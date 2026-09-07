@@ -195,7 +195,10 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
     recommendedPathId,
     recommendationReason,
     requiresManualReview,
-    incomeBasis: agency.usedLineItems ? "urla_line_items" : "application_summary",
+    incomeBasis:
+      agency.usedLineItems || selfEmployment.path.status === "applicable"
+        ? "urla_line_items"
+        : "application_summary",
   };
 }
 

@@ -4,7 +4,7 @@ import type { Express } from "express";
 import type { IStorage } from "../../storage";
 import { isAuthenticated, requireRole } from "../../auth";
 import { insertBorrowerDeclarationsSchema, CREDIT_DECISION_ROLES, type User } from "@shared/schema";
-import { isAdmin, isStaffRole } from "@shared/roles";
+import { isAdmin } from "@shared/roles";
 import { PREQUAL_ELIGIBLE_STATUSES, effectiveLetterStatus, letterRevocationSchema, resolveLetterAmount } from "@shared/letters";
 import { z } from "zod";
 import crypto from "crypto";
@@ -119,7 +119,14 @@ export function registerLetterRoutes(
         "Equal Housing Lender. All loans are subject to credit approval.",
       ];
 
-      const borrowerName = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Borrower";
+      // The caller can be assigned staff. The letter and its notification must
+      // always name and reach the application's borrower, never the LO who
+      // clicked Generate in the Command Center.
+      const borrower = await storage.getUser(application.userId);
+      if (!borrower) {
+        return res.status(422).json({ error: "The borrower record is missing; the letter was not issued." });
+      }
+      const borrowerName = [borrower.firstName, borrower.lastName].filter(Boolean).join(" ") || "Borrower";
 
       const annualIncome = parseFloat(application.annualIncome || "0");
       const monthlyDebts = parseFloat(application.monthlyDebts || "0");
@@ -258,7 +265,10 @@ export function registerLetterRoutes(
           companyLegalName: COMPANY_CONFIG.legalName,
           companyNmlsId: COMPANY_CONFIG.nmlsId,
           companyContactInfo: COMPANY_CONFIG.contactInfo,
-          loanOfficerId: isStaffRole(user.role) ? user.id : undefined,
+          // The audit log records the clicking actor. This column records the
+          // file's assigned LO, so a processor or underwriter issuing the
+          // artifact cannot silently become the officer of record.
+          loanOfficerId: application.loanOfficerId ?? (user.role === "lo" ? user.id : undefined),
           pdfStorageKey: pdfStored ? storageKey : undefined,
           pdfGeneratedAt: new Date(),
         };
@@ -312,7 +322,7 @@ export function registerLetterRoutes(
       }
 
       await storage.createNotification({
-        userId: user.id,
+        userId: borrower.id,
         type: "pre_approval_letter_ready",
         title: "Pre-Approval Letter Ready",
         body: `Your pre-approval letter #${letterNumber} is ready for download.`,
@@ -321,10 +331,10 @@ export function registerLetterRoutes(
         status: "unread",
       });
 
-      if (user.email) {
+      if (borrower.email) {
         sendNotificationEmail({
           type: "pre_approval_letter_ready",
-          recipientEmail: user.email,
+          recipientEmail: borrower.email,
           data: {
             borrowerName,
             amount: (parseFloat(loanAmount) || 0).toLocaleString(),

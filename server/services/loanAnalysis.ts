@@ -288,15 +288,18 @@ function friendlyMissingItems(items: string[]): string[] {
   return out;
 }
 
-export async function analyzeIntake(applicationId: string): Promise<IntakeAnalysisResult> {
+export async function analyzeIntake(
+  applicationId: string,
+  trigger = "intake",
+): Promise<IntakeAnalysisResult> {
   const app = await storage.getLoanApplication(applicationId);
   if (!app) {
     throw new Error("Application not found");
   }
 
-  // Compute the decision AND stamp an immutable snapshot (trigger: "intake"),
-  // so the decision history starts at minute zero.
-  const decision = await recalculateDecision(applicationId, "intake");
+  // Compute the decision AND stamp an immutable snapshot. Initial submission
+  // uses "intake"; later URLA saves name the facts that changed.
+  const decision = await recalculateDecision(applicationId, trigger);
 
   const purchasePrice = toNumber(app.purchasePrice);
   const downPayment = toNumber(app.downPayment);
@@ -409,6 +412,89 @@ export async function analyzeIntake(applicationId: string): Promise<IntakeAnalys
     scenarios,
     decision,
   };
+}
+
+const REFRESHABLE_INTAKE_STATUSES = new Set(["under_review", "pre_approved"]);
+
+/**
+ * Reconcile borrower/staff-facing preliminary analysis after URLA facts change.
+ *
+ * A URLA save used to append a decision snapshot while leaving the application
+ * row's DTI, pre-approval amount, status, and loan options untouched. Every UI
+ * then showed an older answer than the decision history. This function keeps
+ * those projections together for files that are still in the preliminary
+ * intake phase. It may promote under_review -> pre_approved after missing facts
+ * are supplied. It never retracts an issued pre-approval automatically; a new
+ * non-approval snapshot remains visible to staff for a licensed review.
+ */
+export async function refreshEarlyStageIntakeAnalysis(
+  applicationId: string,
+  trigger: string,
+): Promise<IntakeAnalysisResult | null> {
+  const application = await storage.getLoanApplication(applicationId);
+  if (!application || !REFRESHABLE_INTAKE_STATUSES.has(application.status)) return null;
+
+  const result = await analyzeIntake(applicationId, trigger);
+  const promotesToPreApproval =
+    application.status === "under_review" && result.outcome === "pre_approved";
+  const remainsIssuedPreApproval =
+    application.status === "pre_approved" && result.outcome !== "pre_approved";
+
+  await storage.updateLoanApplication(applicationId, {
+    ...(promotesToPreApproval ? { status: "pre_approved" } : {}),
+    ...(!remainsIssuedPreApproval ? { preApprovalAmount: result.preApprovalAmount } : {}),
+    dtiRatio: result.dtiRatio,
+    ltvRatio: result.ltvRatio,
+    aiAnalysis: result.analysis,
+    aiAnalyzedAt: new Date(),
+  });
+
+  // Rebuild quoted options from the same facts as the refreshed headline.
+  // Under-review files have no offer to present; an existing issued approval is
+  // preserved for licensed review rather than silently withdrawn by automation.
+  if (result.isApproved) {
+    await storage.deleteLoanOptionsByApplication(applicationId);
+    for (const scenario of result.scenarios) {
+      await storage.createLoanOption({ applicationId, ...scenario });
+    }
+  }
+
+  if (promotesToPreApproval) {
+    try {
+      const { recordStageTimestamp } = await import("./outcomeTracker");
+      await recordStageTimestamp(applicationId, "pre_approved");
+    } catch (outcomeErr) {
+      console.warn("[Analysis] URLA promotion outcome stamp failed (non-fatal):", outcomeErr);
+    }
+    try {
+      const { syncApplicationStatusToStateMachine } = await import("./optimizationEngine");
+      await syncApplicationStatusToStateMachine(application.userId, applicationId, "pre_approved");
+    } catch (syncErr) {
+      console.warn("[Analysis] URLA promotion state sync failed (non-fatal):", syncErr);
+    }
+    try {
+      const amount = (parseFloat(result.preApprovalAmount) || 0).toLocaleString();
+      await storage.createDealActivity({
+        applicationId,
+        activityType: "status_change",
+        title: "Pre-Approval Updated",
+        description: `The completed application supports a preliminary pre-approval up to $${amount}. Final terms remain subject to document and underwriting review.`,
+      });
+      await storage.createNotification({
+        userId: application.userId,
+        type: "application_pre_approved",
+        title: "Your application was updated",
+        body: `Your preliminary pre-approval is now up to $${amount}. Next, upload the requested documents so your loan team can verify the file.`,
+        entityType: "loan_application",
+        entityId: applicationId,
+        status: "unread",
+      });
+    } catch (notificationErr) {
+      console.warn("[Analysis] URLA promotion notification failed (non-fatal):", notificationErr);
+    }
+  }
+
+  return result;
 }
 
 // Pre-analysis statuses this finalizer is allowed to act on. Anything further

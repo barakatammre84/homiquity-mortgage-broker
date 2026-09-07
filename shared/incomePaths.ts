@@ -60,6 +60,8 @@ interface IncomePathCommon {
   requiresManualReview: boolean;
   /** Reason code when status = "unavailable" (e.g. PROGRAM_REFERENCE_NOT_IN_REPO). */
   unavailableReason?: string;
+  /** Borrower-supplied facts still required before this path can be decisioned. */
+  missingItems?: string[];
   notes: string[];
 }
 
@@ -170,6 +172,7 @@ const commonShape = {
   citations: z.array(citationSchema),
   requiresManualReview: z.boolean(),
   unavailableReason: z.string().optional(),
+  missingItems: z.array(z.string()).optional(),
   notes: z.array(z.string()),
 };
 const dtiPathSchema = z.object({
@@ -203,6 +206,7 @@ export function canonicalizePaths(paths: IncomePathResult[]): string {
         s: p.status,
         r: p.role,
         mr: p.requiresManualReview,
+        mi: [...(p.missingItems ?? [])].sort(),
       };
       if (p.kind === "dti_income") {
         return {

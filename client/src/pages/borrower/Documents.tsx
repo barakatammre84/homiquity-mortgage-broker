@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, loanApplicationKeys, dashboardKeys, applicationResourceKeys } from "@/lib/queryClient";
+import { apiRequest, loanApplicationKeys, dashboardKeys, applicationResourceKeys, taskKeys } from "@/lib/queryClient";
 import { useActiveApplication } from "@/hooks/useActiveApplication";
 import type { Document, LoanApplication, LoanCondition } from "@shared/schema";
 import { canonicalDocumentType } from "@shared/documentTypes";
@@ -200,6 +200,8 @@ export default function Documents() {
         return;
       }
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       // Refresh pipeline data too — a matching upload moves the focused
       // condition to "submitted" and the banner should say so.
       queryClient.invalidateQueries({ queryKey: loanApplicationKeys.all() });

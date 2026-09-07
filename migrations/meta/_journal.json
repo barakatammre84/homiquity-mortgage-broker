@@ -442,6 +442,20 @@
       "when": 1788572230000,
       "tag": "0062_financial_workpapers_memo",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788572240000,
+      "tag": "0063_expire_superseded_document_review_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1788572250000,
+      "tag": "0064_reopen_rejected_document_tasks",
+      "breakpoints": true
     }
   ]
 }

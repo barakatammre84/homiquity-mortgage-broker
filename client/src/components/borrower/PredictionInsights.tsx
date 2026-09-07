@@ -50,7 +50,7 @@ interface Benchmark {
   insights: string[];
 }
 
-export default function PredictionInsights({ applicationId }: { applicationId?: string }) {
+export default function PredictionInsights({ applicationId, financialsVerified = false }: { applicationId?: string; financialsVerified?: boolean }) {
   // No queryFn / no second URL spelling. `/api/predictions/me` reads
   // `?applicationId=` (server/routes/data-intelligence.ts) — it is not
   // `/me/:id` — so the old bare-scalar key resolved to a path that does not
@@ -116,7 +116,7 @@ export default function PredictionInsights({ applicationId }: { applicationId?: 
             <p className="text-xs text-muted-foreground">after full submission</p>
             <p className="text-xs leading-tight text-muted-foreground">typical, not a closing date</p>
           </div>
-          {benchmark?.percentiles?.creditScorePercentile != null && (
+          {financialsVerified && benchmark?.percentiles?.creditScorePercentile != null && (
             <div className="space-y-1" data-testid="metric-credit-percentile">
               <p className="text-xs text-muted-foreground">Credit Standing</p>
               <div className="flex items-center gap-1">

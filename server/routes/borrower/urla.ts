@@ -168,6 +168,12 @@ export function registerUrlaRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
       await storage.deleteEmploymentHistory(id);
+      try {
+        const { refreshEarlyStageIntakeAnalysis } = await import("../../services/loanAnalysis");
+        await refreshEarlyStageIntakeAnalysis(record.applicationId, "income_updated");
+      } catch (analysisErr) {
+        console.error("[Analysis] Employment deletion refresh failed (non-fatal):", analysisErr);
+      }
       res.status(204).send();
     } catch (error) {
       console.error("Delete employment error:", error);
@@ -206,14 +212,18 @@ export function registerUrlaRoutes(
         return res.status(404).json({ error: "Employment record not found" });
       }
 
-      // P5 accuracy loop: a saved worksheet changes qualifying income — rerun
-      // the decision (and its income-path evaluation). A confirmed smart-fill
-      // draft is distinguishable in the snapshot trail by its trigger.
-      const { recalculateDecision } = await import("../../services/decisionEngine");
-      void recalculateDecision(
-        record.applicationId,
-        parsed.data.confirmedByBorrowerAt ? "worksheet_confirmed" : "income_updated",
-      );
+      // P5 accuracy loop: a saved worksheet changes qualifying income. Await
+      // the shared preliminary-analysis refresh so the response, decision
+      // history, dashboard headline, and staff file all describe the same facts.
+      try {
+        const { refreshEarlyStageIntakeAnalysis } = await import("../../services/loanAnalysis");
+        await refreshEarlyStageIntakeAnalysis(
+          record.applicationId,
+          parsed.data.confirmedByBorrowerAt ? "worksheet_confirmed" : "income_updated",
+        );
+      } catch (analysisErr) {
+        console.error("[Analysis] Worksheet refresh failed (non-fatal):", analysisErr);
+      }
 
       res.json(result);
     } catch (error) {
@@ -466,6 +476,7 @@ export function registerUrlaRoutes(
         );
 
       const collectionMethod = isStaffRole(user.role) ? "loan_officer" : "borrower";
+      let decisionInputsChanged = false;
 
       // Writes one borrower's URLA sections, scoped to a borrowerSequenceNumber.
       // Bodies are whitelisted to their table's columns (pickTableFields) before
@@ -540,7 +551,10 @@ export function registerUrlaRoutes(
               const existing = await storage.getEmploymentHistoryById(emp.id);
               if (!existing || existing.applicationId !== applicationId) return { ok: false, results };
               const updated = await storage.updateEmploymentHistory(emp.id, { ...cleanEmp, borrowerSequenceNumber: seq } as any);
-              if (updated) results.employmentHistory.push(updated);
+              if (updated) {
+                results.employmentHistory.push(updated);
+                decisionInputsChanged = true;
+              }
             } else {
               const created = await storage.createEmploymentHistory({
                 ...cleanEmp,
@@ -549,6 +563,7 @@ export function registerUrlaRoutes(
                 employmentType: cleanEmp.employmentType || "current",
               } as any);
               results.employmentHistory.push(created);
+              decisionInputsChanged = true;
             }
           }
         }
@@ -562,10 +577,14 @@ export function registerUrlaRoutes(
               const existing = await storage.getUrlaAssetById(asset.id);
               if (!existing || existing.applicationId !== applicationId) return { ok: false, results };
               const updated = await storage.updateUrlaAsset(asset.id, { ...cleanAsset, borrowerSequenceNumber: seq } as any);
-              if (updated) results.assets.push(updated);
+              if (updated) {
+                results.assets.push(updated);
+                decisionInputsChanged = true;
+              }
             } else if (asset.accountType) {
               const created = await storage.createUrlaAsset({ ...cleanAsset, applicationId, borrowerSequenceNumber: seq } as any);
               results.assets.push(created);
+              decisionInputsChanged = true;
             }
           }
         }
@@ -579,10 +598,14 @@ export function registerUrlaRoutes(
               const existing = await storage.getUrlaLiabilityById(liability.id);
               if (!existing || existing.applicationId !== applicationId) return { ok: false, results };
               const updated = await storage.updateUrlaLiability(liability.id, { ...cleanLiability, borrowerSequenceNumber: seq } as any);
-              if (updated) results.liabilities.push(updated);
+              if (updated) {
+                results.liabilities.push(updated);
+                decisionInputsChanged = true;
+              }
             } else if (liability.liabilityType) {
               const created = await storage.createUrlaLiability({ ...cleanLiability, applicationId, borrowerSequenceNumber: seq } as any);
               results.liabilities.push(created);
+              decisionInputsChanged = true;
             }
           }
         }
@@ -630,6 +653,7 @@ export function registerUrlaRoutes(
           ...pickTableFields(URLA_TABLES.propertyInfo, propertyInfo),
           applicationId,
         } as any);
+        decisionInputsChanged = true;
       }
 
       // URLA Section 4a — loan type + amortization type (WF2-F4). These are
@@ -657,12 +681,7 @@ export function registerUrlaRoutes(
           results.loanDetails = updated
             ? { preferredLoanType: updated.preferredLoanType, amortizationType: updated.amortizationType }
             : parsedLoanDetails.data;
-          // Loan type is a pricing input (the projected rate differs by
-          // product), so a change re-runs the deterministic decision —
-          // fire-and-forget, same as the worksheet route above. Unchanged
-          // saves skip this so save-as-you-go doesn't spam snapshots.
-          const { recalculateDecision } = await import("../../services/decisionEngine");
-          void recalculateDecision(applicationId, "loan_details_updated");
+          decisionInputsChanged = true;
         } else {
           results.loanDetails = {
             preferredLoanType: application.preferredLoanType,
@@ -683,13 +702,17 @@ export function registerUrlaRoutes(
               return res.status(403).json({ error: "Access denied" });
             }
             const updated = await storage.updateOtherIncomeSource(income.id, cleanIncome as any);
-            if (updated) results.otherIncomeSources.push(updated);
+            if (updated) {
+              results.otherIncomeSources.push(updated);
+              decisionInputsChanged = true;
+            }
           } else {
             const created = await storage.createOtherIncomeSource({
               ...cleanIncome,
               applicationId,
             } as any);
             results.otherIncomeSources.push(created);
+            decisionInputsChanged = true;
           }
         }
       }
@@ -713,6 +736,26 @@ export function registerUrlaRoutes(
             return res.status(coResult.status ?? 403).json({ error: coResult.error ?? "Access denied" });
           }
           results.coApplicants.push(coResult.results);
+        }
+      }
+
+      if (decisionInputsChanged) {
+        try {
+          const { refreshEarlyStageIntakeAnalysis } = await import("../../services/loanAnalysis");
+          const refreshed = await refreshEarlyStageIntakeAnalysis(applicationId, "urla_updated");
+          if (refreshed) {
+            results.analysis = {
+              outcome: refreshed.outcome,
+              preApprovalAmount: refreshed.preApprovalAmount,
+              dtiRatio: refreshed.dtiRatio,
+              ltvRatio: refreshed.ltvRatio,
+            };
+          }
+        } catch (analysisErr) {
+          // The URLA rows are already durable. Preserve a successful save and
+          // surface the refresh failure to operations for retry rather than
+          // returning a 500 that invites duplicate borrower rows.
+          console.error("[Analysis] URLA refresh failed after save (non-fatal):", analysisErr);
         }
       }
 

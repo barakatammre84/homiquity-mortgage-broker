@@ -75,12 +75,12 @@ export function IncomeSourcesStep({
   const entries: RentalAwareEntry[] = value ?? [];
   // `string[]`, not the entry union: the toggle list is keyed by the plain
   // option values rendered below, and narrowing happens where an entry is built.
-  const selectedIncomeTypes: string[] = entries.map((e) => e.type);
+  const selectedIncomeTypes: string[] = Array.from(new Set(entries.map((e) => e.type)));
   const rentalProperties = entries.find((e) => e.type === "rental")?.rentalProperties ?? [];
 
-  /** Replace the entry of `type` (creating nothing) and report upward. */
-  const updateEntry = (type: string, update: (entry: RentalAwareEntry) => RentalAwareEntry) => {
-    onChange(entries.map((e) => (e.type === type ? update(e) : e)));
+  /** Replace one entry and report upward. Self-employment may have many entries. */
+  const updateEntryAt = (entryIndex: number, update: (entry: RentalAwareEntry) => RentalAwareEntry) => {
+    onChange(entries.map((entry, index) => (index === entryIndex ? update(entry) : entry)));
   };
   const employmentTypeMap: Record<string, string> = { employed: "w2", self_employed: "self_employed", retired: "pension" };
   // Self-employed borrowers keep their primary type in the list — the
@@ -114,14 +114,27 @@ export function IncomeSourcesStep({
     onChange([...entries, added]);
   };
 
-  const updateDetail = (typeValue: string, field: string, fieldValue: string) => {
-    updateEntry(typeValue, (entry) => ({ ...entry, [field]: fieldValue }));
+  const addSelfEmployedSource = () => {
+    onChange([
+      ...entries,
+      { ...EMPTY_DETAILS, type: "self_employed" },
+    ]);
+  };
+
+  const removeEntryAt = (entryIndex: number) => {
+    onChange(entries.filter((_, index) => index !== entryIndex));
+  };
+
+  const updateDetail = (entryIndex: number, field: string, fieldValue: string) => {
+    updateEntryAt(entryIndex, (entry) => ({ ...entry, [field]: fieldValue }));
   };
 
   const updateRentals = (
     update: (props: RentalPropertyEntry[]) => RentalPropertyEntry[],
   ) => {
-    updateEntry("rental", (entry) =>
+    const rentalIndex = entries.findIndex((entry) => entry.type === "rental");
+    if (rentalIndex < 0) return;
+    updateEntryAt(rentalIndex, (entry) =>
       withDerivedRentalAmount({
         ...entry,
         rentalProperties: update(entry.rentalProperties ?? []),
@@ -186,13 +199,16 @@ export function IncomeSourcesStep({
 
       {selectedIncomeTypes.length > 0 && (
         <div className="space-y-4">
-          {selectedIncomeTypes.map((typeValue) => {
+          {entries.map((details, entryIndex) => {
+            const typeValue = details.type;
             const typeInfo = allIncomeTypes.find((t) => t.value === typeValue);
-            const details = entries.find((e) => e.type === typeValue) ?? EMPTY_DETAILS;
+            const sameTypeOrdinal = entries
+              .slice(0, entryIndex + 1)
+              .filter((entry) => entry.type === typeValue).length;
 
             if (typeValue === "rental") {
               return (
-                <div key={typeValue} className="border-2 rounded-xl p-5 space-y-4 text-left" data-testid="card-income-rental">
+                <div key={`${typeValue}-${entryIndex}`} className="border-2 rounded-xl p-5 space-y-4 text-left" data-testid="card-income-rental">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Home className="h-4 w-4 text-primary" />
                     <span className="font-semibold text-foreground">Rental Properties</span>
@@ -224,6 +240,7 @@ export function IncomeSourcesStep({
                         <AddressInput
                           placeholder="Start typing a property address..."
                           defaultValue={prop.address}
+                          onChange={(address) => updateRentalProperty(idx, "address", address)}
                           onSelect={(result) => updateRentalProperty(idx, "address", result.formattedAddress)}
                         />
                       </div>
@@ -278,19 +295,37 @@ export function IncomeSourcesStep({
             }
 
             return (
-              <div key={typeValue} className="border-2 rounded-xl p-5 space-y-4 text-left" data-testid={`card-income-${typeValue}`}>
+              <div
+                key={`${typeValue}-${entryIndex}`}
+                className="border-2 rounded-xl p-5 space-y-4 text-left"
+                data-testid={typeValue === "self_employed" ? `card-income-self_employed-${sameTypeOrdinal - 1}` : `card-income-${typeValue}`}
+              >
                 <div className="flex items-center gap-2 flex-wrap">
                   {typeInfo && <typeInfo.icon className="h-4 w-4 text-primary" />}
-                  <span className="font-semibold text-foreground">{typeInfo?.label}</span>
+                  <span className="font-semibold text-foreground">
+                    {typeValue === "self_employed" ? `Business or 1099 source ${sameTypeOrdinal}` : typeInfo?.label}
+                  </span>
+                  {typeValue === "self_employed" && entries.filter((entry) => entry.type === "self_employed").length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove business or 1099 source ${sameTypeOrdinal}`}
+                      onClick={() => removeEntryAt(entryIndex)}
+                      className="ml-auto"
+                    >
+                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Annual Amount</label>
                   <div className="relative">
                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
-                      data-testid={`input-income-amount-${typeValue}`}
+                      data-testid={typeValue === "self_employed" ? `input-income-amount-self_employed-${sameTypeOrdinal - 1}` : `input-income-amount-${typeValue}`}
                       value={details.annualAmount ?? ""}
-                      onChange={(e) => updateDetail(typeValue, "annualAmount", maskCurrencyDigits(e.target.value))}
+                      onChange={(e) => updateDetail(entryIndex, "annualAmount", maskCurrencyDigits(e.target.value))}
                       className="pl-9"
                       placeholder="75,000"
                     />
@@ -298,12 +333,12 @@ export function IncomeSourcesStep({
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">
-                    {needsEmployerDetails(typeValue) ? "Employer Name" : "Source"}
+                    {typeValue === "self_employed" ? "Business or payer name" : needsEmployerDetails(typeValue) ? "Employer Name" : "Source"}
                   </label>
                   <Input
-                    data-testid={`input-income-employer-${typeValue}`}
+                    data-testid={typeValue === "self_employed" ? `input-income-employer-self_employed-${sameTypeOrdinal - 1}` : `input-income-employer-${typeValue}`}
                     value={details.employerName ?? ""}
-                    onChange={(e) => updateDetail(typeValue, "employerName", e.target.value)}
+                    onChange={(e) => updateDetail(entryIndex, "employerName", e.target.value)}
                     placeholder={needsEmployerDetails(typeValue) ? "Company name" : "Source name (optional)"}
                   />
                 </div>
@@ -311,9 +346,9 @@ export function IncomeSourcesStep({
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Years in Role</label>
                     <Input
-                      data-testid={`input-income-years-${typeValue}`}
+                      data-testid={typeValue === "self_employed" ? `input-income-years-self_employed-${sameTypeOrdinal - 1}` : `input-income-years-${typeValue}`}
                       value={details.yearsInRole ?? ""}
-                      onChange={(e) => updateDetail(typeValue, "yearsInRole", e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => updateDetail(entryIndex, "yearsInRole", e.target.value.replace(/\D/g, ""))}
                       placeholder="3"
                       inputMode="numeric"
                     />
@@ -322,6 +357,18 @@ export function IncomeSourcesStep({
               </div>
             );
           })}
+          {selectedIncomeTypes.includes("self_employed") && (
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="button-add-self-employed-source"
+              onClick={addSelfEmployedSource}
+              className="w-full"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Another Business or 1099 Source
+            </Button>
+          )}
         </div>
       )}
     </div>

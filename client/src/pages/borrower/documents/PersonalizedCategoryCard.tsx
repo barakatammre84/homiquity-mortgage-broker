@@ -7,6 +7,32 @@ import { CONDITION_CATEGORY_META } from "../documentCategories";
 import { ChecklistRows } from "./ChecklistRows";
 import type { UploadControls } from "./types";
 
+export function personalizedCategoryDescription(
+  categoryId: string,
+  items: Pick<ChecklistItemView, "documentType" | "acceptedTypes">[],
+): string {
+  const requestedTypes = new Set(
+    items.flatMap((item) => [item.documentType, ...(item.acceptedTypes ?? [])]),
+  );
+
+  const hasSelfEmployedEvidence = [
+    "tax_return",
+    "tax_return_1040",
+    "profit_loss",
+    "profit_loss_statement",
+    "business_license",
+  ].some((type) => requestedTypes.has(type));
+  const hasEmployeeEvidence = ["pay_stub", "paystub", "w2"].some((type) =>
+    requestedTypes.has(type),
+  );
+
+  if (categoryId === "income" && hasSelfEmployedEvidence && !hasEmployeeEvidence) {
+    return "Tax returns, profit and loss statements, and business records";
+  }
+
+  return CONDITION_CATEGORY_META[categoryId].description;
+}
+
 /** A category of the pipeline-driven personalized checklist. */
 export function PersonalizedCategoryCard({
   categoryId,
@@ -24,6 +50,7 @@ export function PersonalizedCategoryCard({
   const pendingInGroup = items.filter(
     (i) => i.status === "needed" || i.status === "rejected",
   ).length;
+  const description = personalizedCategoryDescription(categoryId, items);
 
   return (
     <Card className="shadow-lg border-0" data-testid={`card-category-${categoryId}`}>
@@ -40,7 +67,7 @@ export function PersonalizedCategoryCard({
                   <CheckCircle2 className="h-5 w-5 text-success-subtle-foreground" />
                 )}
               </CardTitle>
-              <CardDescription>{meta.description}</CardDescription>
+              <CardDescription>{description}</CardDescription>
             </div>
           </div>
           <Badge

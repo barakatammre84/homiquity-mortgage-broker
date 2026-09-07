@@ -1,6 +1,6 @@
 import { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES } from "@shared/statusVocabularies";
 import { URLA_LIABILITY_TYPES } from "@shared/liabilityTypes";
-import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, LoanApplication, OtherIncomeSource, PreferredLoanType, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo } from "@shared/schema";
+import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
 import { OTHER_INCOME_LABELS } from "@shared/incomeTypes";
 // SSN and account numbers are WRITE-ONLY virtual fields: the server encrypts
 // them at rest and never returns the value — responses carry only ssnLast4 /
@@ -110,6 +110,78 @@ export const emptySlice = (): BorrowerSlice => ({
   declarations: {},
   demographics: emptyDemographics(),
 });
+
+/** Reuse the identity the borrower just supplied at signup. Real URLA values win. */
+export function prefillPrimaryPersonalInfo(
+  existing: UrlaPersonalInfo | undefined,
+  user: Pick<User, "firstName" | "lastName" | "email"> | undefined,
+): PersonalInfoForm {
+  const savedValueOr = (value: string | null | undefined, fallback: string | null | undefined) =>
+    value?.trim() ? value : fallback ?? "";
+  return {
+    ...existing,
+    firstName: savedValueOr(existing?.firstName, user?.firstName),
+    lastName: savedValueOr(existing?.lastName, user?.lastName),
+    email: savedValueOr(existing?.email, user?.email),
+  };
+}
+
+function monthlyFromAnnual(value: unknown): string {
+  const annual = parseFloat(String(value ?? "").replace(/[,$]/g, ""));
+  if (!Number.isFinite(annual) || annual <= 0) return "";
+  return (annual / 12).toFixed(2).replace(/\.00$/, "");
+}
+
+/** Keep the borrower's intended job order stable across database refetches. */
+export function orderEmploymentRecords(
+  records: EmploymentHistory[],
+): EmploymentHistory[] {
+  const rank = (record: EmploymentHistory) => {
+    if (record.employmentType === "current") return 0;
+    if (record.employmentType === "additional") return 1;
+    if (record.employmentType === "previous") return 2;
+    return 3;
+  };
+  return [...records].sort((left, right) => rank(left) - rank(right));
+}
+
+/**
+ * Bridge the short intake into URLA state. The old form rendered application
+ * fallbacks inside empty inputs, so Save discarded what the borrower could see.
+ * These rows are real controlled state and therefore survive the first save.
+ */
+export function prefillPrimaryEmployment(
+  existing: EmploymentHistory[],
+  app: LoanApplication,
+): Partial<EmploymentHistory>[] {
+  if (existing.length > 0) return orderEmploymentRecords(existing);
+
+  const selfEmployedSources = (Array.isArray(app.incomeSources) ? app.incomeSources : [])
+    .filter((source): source is IncomeSourceEntry => {
+      const candidate = source as Partial<IncomeSourceEntry> | null;
+      return !!candidate && candidate.type === "self_employed";
+    });
+
+  if (app.employmentType === "self_employed" && selfEmployedSources.length > 0) {
+    return selfEmployedSources.map((source, index) => ({
+      employmentType: index === 0 ? "current" : "additional",
+      employerName: source.employerName ?? "",
+      yearsInLineOfWork: source.yearsInRole ? parseInt(source.yearsInRole, 10) || 0 : null,
+      isSelfEmployed: true,
+      baseIncome: monthlyFromAnnual(source.annualAmount),
+      borrowerSequenceNumber: 1,
+    }));
+  }
+
+  return [{
+    employmentType: "current",
+    employerName: app.employerName ?? "",
+    yearsInLineOfWork: app.employmentYears ?? null,
+    isSelfEmployed: app.employmentType === "self_employed",
+    baseIncome: monthlyFromAnnual(app.annualIncome),
+    borrowerSequenceNumber: 1,
+  }];
+}
 
 export const hmdaToState = (h: HmdaDemographics): DemographicsState => ({
   ethnicityHispanicLatino: !!h.ethnicityHispanicLatino,

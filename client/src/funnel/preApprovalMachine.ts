@@ -175,7 +175,14 @@ export function computeRoute(answers: PreApprovalFormData): FunnelStepId[] {
   if (answers.isVeteran) {
     route.push("householdFamilySize", "homeSquareFootage");
   }
-  route.push("annualIncome", "employmentType", "employmentYears");
+  route.push("annualIncome");
+  // A self-employed landing page or restored draft has already answered this.
+  // Asking the same employment-type question again adds a click without adding
+  // information; the detailed source step remains mandatory below.
+  if (answers.employmentType !== "self_employed") {
+    route.push("employmentType");
+  }
+  route.push("employmentYears");
   const hasEnteredSources = (answers.incomeSources?.length ?? 0) > 0;
   // Only ask the yes/no gate when it can actually change what comes next.
   // `complexIncome` (self-employed, or two or more rental properties already

@@ -164,19 +164,16 @@ export default function Tasks() {
         applicationId: selectedTask.applicationId,
       });
 
-      const document = await uploadResponse.json();
+      await uploadResponse.json();
 
-      // Linking the document is what advances the task (IN_PROGRESS +
-      // verification pending) — done server-side by this POST. The old
-      // follow-up PATCH { status: "submitted" } always 403'd for borrowers
-      // (status is a staff-only field), surfacing a spurious failure toast
-      // after a successful upload.
-      const linkResponse = await apiRequest("POST", `/api/tasks/${selectedTask.id}/documents`, {
-        documentId: document.id,
-      });
-      await linkResponse.json();
+      // Registration advances and links the matching borrower task on the
+      // server, regardless of which upload surface initiated it. A second
+      // client request here used to make To-Do behave differently from
+      // Documents and Homi.
 
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       // Was ["/api/documents"] — a key no client query reads. The upload also
       // satisfies a checklist item, so refresh the checklist root.
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.all() });
@@ -329,13 +326,8 @@ export default function Tasks() {
                                     payloads (borrowerTaskView); the staff→
                                     borrower channel is documentInstructions. */}
                                 <p className="text-sm text-destructive bg-destructive/10 p-2 rounded">
-                                  We couldn't verify this document — please upload a new copy.
+                                  {task.documentInstructions || "We couldn't verify this document — please upload a new copy."}
                                 </p>
-                                {task.documentInstructions && (
-                                  <p className="text-xs text-muted-foreground mt-2 italic">
-                                    {task.documentInstructions}
-                                  </p>
-                                )}
                               </div>
                               <Button
                                 size="sm" className="touch-target"

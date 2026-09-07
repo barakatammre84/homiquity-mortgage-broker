@@ -140,6 +140,15 @@ describe("letters route source guards", () => {
       "expected generate-letter to fail loudly (500) when the pre_approval_letters insert fails, instead of handing out a PDF the system cannot account for",
     ).toBe(true);
   });
+
+  it("names and notifies the application borrower when staff issues the letter", async () => {
+    const source = await lettersSource();
+    expect(source).toContain("storage.getUser(application.userId)");
+    expect(source).toContain("userId: borrower.id");
+    expect(source).toContain("recipientEmail: borrower.email");
+    expect(source).not.toContain("recipientEmail: user.email");
+    expect(source).toContain('application.loanOfficerId ?? (user.role === "lo" ? user.id : undefined)');
+  });
 });
 
 describe("effectiveLetterStatus", () => {

@@ -244,6 +244,7 @@ export function registerCockpitRoutes(app: Express, storage: IStorage) {
             downPayment: application.downPayment,
             propertyState: application.propertyState,
             propertyType: application.propertyType,
+            financialDataProvenance: application.financialDataProvenance,
             isVeteran: application.isVeteran ?? false,
             closingDate: application.closingDate ?? null,
             createdAt: application.createdAt,

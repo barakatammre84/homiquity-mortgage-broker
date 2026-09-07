@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { dashboardKeys, urlaKeys } from "@/lib/queryClient";
+import { orderEmploymentRecords, prefillPrimaryEmployment, prefillPrimaryPersonalInfo } from "./urla/types";
 
 // The #451 defect, for the OTHER borrower.
 //
@@ -44,7 +45,7 @@ vi.mock("wouter", () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
-import URLAForm from "./URLAForm";
+import URLAForm, { isEmploymentSectionComplete } from "./URLAForm";
 
 const APP_ID = "app-1";
 
@@ -56,6 +57,138 @@ const application = {
   preferredLoanType: "conventional",
   amortizationType: "fixed",
 };
+
+describe("URLA intake handoff", () => {
+  it("turns every captured self-employed entity into editable URLA state", () => {
+    const records = prefillPrimaryEmployment([], {
+      ...application,
+      employmentType: "self_employed",
+      employmentYears: 6,
+      annualIncome: "240000",
+      incomeSources: [
+        { type: "self_employed", annualAmount: "140000", employerName: "Northstar Consulting LLC", yearsInRole: "6" },
+        { type: "rental", annualAmount: "36000" },
+        { type: "self_employed", annualAmount: "70000", employerName: "Lakeview Design LLC", yearsInRole: "3" },
+      ],
+    } as never);
+
+    expect(records).toEqual([
+      expect.objectContaining({ employerName: "Northstar Consulting LLC", baseIncome: "11666.67", isSelfEmployed: true, employmentType: "current" }),
+      expect.objectContaining({ employerName: "Lakeview Design LLC", baseIncome: "5833.33", isSelfEmployed: true, employmentType: "additional" }),
+    ]);
+  });
+
+  it("keeps current and additional businesses in the borrower's intended order after refetch", () => {
+    const records = orderEmploymentRecords([
+      { id: "newer", employmentType: "additional", employerName: "Lakeview Design LLC" },
+      { id: "older", employmentType: "current", employerName: "Northstar Consulting LLC" },
+      { id: "oldest", employmentType: "previous", employerName: "Prior Studio" },
+    ] as never);
+
+    expect(records.map((record) => record.employerName)).toEqual([
+      "Northstar Consulting LLC",
+      "Lakeview Design LLC",
+      "Prior Studio",
+    ]);
+  });
+
+  it("reuses signup identity until the borrower has saved URLA identity", () => {
+    expect(prefillPrimaryPersonalInfo(undefined, {
+      firstName: "Jordan",
+      lastName: "Audit",
+      email: "jse@test.local",
+    } as never)).toEqual({
+      firstName: "Jordan",
+      lastName: "Audit",
+      email: "jse@test.local",
+    });
+  });
+
+  it("falls back through blank values from a partial URLA row", () => {
+    expect(prefillPrimaryPersonalInfo({
+      firstName: "Casey",
+      lastName: "",
+      email: "",
+    } as never, {
+      firstName: "Signup",
+      lastName: "Complex",
+      email: "casey@example.test",
+    } as never)).toMatchObject({
+      firstName: "Casey",
+      lastName: "Complex",
+      email: "casey@example.test",
+    });
+  });
+
+  it("does not mark self-employed work complete before the income worksheet and ownership are captured", () => {
+    expect(isEmploymentSectionComplete([
+      { employerName: "Northstar Consulting LLC", isSelfEmployed: true },
+    ])).toBe(false);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: {
+            currentYear: {
+              netProfitOrLoss: 0,
+              depreciation: 0,
+              depletion: 0,
+              amortizationOrCasualtyLoss: 0,
+              businessUseOfHome: 0,
+              mealsExclusion: 0,
+              nonRecurringIncome: 0,
+            },
+          },
+        },
+      },
+    ])).toBe(false);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: {
+            currentYear: {
+              netProfitOrLoss: 140000,
+              depreciation: 0,
+              depletion: 0,
+              amortizationOrCasualtyLoss: 0,
+              businessUseOfHome: 0,
+              mealsExclusion: 0,
+              nonRecurringIncome: 0,
+            },
+          },
+        },
+      },
+    ])).toBe(true);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: { currentYear: { netProfitOrLoss: 140000, depreciation: 0, depletion: 0, amortizationOrCasualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 0, nonRecurringIncome: 0 } },
+        },
+      },
+      { employerName: "Lakeview Design LLC", isSelfEmployed: true },
+    ])).toBe(false);
+  });
+});
 
 /**
  * Seeds a file that already has a co-borrower, so `hasCoBorrower` latches from

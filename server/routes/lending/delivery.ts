@@ -4,7 +4,8 @@ import type { Express } from "express";
 import type { IStorage } from "../../storage";
 import { isAuthenticated, requireRole } from "../../auth";
 import { insertBorrowerDeclarationsSchema } from "@shared/schema";
-import { generateMISMO34XML, type MISMOLoanDTO } from "../../mismo";
+import { generateMISMO34XML, validateMISMOXML, type MISMOLoanDTO } from "../../mismo";
+import type { BrokerSubmissionReadiness } from "../../services/brokerSubmissionReadiness";
 import { z } from "zod";
 import * as creditService from "../../services/creditService";
 import { routeParams } from "../../http/routeParams";
@@ -12,6 +13,14 @@ import { routeParams } from "../../http/routeParams";
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
 });
+
+export function mismoExportReadinessBlockers(readiness: BrokerSubmissionReadiness): string[] {
+  return readiness.readyToSubmitToLender
+    ? []
+    : readiness.stages.flatMap((stage) =>
+        stage.blockers.map((blocker) => `[${stage.label}] ${blocker}`),
+      );
+}
 
 // Intake validation lives in shared/schema/lending.ts (loanApplicationIntakeSchema),
 // derived from the same base schema the funnel validates with client-side — the
@@ -32,8 +41,21 @@ export function registerDeliveryRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
+      // A raw XML download is the same sensitive package an officer can hand
+      // to a lender. Apply the package readiness gate here too; an incomplete
+      // file must not leave the product under a "MISMO export" label.
+      const { evaluateBrokerSubmissionReadiness } = await import("../../services/brokerSubmissionReadiness");
+      const readiness = await evaluateBrokerSubmissionReadiness(id);
+      const readinessBlockers = mismoExportReadinessBlockers(readiness);
+      if (readinessBlockers.length > 0) {
+        return res.status(422).json({
+          error: "MISMO export is blocked until the lender package is ready.",
+          blockers: readinessBlockers,
+        });
+      }
+
       const mismoData = await storage.getMISMOLoanData(id);
-      
+
       if (!mismoData) {
         return res.status(404).json({ error: "Application not found" });
       }
@@ -51,19 +73,33 @@ export function registerDeliveryRoutes(
         purpose: "loanDelivery",
         noteDate: deliveryData?.noteDate ?? undefined,
       });
-      
-      // Set proper headers for XML download
-      res.setHeader("Content-Type", "application/xml");
-      res.setHeader("Content-Disposition", `attachment; filename="mismo-${id}.xml"`);
-      res.send(xml);
+      const structuralValidation = validateMISMOXML(xml);
+      if (!structuralValidation.valid) {
+        return res.status(422).json({
+          error: "The assembled MISMO package failed structural validation.",
+          blockers: structuralValidation.errors,
+        });
+      }
 
+      // Record both operational activity and the security audit before bytes
+      // containing SSN/DOB leave the process. A deal-activity write failure
+      // blocks the download instead of throwing after the response was sent.
       await storage.createDealActivity({
         applicationId: id,
         activityType: "note",
         title: "MISMO XML Exported",
-        description: "Loan data exported in MISMO 3.4 format for GSE delivery",
+        description: "Readiness-gated loan package exported in MISMO 3.4 format",
         performedBy: req.user!.id,
       });
+      const { logAudit } = await import("../../auditLog");
+      await logAudit(req, "loan_application.mismo_exported", "loan_application", id, {
+        readinessStage: readiness.currentStage,
+      });
+
+      // Set proper headers for XML download
+      res.setHeader("Content-Type", "application/xml");
+      res.setHeader("Content-Disposition", `attachment; filename="mismo-${id}.xml"`);
+      res.send(xml);
     } catch (error) {
       console.error("MISMO export error:", error);
       res.status(500).json({ error: "Failed to generate MISMO XML" });
@@ -76,11 +112,11 @@ export function registerDeliveryRoutes(
       const { id } = routeParams(req);
       // Use ownership-scoped query - authorization happens at database level
       const application = await storage.getLoanApplicationWithAccess(id, req.user!.id, req.user!.role || "");
-      
+
       if (!application) {
         return res.status(404).json({ error: "Application not found" });
       }
-      
+
       const quality = await storage.getApplicationDataQuality(id);
       res.json(quality);
     } catch (error) {

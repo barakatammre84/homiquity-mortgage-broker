@@ -24,9 +24,11 @@ import {
  *    routes self-employment through the cited calculator instead of counting a
  *    raw captured figure;
  *  - other-income sources add to variable income;
- *  - when NO usable wage line item exists at all, fall back to the
- *    application-summary annual income (base only). A net loss IS usable data,
- *    so the fallback fires only on the true absence of any line item.
+ *  - when NO usable wage line item or self-employment record exists, fall back
+ *    to the application-summary annual income (base only). The intake total is
+ *    a rough planning value for a self-employed borrower and must never stack
+ *    on top of Form 1084 income. A net loss IS usable data, so the fallback
+ *    fires only on the true absence of any detailed income record.
  */
 
 const AGENCY_WAGE_CITATIONS = [
@@ -132,7 +134,8 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
   }
 
   let usedLineItems = sawLineItem;
-  if (!sawLineItem) {
+  const hasSelfEmploymentRecord = input.employment.some((employment) => employment.isSelfEmployed);
+  if (!sawLineItem && !hasSelfEmploymentRecord) {
     const annual = toNum(input.fallbackAnnualIncome);
     base = annual / 12;
     variable = 0;
@@ -140,6 +143,8 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
     if (annual > 0) {
       notes.push("No wage line items captured — using the application-summary annual income.");
     }
+  } else if (!sawLineItem && hasSelfEmploymentRecord) {
+    notes.push("Application-summary income excluded because self-employment is calculated from the business worksheets.");
   }
 
   base = roundCents(base);

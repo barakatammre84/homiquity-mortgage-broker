@@ -13,7 +13,7 @@ import { PREQUAL_ELIGIBLE_STATUSES } from "@shared/letters";
 // per-letter differences declared in LETTER_KINDS below.
 type LetterKind = {
   /** Which loan statuses this letter is offered for. */
-  isEligible: (status: string) => boolean;
+  isEligible: (status: string, financialsVerified: boolean) => boolean;
   statusQueryKey: (applicationId: string) => readonly unknown[];
   generatePath: (applicationId: string) => string;
   pdfPath: (applicationId: string) => string;
@@ -32,8 +32,9 @@ const LETTER_KINDS = {
   prequal: {
     // Offered while the file is pre-qual eligible, but a pre-approved file gets
     // the stronger pre-approval letter instead.
-    isEligible: (status) =>
-      (PREQUAL_ELIGIBLE_STATUSES as readonly string[]).includes(status) && status !== "pre_approved",
+    isEligible: (status, financialsVerified) =>
+      (PREQUAL_ELIGIBLE_STATUSES as readonly string[]).includes(status) &&
+      (status !== "pre_approved" || !financialsVerified),
     statusQueryKey: (id) => loanApplicationKeys.prequalStatus(id),
     generatePath: (id) => `/api/loan-applications/${id}/generate-prequal`,
     pdfPath: (id) => `/api/loan-applications/${id}/prequal-pdf`,
@@ -48,7 +49,7 @@ const LETTER_KINDS = {
     downloadTestId: "button-download-prequal",
   },
   preapproval: {
-    isEligible: (status) => status === "pre_approved",
+    isEligible: (status, financialsVerified) => status === "pre_approved" && financialsVerified,
     statusQueryKey: (id) => loanApplicationKeys.letterStatus(id),
     generatePath: (id) => `/api/loan-applications/${id}/generate-letter`,
     pdfPath: (id) => `/api/loan-applications/${id}/letter-pdf`,
@@ -63,14 +64,24 @@ const LETTER_KINDS = {
   },
 } satisfies Record<string, LetterKind>;
 
+export function isLoanLetterEligible(
+  kind: keyof typeof LETTER_KINDS,
+  status: string,
+  financialsVerified: boolean,
+): boolean {
+  return LETTER_KINDS[kind].isEligible(status, financialsVerified);
+}
+
 export function LoanLetterButton({
   applicationId,
   status,
   kind,
+  financialsVerified,
 }: {
   applicationId: string;
   status: string;
   kind: keyof typeof LETTER_KINDS;
+  financialsVerified: boolean;
 }) {
   const queryClient = useQueryClient();
   const spec: LetterKind = LETTER_KINDS[kind];
@@ -106,7 +117,7 @@ export function LoanLetterButton({
     }
   };
 
-  if (!spec.isEligible(status)) return null;
+  if (!isLoanLetterEligible(kind, status, financialsVerified)) return null;
 
   const hasLetter = statusQuery.data?.hasLetter;
 

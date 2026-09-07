@@ -189,6 +189,28 @@ describe("SubmissionReadinessDialog — the lender identifier contract (F-0818-0
 // sims are labeled) and the empty state.
 // -----------------------------------------------------------------------------
 describe("SubmissionReadinessDialog — DU / LPA findings panel (B3-2-11)", () => {
+  it("disables AUS while required intake data is still blocked", async () => {
+    renderDialog({
+      readinessOver: {
+        stages: [
+          {
+            key: "intake",
+            label: "Complete intake",
+            status: "blocked",
+            blockers: ["SSN is required"],
+            warnings: [],
+          },
+          { ...AUS_STAGE, status: "blocked", blockers: ["Complete intake first"] },
+        ],
+      },
+      detail: applicationDetail({ ausCasefileId: null, ausRecommendation: null, ausFindings: null }),
+    });
+    await openDialog();
+
+    expect((await screen.findByTestId("run-aus") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("run-aus-blocked-reason").textContent).toMatch(/complete the intake blockers/i);
+  });
+
   it("renders recommendation, simulated label, LPA leg, messages, and D1C reasons from the persisted shape", async () => {
     renderDialog({ readinessOver: { stages: [AUS_STAGE] } });
     const user = await openDialog();

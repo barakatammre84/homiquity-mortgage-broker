@@ -94,7 +94,7 @@ export default function SelfEmployed() {
     <div className="min-h-screen bg-background">
       <SEOHead
         title="Self-Employed Mortgages - Built for 1099 & Business Income | Homiquity"
-        description="Self-employed, 1099, or juggling multiple income streams? Our application is built for complex income and a human reviews your file. No W-2 needed — check your options with a soft credit pull."
+        description="Self-employed, 1099, or juggling multiple income streams? Our application captures complex income source by source and routes it for human review without forcing it into a W-2-only workflow."
         ogImage={lifestyleImages.selfEmployed.src}
       />
       <SkipLink />
@@ -125,12 +125,12 @@ export default function SelfEmployed() {
                 <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground">
                   1099s, K-1s, write-offs, multiple income streams — our application was built
                   for income like yours, and people who understand business returns review it.
-                  No W-2 needed.
+                  We collect each source on its own terms instead of forcing everything into a wage box.
                 </p>
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground lg:justify-start">
                   <span className="flex items-center gap-2">
                     <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-primary" />
-                    A real answer, not an algorithm's guess
+                    Human review for complicated returns
                   </span>
                   <span className="flex items-center gap-2">
                     <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-primary" />
@@ -196,7 +196,7 @@ export default function SelfEmployed() {
                   ))}
                 </div>
                 <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-                  Every path leads to the same 3-minute check — your answer just sets up the
+                  Every path leads to the same focused first check — your answer sets up the
                   right questions so you only see what applies to you.
                 </p>
                 <div className="mt-4 border-t border-card-border pt-4">{softPullNote}</div>

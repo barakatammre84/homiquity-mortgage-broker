@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { friendlyApiError } from "@/lib/errorMessage";
 import { isInternalStaffRole } from "@shared/roles";
 import { Gauge, Users } from "lucide-react";
 import { AttentionRail } from "./loCommandCenter/AttentionRail";
@@ -76,15 +77,13 @@ export default function LoCommandCenter() {
     try {
       const res = await apiRequest("GET", `/api/loan-applications/${applicationId}/mismo-export`).catch(
         (err: unknown) => {
-          throw new Error(
-            err instanceof ApiError && err.status === 403
-              ? "MISMO export is restricted to internal staff with access to this application."
-              : "Failed to generate the MISMO file.",
-          );
+          throw new Error(err instanceof ApiError && err.status === 403
+            ? "MISMO export is restricted to internal staff with access to this application."
+            : friendlyApiError(err, "Failed to generate the MISMO file."));
         },
       );
       await downloadResponseAsFile(res, `mismo-${applicationId}.xml`);
-      toast({ title: "MISMO 3.4 exported", description: "The lender-ready XML package has been downloaded." });
+      toast({ title: "MISMO 3.4 exported", description: "The readiness-gated XML package has been downloaded." });
     } catch (error) {
       toast({
         title: "Export failed",
@@ -143,7 +142,7 @@ export default function LoCommandCenter() {
       <div className="grid flex-1 gap-4 overflow-hidden p-4 md:px-6 lg:grid-cols-[300px_1fr_240px]">
         {/* Left: attention rail (hidden on mobile once a file is open) */}
         <aside className={`overflow-y-auto ${selectedId ? "hidden lg:block" : "block"}`} aria-label="Attention rail">
-          {canClaim && <IntakeInboxCard />}
+          {canClaim && <IntakeInboxCard onClaim={setSelectedId} />}
           <AttentionRail
             queue={queue}
             signals={signals}

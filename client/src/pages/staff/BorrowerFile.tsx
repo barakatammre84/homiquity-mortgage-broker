@@ -140,7 +140,7 @@ export default function BorrowerFile() {
       await downloadResponseAsFile(res, `mismo-${applicationId}.xml`);
       toast({
         title: "MISMO 3.4 exported",
-        description: "The lender-ready XML file has been downloaded.",
+        description: "The readiness-gated XML package has been downloaded.",
       });
     } catch (error) {
       toast({
@@ -152,22 +152,6 @@ export default function BorrowerFile() {
       setExportingMismo(false);
     }
   };
-
-  const verifyFinancialsMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/loan-applications/${applicationId}/verify-financials`, {});
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.detail(applicationId) });
-      toast({
-        title: "Financials Verified",
-        description: "This application can now proceed to approval.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Verification Failed", description: error.message, variant: "destructive" });
-    },
-  });
 
   const isLoading = authLoading || appLoading || pipelineLoading;
 
@@ -214,10 +198,21 @@ export default function BorrowerFile() {
   // Mirrors the server's role gate on PATCH /:id/status (statusDecisions.ts):
   // final credit decisions are 403'd for everyone else, so grey them out here.
   const canSetCreditDecisions = CREDIT_DECISION_ROLES.includes(user?.role || "");
-  // Mirrors requireRole on POST /:id/verify-financials — closer, broker, and lender
-  // are 403'd there, so they must not be offered the button. Both sides read
-  // FINANCIAL_VERIFICATION_ROLES (shared/schema/lendingCore.ts) so they can't drift.
+  // Mirrors the evidence-backed per-dimension verification routes — closer,
+  // broker, and lender are 403'd there. Both sides read the shared role list.
   const canVerifyFinancials = FINANCIAL_VERIFICATION_ROLES.includes(user?.role || "");
+  const financialVerificationCount = [
+    application.incomeVerified,
+    application.assetsVerified,
+    application.creditVerified,
+  ].filter(Boolean).length;
+  const isPreliminaryReview = application.status === "pre_approved" && application.financialDataProvenance !== "verified";
+  const propertyLocation = [application.propertyCity, application.propertyState]
+    .filter(Boolean)
+    .join(", ");
+  const hasVerifiedCredit = application.creditVerified === true;
+  const hasVerifiedIncome = application.incomeVerified === true;
+  const hasDecisionGradeDti = hasVerifiedCredit && hasVerifiedIncome;
 
   // Pre-underwriting validator flags (loan_applications.pre_uw_flags) — the
   // machine-readable signal staff should see before opening any tab.
@@ -289,8 +284,8 @@ export default function BorrowerFile() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={application.status === "pre_approved" ? "default" : "secondary"}>
-                    {application.status?.replace(/_/g, " ").toUpperCase()}
+                  <Badge variant={isPreliminaryReview ? "secondary" : application.status === "pre_approved" ? "default" : "secondary"}>
+                    {isPreliminaryReview ? "INITIAL REVIEW" : application.status?.replace(/_/g, " ").toUpperCase()}
                   </Badge>
                   <Badge variant="outline">
                     {application.preferredLoanType?.toUpperCase() || "CONVENTIONAL"}
@@ -307,18 +302,12 @@ export default function BorrowerFile() {
                       <Badge variant="outline" className="border-border text-warning-subtle-foreground">
                         Financials Unverified
                       </Badge>
-                      {canVerifyFinancials && (
-                        <Button
-                          size="sm" className="touch-target"
-                          variant="outline"
-                          disabled={verifyFinancialsMutation.isPending}
-                          onClick={() => verifyFinancialsMutation.mutate()}
-                          data-testid="button-verify-financials"
-                        >
-                          <CheckCircle2 className="mr-1 h-3 w-3" />
-                          {verifyFinancialsMutation.isPending ? "Verifying..." : "Mark Financials Verified"}
-                        </Button>
-                      )}
+                      <Badge variant="secondary" data-testid="badge-verification-progress">
+                        {financialVerificationCount}/3 checks complete
+                      </Badge>
+                      <span className="max-w-xs text-xs text-muted-foreground" data-testid="text-verification-next-step">
+                        Complete the Financial review and Credit tabs to verify evidence.
+                      </span>
                     </>
                   )}
                   <StatusUpdateDialog
@@ -351,7 +340,9 @@ export default function BorrowerFile() {
 
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Credit Score</CardTitle>
+                    <CardTitle className="text-sm font-medium">
+                      {hasVerifiedCredit ? "Credit score" : "Credit score provided"}
+                    </CardTitle>
                     <CreditCard className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
@@ -359,7 +350,8 @@ export default function BorrowerFile() {
                       {application.creditScore || "---"}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {application.creditScore && application.creditScore >= 740 ? "740+" :
+                      {!hasVerifiedCredit && application.creditScore ? "Awaiting bureau verification" :
+                       application.creditScore && application.creditScore >= 740 ? "740+" :
                        application.creditScore && application.creditScore >= 680 ? "680-739" :
                        application.creditScore && application.creditScore >= 620 ? "620-679" : "Pending"}
                     </p>
@@ -487,9 +479,9 @@ export default function BorrowerFile() {
                           <span className="text-muted-foreground">Employer:</span>
                           <span>{application.employerName || "N/A"}</span>
                           <span className="text-muted-foreground">Years:</span>
-                          <span>{application.employmentYears || 0} years</span>
-                          <span className="text-muted-foreground">Income:</span>
-                          <span>{formatCurrency(application.annualIncome)}/year</span>
+                          <span>{application.employmentYears != null ? `${application.employmentYears} years` : "Not provided"}</span>
+                          <span className="text-muted-foreground">{hasVerifiedIncome ? "Verified income:" : "Reported income:"}</span>
+                          <span>{application.annualIncome != null ? `${formatCurrency(application.annualIncome)}/year` : "Not provided"}</span>
                         </div>
                       </CardContent>
                     </Card>
@@ -506,9 +498,9 @@ export default function BorrowerFile() {
                           <span className="text-muted-foreground">Address:</span>
                           <span>{application.propertyAddress || "N/A"}</span>
                           <span className="text-muted-foreground">City/State:</span>
-                          <span>{application.propertyCity}, {application.propertyState}</span>
+                          <span>{propertyLocation || "Not provided"}</span>
                           <span className="text-muted-foreground">Value:</span>
-                          <span>{formatCurrency(application.propertyValue)}</span>
+                          <span>{application.propertyValue != null && Number(application.propertyValue) > 0 ? formatCurrency(application.propertyValue) : "Not provided"}</span>
                           <span className="text-muted-foreground">Type:</span>
                           <span className="capitalize">{application.propertyType || "SFR"}</span>
                         </div>
@@ -527,10 +519,10 @@ export default function BorrowerFile() {
                           <span className="text-muted-foreground">Purpose:</span>
                           <span className="capitalize">{application.loanPurpose || "Purchase"}</span>
                           <span className="text-muted-foreground">Down Payment:</span>
-                          <span>{formatCurrency(application.downPayment)}</span>
+                          <span>{application.downPayment != null ? formatCurrency(application.downPayment) : "Not provided"}</span>
                           <span className="text-muted-foreground">LTV:</span>
                           <span>{application.ltvRatio ? `${Number(application.ltvRatio).toFixed(1)}%` : "N/A"}</span>
-                          <span className="text-muted-foreground">DTI:</span>
+                          <span className="text-muted-foreground">{hasDecisionGradeDti ? "DTI:" : "Preliminary DTI:"}</span>
                           <span>{application.dtiRatio ? `${Number(application.dtiRatio).toFixed(1)}%` : "N/A"}</span>
                         </div>
                       </CardContent>
@@ -547,7 +539,13 @@ export default function BorrowerFile() {
                 {isInternalStaffRole(user?.role ?? "") && (
                   <TabsContent value="financial-review">
                     <Suspense fallback={<Skeleton className="h-72" />}>
-                      <FinancialReviewTab applicationId={applicationId} onNavigate={setActiveTab} />
+                      <FinancialReviewTab
+                        applicationId={applicationId}
+                        onNavigate={setActiveTab}
+                        incomeVerified={application.incomeVerified === true}
+                        assetsVerified={application.assetsVerified === true}
+                        canVerify={canVerifyFinancials}
+                      />
                     </Suspense>
                   </TabsContent>
                 )}

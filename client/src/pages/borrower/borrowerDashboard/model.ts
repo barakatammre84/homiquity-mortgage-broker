@@ -1,4 +1,5 @@
 import type { LoanApplication, DealActivity, LoanAppStatus } from "@shared/schema";
+import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import {
   AlertCircle,
   AlertTriangle,
@@ -98,6 +99,7 @@ export function getPreUwFlags(application: LoanApplication | null | undefined): 
 
 export function getExpirationInfo(application: LoanApplication): { label: string; daysLeft: number; urgency: "expired" | "urgent" | "normal" } | null {
   if (application.status !== "pre_approved") return null;
+  if (!isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)) return null;
   if (!application.createdAt) return null;
   const createdDate = new Date(application.createdAt);
   if (isNaN(createdDate.getTime())) return null;
@@ -160,6 +162,9 @@ export function getReadinessPercent(
     suspended: 25,
   };
   let base = statusWeights[status as LoanAppStatus] || 30;
+  if (status === "pre_approved" && !isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)) {
+    base = statusWeights.under_review;
+  }
   if (verificationStatus) {
     if (verificationStatus.hasCreditConsent) base += 3;
     if (verificationStatus.hasIdVerification) base += 3;
@@ -186,7 +191,9 @@ export function getPersonalizedGreeting(user: { firstName?: string | null } | nu
     case "analyzing":
       return { title: greeting, subtitle: "Your application is being reviewed. We'll have an answer shortly." };
     case "pre_approved":
-      return { title: greeting, subtitle: "You're pre-approved. Time to find your home." };
+      return isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)
+        ? { title: greeting, subtitle: "You're pre-approved. Time to find your home." }
+        : { title: greeting, subtitle: "Your initial review is ready. Complete verification to confirm your borrowing range." };
     case "doc_collection":
     case "processing":
       return { title: greeting, subtitle: "We're processing your documents. Upload anything still needed." };
@@ -211,6 +218,12 @@ export function getPersonalizedGreeting(user: { firstName?: string | null } | nu
 }
 
 export interface BorrowerGraphData {
+  financialVerification: {
+    income: boolean;
+    assets: boolean;
+    credit: boolean;
+    decisionGrade: boolean;
+  };
   bestAnnualIncome: number | null;
   bestIncomeSource: string | null;
   totalVerifiedAssets: number | null;

@@ -63,6 +63,7 @@ export interface CockpitData {
     downPayment: string | null;
     propertyState: string | null;
     propertyType: string | null;
+    financialDataProvenance: string | null;
     isVeteran: boolean;
     closingDate: string | null;
     createdAt: string | null;

@@ -5,7 +5,7 @@ const JOURNEY_STEPS = [
     id: "submitted",
     label: "Application Received",
     icon: FileText,
-    statuses: ["submitted", "analyzing"],
+    statuses: ["submitted", "analyzing", "under_review"],
     estimate: "Minutes",
   },
   {
@@ -62,17 +62,19 @@ function getStepIndex(status: string): number {
 
 /** One-line description per step — shown only in the vertical timeline variant. */
 const STEP_DESCRIPTIONS: Record<string, string> = {
-  submitted: "We've received your application and started the review.",
-  pre_approved: "You're pre-approved. Time to shop with confidence.",
-  processing: "We're verifying the documents you provided.",
-  underwriting: "An underwriter is reviewing your complete file.",
-  clear_to_close: "Approved — we're preparing your closing.",
-  closing: "Sign your final documents at closing.",
-  funded: "Your loan is funded. Welcome home!",
+  submitted: "Your application is received and the initial review begins.",
+  pre_approved: "Once confirmed, you can shop with a reviewed borrowing range.",
+  processing: "Your submitted documents are checked and reconciled.",
+  underwriting: "An underwriter reviews the complete file.",
+  clear_to_close: "Final approval confirms the file is ready for closing.",
+  closing: "You sign the final documents at closing.",
+  funded: "Funding completes the loan and releases the funds.",
 };
 
 interface JourneyTrackerProps {
   status: string;
+  /** False while a `pre_approved` stage is still based on self-reported inputs. */
+  approvalVerified?: boolean;
   className?: string;
   showEstimates?: boolean;
   /**
@@ -89,7 +91,7 @@ interface JourneyTrackerProps {
   details?: Partial<Record<string, string[]>>;
 }
 
-export function JourneyTracker({ status, className = "", showEstimates = false, variant = "responsive", details }: JourneyTrackerProps) {
+export function JourneyTracker({ status, approvalVerified = true, className = "", showEstimates = false, variant = "responsive", details }: JourneyTrackerProps) {
   if (status === "draft" || status === "denied") return null;
 
   const currentIndex = getStepIndex(status);
@@ -99,6 +101,12 @@ export function JourneyTracker({ status, className = "", showEstimates = false, 
       ? JOURNEY_STEPS[currentIndex + 1]
       : null;
   const CurrentIcon = current?.icon ?? Circle;
+  const labelFor = (step: (typeof JOURNEY_STEPS)[number]) =>
+    step.id === "pre_approved" && !approvalVerified ? "Initial Review" : step.label;
+  const descriptionFor = (step: (typeof JOURNEY_STEPS)[number]) =>
+    step.id === "pre_approved" && !approvalVerified
+      ? "Your initial calculation is ready while your loan team verifies the file."
+      : STEP_DESCRIPTIONS[step.id];
 
   if (variant === "vertical") {
     return (
@@ -172,11 +180,11 @@ export function JourneyTracker({ status, className = "", showEstimates = false, 
                   }`}
                   data-testid={`journey-label-${step.id}`}
                 >
-                  {step.label}
+                  {labelFor(step)}
                 </p>
-                {STEP_DESCRIPTIONS[step.id] && (
+                {descriptionFor(step) && (
                   <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
-                    {STEP_DESCRIPTIONS[step.id]}
+                    {descriptionFor(step)}
                   </p>
                 )}
                 {(details?.[step.id]?.length ?? 0) > 0 && (
@@ -220,7 +228,7 @@ export function JourneyTracker({ status, className = "", showEstimates = false, 
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-foreground" data-testid="journey-compact-label">
-                  {current.label}
+                  {labelFor(current)}
                 </div>
                 {showEstimates && current.estimate && (
                   <div className="text-xs text-muted-foreground">~{current.estimate}</div>
@@ -249,7 +257,7 @@ export function JourneyTracker({ status, className = "", showEstimates = false, 
 
           {next && (
             <div className="mt-1.5 text-xs text-muted-foreground">
-              Up next: <span className="text-foreground">{next.label}</span>
+              Up next: <span className="text-foreground">{labelFor(next)}</span>
             </div>
           )}
         </div>
@@ -310,7 +318,7 @@ export function JourneyTracker({ status, className = "", showEstimates = false, 
                   }`}
                   data-testid={`journey-label-${step.id}`}
                 >
-                  {step.label}
+                  {labelFor(step)}
                 </span>
 
                 {showEstimates && isCurrent && step.estimate && (

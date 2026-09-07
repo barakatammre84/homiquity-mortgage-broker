@@ -274,6 +274,41 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe("Self-employed intake decision gate", () => {
+  it("requires URLA self-employment detail before a rough intake total can be decisioned", async () => {
+    primeOrchestrator(makeApp({ employmentType: "self_employed", annualIncome: "240000" }), {
+      employment: [],
+      piti: 4200,
+    });
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("NEEDS_MORE_INFO");
+    expect(decision.decision).toBeNull();
+    expect(decision.missingItems.join(" ")).toMatch(/self-employment.*worksheet/i);
+  });
+
+  it("keeps a self-employed record without its worksheet in needs-more-info", async () => {
+    primeOrchestrator(makeApp({ employmentType: "self_employed", annualIncome: "240000" }), {
+      employment: [
+        {
+          borrowerSequenceNumber: 1,
+          employerName: "Northstar Consulting LLC",
+          isSelfEmployed: true,
+          selfEmploymentIncome: null,
+        },
+      ],
+      piti: 4200,
+    });
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("NEEDS_MORE_INFO");
+    expect(decision.decision).toBeNull();
+    expect(decision.missingItems.join(" ")).toMatch(/complete.*worksheet/i);
+  });
+});
+
 // ===========================================================================
 // PERSONA 1 — "Marcus Vale": self-employed, four K-1s, negative 2025 net
 // income, $2M liquid spike in 2026.

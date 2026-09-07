@@ -71,15 +71,17 @@ export function CreditTab({
         pullType,
         bureaus: ["experian", "equifax", "transunion"],
       });
-      return await response.json();
+      return await response.json() as { pull?: { isSimulated?: boolean } };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: loanApplicationKeys.credit.summary(applicationId) });
       queryClient.invalidateQueries({ queryKey: loanApplicationKeys.credit.auditLog(applicationId) });
       queryClient.invalidateQueries({ queryKey: loanApplicationKeys.detail(applicationId) });
       toast({
-        title: "Credit Pull Complete",
-        description: "Credit report has been successfully retrieved.",
+        title: result.pull?.isSimulated ? "Credit workflow simulation complete" : "Credit pull complete",
+        description: result.pull?.isSimulated
+          ? "No bureau report was retrieved. This simulated result cannot verify credit or support a binding decision."
+          : "The bureau credit report has been retrieved.",
       });
     },
     onError: (error: Error) => {
@@ -236,7 +238,7 @@ export function CreditTab({
               </CardTitle>
               <Button
                 size="sm" className="touch-target"
-                disabled={!creditData?.hasActiveConsent || pullCreditMutation.isPending}
+                disabled={creditData?.consent?.consentType !== "hard_pull" || pullCreditMutation.isPending}
                 onClick={() => pullCreditMutation.mutate("tri_merge")}
                 data-testid="button-pull-credit"
               >
@@ -253,6 +255,11 @@ export function CreditTab({
                 )}
               </Button>
             </div>
+            {creditData?.hasActiveConsent && creditData.consent?.consentType !== "hard_pull" && (
+              <CardDescription data-testid="text-credit-pull-blocked-by-consent">
+                Waiting for the borrower to authorize a hard inquiry before a tri-merge can be requested.
+              </CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             {creditData?.latestPull ? (

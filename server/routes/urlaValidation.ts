@@ -72,9 +72,14 @@ export function pickTableFields(
   return out;
 }
 
-// Treat "" as "not provided" — HTML form fields submit empty strings.
+// Treat blank and database-null values as "not provided". The edit form sends
+// a previously saved partial row back as a whole, and nullable DB columns come
+// back as null; rejecting that round-trip prevents every later section save.
 const optionalTrimmed = (schema: z.ZodTypeAny) =>
-  z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema.optional());
+  z.preprocess(
+    (v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v),
+    schema.optional(),
+  );
 
 /**
  * Format checks for the identity fields on URLA Section 1a. Applied after

@@ -539,8 +539,16 @@ export function registerDocumentRoutes(
                 ),
               );
             }
+            const { reconcileDocumentReviewTasks } = await import("../pipelineEngine");
+            await reconcileDocumentReviewTasks({
+              applicationId: document.applicationId,
+              documentId: id,
+              status,
+              reason: status === DOCUMENT_STATUS.REJECTED ? trimmedReason : undefined,
+              reviewedBy: user.id,
+            });
           } catch (taskErr) {
-            console.warn(`[Documents] Review task completion failed for ${id} (non-fatal):`, taskErr);
+            console.warn(`[Documents] Review task synchronization failed for ${id} (non-fatal):`, taskErr);
           }
         }
 

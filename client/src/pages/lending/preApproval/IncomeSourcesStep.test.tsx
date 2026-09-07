@@ -78,6 +78,40 @@ describe("IncomeSourcesStep", () => {
     await user.click(screen.getByTestId("button-remove-rental-1"));
     expect(screen.queryByTestId("rental-property-1")).toBeNull();
   });
+
+  it("keeps a fully typed rental address when lookup is unavailable", async () => {
+    const user = userEvent.setup();
+    const onEntries = vi.fn();
+    render(<Harness onEntries={onEntries} />);
+
+    await user.click(screen.getByTestId("toggle-income-rental"));
+    await user.type(screen.getByTestId("input-address-autocomplete"), "233 South Wacker Drive, Chicago, IL");
+
+    const reported = onEntries.mock.calls.at(-1)![0] as Array<
+      IncomeSourceEntry & { rentalProperties?: RentalPropertyEntry[] }
+    >;
+    expect(reported.find((entry) => entry.type === "rental")?.rentalProperties?.[0]?.address)
+      .toBe("233 South Wacker Drive, Chicago, IL");
+  });
+
+  it("captures separate income details for more than one business entity", async () => {
+    const user = userEvent.setup();
+    const onEntries = vi.fn();
+    render(<Harness employmentType="self_employed" onEntries={onEntries} />);
+
+    await user.click(screen.getByTestId("toggle-income-self_employed"));
+    await user.type(screen.getByTestId("input-income-amount-self_employed-0"), "140000");
+    await user.type(screen.getByTestId("input-income-employer-self_employed-0"), "Northstar Consulting LLC");
+    await user.click(screen.getByTestId("button-add-self-employed-source"));
+    await user.type(screen.getByTestId("input-income-amount-self_employed-1"), "70000");
+    await user.type(screen.getByTestId("input-income-employer-self_employed-1"), "Lakeview Design LLC");
+
+    const reported = onEntries.mock.calls.at(-1)![0] as IncomeSourceEntry[];
+    expect(reported.filter((entry) => entry.type === "self_employed")).toEqual([
+      expect.objectContaining({ annualAmount: "140,000", employerName: "Northstar Consulting LLC" }),
+      expect.objectContaining({ annualAmount: "70,000", employerName: "Lakeview Design LLC" }),
+    ]);
+  });
 });
 
 /**

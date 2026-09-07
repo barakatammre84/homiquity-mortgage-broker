@@ -97,6 +97,9 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
       case "homeSquareFootage":
         return "The VA estimates monthly utilities at $0.14 per square foot when verifying your loan leaves enough residual income.";
       case "annualIncome":
+        if (formValues.employmentType === "self_employed") {
+          return "Use your best rough yearly total here. On the next steps, each business, 1099, and rental source is captured separately and verified against tax documents.";
+        }
         return "We use gross income to calculate your debt-to-income ratio. We'll verify with W-2s or tax returns later.";
       case "employmentType":
         if (formValues.employmentType === "self_employed") {
@@ -313,6 +316,13 @@ export function resolveStepCopy(currentQ: Question, formValues: PreApprovalFormD
       break;
 
     case "annualIncome":
+      if (employmentType === "self_employed") {
+        return {
+          ...fallback,
+          title: "About how much does your household earn in a year?",
+          subtext: "A rough total is fine — next we'll separate each business, 1099, rental, and other source.",
+        };
+      }
       return { ...fallback, title: "What's your total household income?" };
 
     case "employmentYears":
@@ -351,4 +361,3 @@ export function resolveStepCopy(currentQ: Question, formValues: PreApprovalFormD
 export function getDynamicTitle(currentQ: Question, formValues: PreApprovalFormData): string {
   return resolveStepCopy(currentQ, formValues).title;
 }
-

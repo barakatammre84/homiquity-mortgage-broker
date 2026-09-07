@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -20,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { friendlyApiError } from "@/lib/errorMessage";
 import { Clock, Lock, RefreshCw, XCircle } from "lucide-react";
 import { OPEN_RATE_LOCK_STATUSES } from "@shared/statusVocabularies";
 import type { LoanOption, RateLock } from "@shared/schema";
@@ -48,12 +51,36 @@ interface RateLockDialogProps {
   borrowerName: string;
 }
 
+interface WholesaleLenderOption {
+  lenderId: string;
+  lenderName: string;
+  approvalStatus: string;
+  isDemo: boolean;
+  status: string | null;
+}
+
+function lenderStatusLabel(lender: WholesaleLenderOption): string {
+  if (lender.isDemo) return "demo — indicative only";
+  if (lender.approvalStatus === "approved") return "approved";
+  return `${lender.approvalStatus.replaceAll("_", " ")} — indicative only`;
+}
+
 export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [optionId, setOptionId] = useState("");
   const [lockPeriod, setLockPeriod] = useState("30");
+  const [lenderId, setLenderId] = useState("");
+  const [confirmationNumber, setConfirmationNumber] = useState("");
+  const [confirmedRate, setConfirmedRate] = useState("");
+  const [confirmedExpiresAt, setConfirmedExpiresAt] = useState("");
+  const [extensionDays, setExtensionDays] = useState("15");
+  const [extensionConfirmation, setExtensionConfirmation] = useState("");
+  const [extensionExpiresAt, setExtensionExpiresAt] = useState("");
+  const [extensionFee, setExtensionFee] = useState("");
+  const [extensionFeePaidBy, setExtensionFeePaidBy] = useState("");
+  const [extensionFeeCocId, setExtensionFeeCocId] = useState("");
 
   // Segments, not a template string. Written as
   // [`/api/rate-locks/application/${applicationId}`] this fetched the same URL
@@ -68,9 +95,14 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
     queryKey: loanApplicationKeys.options(applicationId),
     enabled: open,
   });
+  const { data: lenders } = useQuery<WholesaleLenderOption[]>({
+    queryKey: ["/api/wholesale-lenders"],
+    enabled: open,
+  });
 
   const activeLock = locks?.find((lock) => OPEN_RATE_LOCK_STATUSES.includes(lock.status));
   const options = optionsData?.options ?? [];
+  const activeLenders = (lenders ?? []).filter((lender) => lender.status?.toUpperCase() !== "INACTIVE");
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: locksKey });
@@ -85,31 +117,58 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
         applicationId,
         loanOptionId: optionId,
         lockPeriodDays: Number(lockPeriod),
+        lenderId,
+        lockConfirmationNumber: confirmationNumber.trim(),
+        confirmedRate: Number(confirmedRate),
+        confirmedExpiresAt: new Date(confirmedExpiresAt).toISOString(),
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (created: RateLock) => {
       refresh();
-      toast({ title: "Rate locked", description: `Locked for ${lockPeriod} days.` });
+      toast(created.simulated
+        ? {
+            title: "Indicative quote recorded",
+            description: "No approved lender is committed to this rate. It is not a rate lock.",
+          }
+        : { title: "Lender-confirmed rate lock recorded", description: `Confirmed for ${lockPeriod} days.` });
     },
     onError: (error: Error) => {
-      toast({ title: "Could not lock the rate", description: error.message, variant: "destructive" });
+      toast({
+        title: "Could not record the lender confirmation",
+        description: friendlyApiError(error, "Check the confirmation details and try again."),
+        variant: "destructive",
+      });
     },
   });
 
   const extendLock = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/rate-locks/${activeLock!.id}/extend`, {
-        additionalDays: 15,
+        additionalDays: Number(extensionDays),
+        lockConfirmationNumber: extensionConfirmation.trim(),
+        confirmedExpiresAt: new Date(extensionExpiresAt).toISOString(),
+        ...(extensionFee ? { extensionFee: Number(extensionFee) } : {}),
+        ...(extensionFeePaidBy ? { extensionFeePaidBy } : {}),
+        ...(extensionFeeCocId.trim() ? { extensionFeeCocId: extensionFeeCocId.trim() } : {}),
       });
       return res.json();
     },
     onSuccess: () => {
       refresh();
-      toast({ title: "Lock extended", description: "Added 15 days to the lock." });
+      setExtensionConfirmation("");
+      setExtensionExpiresAt("");
+      setExtensionFee("");
+      setExtensionFeePaidBy("");
+      setExtensionFeeCocId("");
+      toast({ title: "Lender-confirmed extension recorded" });
     },
     onError: (error: Error) => {
-      toast({ title: "Could not extend the lock", description: error.message, variant: "destructive" });
+      toast({
+        title: "Could not record the extension",
+        description: friendlyApiError(error, "Check the lender confirmation and try again."),
+        variant: "destructive",
+      });
     },
   });
 
@@ -137,15 +196,15 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="touch-target" data-testid={`rate-lock-${applicationId}`}>
           <Lock className="mr-1 h-4 w-4" aria-hidden="true" />
-          Lock
+          Rate desk
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Rate lock — {borrowerName}</DialogTitle>
+          <DialogTitle>Rate desk — {borrowerName}</DialogTitle>
           <DialogDescription>
-            Lock, extend, or cancel this file&apos;s rate. Locking on the borrower&apos;s behalf is
-            procedural; the borrower still acknowledges the loan-options disclosure separately.
+            Record the wholesale lender&apos;s confirmation exactly as issued. The borrower&apos;s
+            loan-options acknowledgement remains a separate step.
           </DialogDescription>
         </DialogHeader>
 
@@ -155,7 +214,12 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
           <div className="space-y-4">
             <div className="rounded-md border border-border p-4">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-2xl font-bold tabular-nums">{activeLock.interestRate}%</span>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums">{activeLock.interestRate}%</p>
+                  <Badge variant={activeLock.simulated ? "secondary" : "outline"} className="mt-1">
+                    {activeLock.simulated ? "Indicative quote — no lender commitment" : "Lender-confirmed lock"}
+                  </Badge>
+                </div>
                 <Badge
                   variant={remaining !== null && remaining <= 3 ? "destructive" : "outline"}
                   className={countdownAmber ? "bg-warning-subtle text-warning-subtle-foreground" : undefined}
@@ -191,20 +255,74 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            {!activeLock.simulated ? (
+            <div className="rounded-md border border-border p-4 space-y-3" data-testid="lock-extension-form">
+              <p className="text-sm font-medium">Record a lender-confirmed extension</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="extension-days">Additional days</Label>
+                  <Input id="extension-days" type="number" min="1" max="90" value={extensionDays} onChange={(event) => setExtensionDays(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="extension-expires">Confirmed expiration</Label>
+                  <Input id="extension-expires" type="datetime-local" value={extensionExpiresAt} onChange={(event) => setExtensionExpiresAt(event.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="extension-confirmation">Lender confirmation number</Label>
+                <Input id="extension-confirmation" value={extensionConfirmation} onChange={(event) => setExtensionConfirmation(event.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="extension-fee">Extension fee (optional)</Label>
+                  <Input id="extension-fee" type="number" min="0" step="0.01" value={extensionFee} onChange={(event) => setExtensionFee(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="extension-fee-payer">Fee paid by</Label>
+                  <Select value={extensionFeePaidBy} onValueChange={setExtensionFeePaidBy}>
+                    <SelectTrigger id="extension-fee-payer"><SelectValue placeholder="Choose payer" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="broker">Broker</SelectItem>
+                      <SelectItem value="lender">Lender</SelectItem>
+                      <SelectItem value="borrower">Borrower</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {extensionFeePaidBy === "borrower" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="extension-coc">Change-of-circumstance record ID</Label>
+                  <Input id="extension-coc" value={extensionFeeCocId} onChange={(event) => setExtensionFeeCocId(event.target.value)} />
+                  <p className="text-xs text-muted-foreground">Required before a borrower-paid fee can be recorded.</p>
+                </div>
+              )}
               <Button
                 variant="outline"
-                className="flex-1"
-                disabled={extendLock.isPending}
+                className="w-full"
+                disabled={
+                  extendLock.isPending ||
+                  !extensionConfirmation.trim() ||
+                  !extensionExpiresAt ||
+                  !extensionDays ||
+                  (Boolean(extensionFee) && !extensionFeePaidBy) ||
+                  (extensionFeePaidBy === "borrower" && !extensionFeeCocId.trim())
+                }
                 onClick={() => extendLock.mutate()}
                 data-testid="extend-lock"
               >
                 <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
-                Extend 15 days
+                Record extension
               </Button>
+            </div>
+            ) : (
+              <p className="rounded-md border border-border p-3 text-sm text-muted-foreground" data-testid="indicative-extension-blocked">
+                An indicative quote cannot be extended as a lock. Obtain a real wholesale lender confirmation and record a new lock.
+              </p>
+            )}
+            <div className="flex gap-2">
               <Button
                 variant="outline"
-                className="flex-1 text-destructive"
+                className="w-full text-destructive"
                 disabled={cancelLock.isPending}
                 onClick={() => cancelLock.mutate()}
                 data-testid="cancel-lock"
@@ -222,9 +340,34 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
               </p>
             ) : (
               <>
+                {activeLenders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground" data-testid="no-lock-lenders">
+                    No active wholesale lenders are configured. Add a counterparty before recording a quote or lock.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="lock-lender">Wholesale lender</Label>
+                    <Select value={lenderId} onValueChange={setLenderId}>
+                      <SelectTrigger id="lock-lender" data-testid="lock-lender-select">
+                        <SelectValue placeholder="Choose the confirming lender" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeLenders.map((lender) => (
+                          <SelectItem key={lender.lenderId} value={lender.lenderId} data-testid={`lock-lender-option-${lender.lenderId}`}>
+                            {lender.lenderName} · {lenderStatusLabel(lender)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="lock-option">Loan option</label>
-                  <Select value={optionId} onValueChange={setOptionId}>
+                  <Select value={optionId} onValueChange={(value) => {
+                    setOptionId(value);
+                    const selected = options.find((option) => option.id === value);
+                    if (selected) setConfirmedRate(String(selected.interestRate));
+                  }}>
                     <SelectTrigger id="lock-option" data-testid="lock-option-select">
                       <SelectValue placeholder="Choose an option to lock" />
                     </SelectTrigger>
@@ -250,14 +393,35 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="confirmed-rate">Lender-confirmed rate</Label>
+                    <Input id="confirmed-rate" type="number" min="0.001" max="99" step="0.001" value={confirmedRate} onChange={(event) => setConfirmedRate(event.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="confirmed-expires">Lender-confirmed expiration</Label>
+                    <Input id="confirmed-expires" type="datetime-local" value={confirmedExpiresAt} onChange={(event) => setConfirmedExpiresAt(event.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lock-confirmation">Lender confirmation number</Label>
+                  <Input id="lock-confirmation" value={confirmationNumber} onChange={(event) => setConfirmationNumber(event.target.value)} />
+                </div>
                 <Button
                   className="w-full"
-                  disabled={!optionId || createLock.isPending}
+                  disabled={
+                    !lenderId ||
+                    !optionId ||
+                    !confirmationNumber.trim() ||
+                    !confirmedRate ||
+                    !confirmedExpiresAt ||
+                    createLock.isPending
+                  }
                   onClick={() => createLock.mutate()}
                   data-testid="submit-lock"
                 >
                   <Lock className="mr-1 h-4 w-4" aria-hidden="true" />
-                  Lock rate
+                  Record lender confirmation
                 </Button>
               </>
             )}

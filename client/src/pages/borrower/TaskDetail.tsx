@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, taskKeys } from "@/lib/queryClient";
+import { apiRequest, dashboardKeys, taskKeys } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -97,17 +97,15 @@ export default function TaskDetail() {
         applicationId: task?.applicationId || undefined,
       });
 
-      const document = await response.json();
-
-      const linkResponse = await apiRequest("POST", `/api/tasks/${taskId}/documents`, {
-        documentId: document.id,
-      });
-
-      return linkResponse.json();
+      // Upload registration now links the matching task centrally, so task
+      // detail, Documents, To-Do, and Homi all have the same outcome.
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId!) });
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       toast({
         title: "Document Uploaded",
         description: "Your document has been uploaded and is pending review.",

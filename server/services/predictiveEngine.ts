@@ -36,6 +36,51 @@ interface PredictionInput {
   engagementLevel: string;
   intentScore: number;
   committedStage: boolean;
+  financialsVerified: boolean;
+}
+
+export function scoreFinancialPredictionSignals(input: Pick<PredictionInput,
+  "financialsVerified" | "creditScore" | "dti" | "ltv" | "employmentYears" | "isVeteran"
+>): { scoreDelta: number; riskFactors: string[]; positiveFactors: string[] } {
+  if (!input.financialsVerified) {
+    return { scoreDelta: 0, riskFactors: [], positiveFactors: [] };
+  }
+
+  let scoreDelta = 0;
+  const riskFactors: string[] = [];
+  const positiveFactors: string[] = [];
+
+  if (input.creditScore) {
+    if (input.creditScore >= 740) { scoreDelta += 15; positiveFactors.push("Excellent credit score"); }
+    else if (input.creditScore >= 700) { scoreDelta += 10; positiveFactors.push("Good credit score"); }
+    else if (input.creditScore >= 660) { scoreDelta += 3; }
+    else if (input.creditScore >= 620) { scoreDelta -= 5; riskFactors.push("Below-average credit score"); }
+    else { scoreDelta -= 15; riskFactors.push("Low credit score increases fallout risk"); }
+  } else {
+    scoreDelta -= 5;
+    riskFactors.push("Credit score not yet verified");
+  }
+
+  if (input.dti !== null) {
+    if (input.dti <= 36) { scoreDelta += 10; positiveFactors.push("Low debt-to-income ratio"); }
+    else if (input.dti <= 43) { scoreDelta += 3; }
+    else if (input.dti <= 50) { scoreDelta -= 8; riskFactors.push("High DTI may require compensating factors"); }
+    else { scoreDelta -= 15; riskFactors.push("DTI exceeds standard thresholds"); }
+  }
+
+  if (input.ltv !== null) {
+    if (input.ltv <= 80) { scoreDelta += 5; positiveFactors.push("20%+ down payment (no PMI)"); }
+    else if (input.ltv <= 95) { scoreDelta += 1; }
+    else { scoreDelta -= 5; riskFactors.push("Very high LTV increases risk"); }
+  }
+
+  if (input.employmentYears !== null) {
+    if (input.employmentYears >= 2) { scoreDelta += 5; positiveFactors.push("Stable employment history"); }
+    else if (input.employmentYears < 1) { scoreDelta -= 5; riskFactors.push("Less than 1 year at current employer"); }
+  }
+
+  if (input.isVeteran) { scoreDelta += 3; positiveFactors.push("VA loan eligible"); }
+  return { scoreDelta, riskFactors, positiveFactors };
 }
 
 function hashInput(input: PredictionInput): string {
@@ -95,6 +140,7 @@ export async function computePrediction(
     // "uncertainty" signals no longer apply (§4.3). Part of the input so the
     // prediction cache differentiates committed vs. pre-commitment borrowers.
     committedStage: isCommittedStage(activeApp?.status),
+    financialsVerified: graph.financialVerification.decisionGrade,
   };
 
   const inputHash = hashInput(input);
@@ -127,34 +173,13 @@ export async function computePrediction(
   const positiveFactors: string[] = [];
   let score = 50;
 
-  if (input.creditScore) {
-    if (input.creditScore >= 740) { score += 15; positiveFactors.push("Excellent credit score"); }
-    else if (input.creditScore >= 700) { score += 10; positiveFactors.push("Good credit score"); }
-    else if (input.creditScore >= 660) { score += 3; }
-    else if (input.creditScore >= 620) { score -= 5; riskFactors.push("Below-average credit score"); }
-    else { score -= 15; riskFactors.push("Low credit score increases fallout risk"); }
-  } else {
-    score -= 5;
-    riskFactors.push("Credit score not yet verified");
-  }
-
-  if (input.dti !== null) {
-    if (input.dti <= 36) { score += 10; positiveFactors.push("Low debt-to-income ratio"); }
-    else if (input.dti <= 43) { score += 3; }
-    else if (input.dti <= 50) { score -= 8; riskFactors.push("High DTI may require compensating factors"); }
-    else { score -= 15; riskFactors.push("DTI exceeds standard thresholds"); }
-  }
-
-  if (input.ltv !== null) {
-    if (input.ltv <= 80) { score += 5; positiveFactors.push("20%+ down payment (no PMI)"); }
-    else if (input.ltv <= 95) { score += 1; }
-    else { score -= 5; riskFactors.push("Very high LTV increases risk"); }
-  }
-
-  if (input.employmentYears !== null) {
-    if (input.employmentYears >= 2) { score += 5; positiveFactors.push("Stable employment history"); }
-    else if (input.employmentYears < 1) { score -= 5; riskFactors.push("Less than 1 year at current employer"); }
-  }
+  // Credit, DTI, LTV, and employment-duration labels read as qualification
+  // findings. Keep them out of the close-outlook score and its borrower-facing
+  // reasons until all financial dimensions are verified.
+  const financialSignals = scoreFinancialPredictionSignals(input);
+  score += financialSignals.scoreDelta;
+  riskFactors.push(...financialSignals.riskFactors);
+  positiveFactors.push(...financialSignals.positiveFactors);
 
   if (input.documentsUploaded >= 5) { score += 5; positiveFactors.push("Strong document submission"); }
   else if (input.documentsUploaded <= 1) { score -= 5; riskFactors.push("Few documents submitted"); }
@@ -182,8 +207,6 @@ export async function computePrediction(
 
   if (input.intentScore >= 70) { score += 5; positiveFactors.push("Strong intent signals"); }
 
-  if (input.isVeteran) { score += 3; positiveFactors.push("VA loan eligible"); }
-
   const likelihoodToClose = Math.max(0.05, Math.min(0.95, score / 100));
   const riskOfFallout = Math.max(0.05, Math.min(0.95, 1 - likelihoodToClose));
 
@@ -199,7 +222,7 @@ export async function computePrediction(
   if (conditionDelayRisk > 0.5) baseDays += 7;
   const estimatedDaysToFund = baseDays;
 
-  const creditBucket = input.creditScore ? getCreditBucketLabel(input.creditScore) : "unknown";
+  const creditBucket = input.financialsVerified && input.creditScore ? getCreditBucketLabel(input.creditScore) : "unknown";
   const cohortKey = `${creditBucket}_${input.loanPurpose || "purchase"}`;
 
   const [cohortData] = await db.select({
@@ -305,19 +328,19 @@ export async function getBorrowerBenchmark(
     return getDefaultBenchmark();
   }
 
-  const creditBucket = graph.eligibility.creditScore
+  const activeApp = pickActiveLoanApplication(graph.applications);
+  const financialsVerified = graph.financialVerification.decisionGrade;
+  const creditBucket = financialsVerified && graph.eligibility.creditScore
     ? getCreditBucketLabel(graph.eligibility.creditScore)
     : null;
-
-  const activeApp = pickActiveLoanApplication(graph.applications);
   const daysInProcess = activeApp?.createdAt
     ? Math.round((Date.now() - new Date(activeApp.createdAt).getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
   const yourMetrics = {
-    creditScore: graph.eligibility.creditScore,
-    dti: graph.eligibility.estimatedDTI,
-    ltv: graph.eligibility.estimatedLTV,
+    creditScore: financialsVerified ? graph.eligibility.creditScore : null,
+    dti: financialsVerified ? graph.eligibility.estimatedDTI : null,
+    ltv: financialsVerified ? graph.eligibility.estimatedLTV : null,
     documentsSubmitted: graph.documentsUploaded,
     daysInProcess,
   };

@@ -17,7 +17,7 @@ import { type BorrowerGraphData } from "./model";
 /** Collapsible financial-profile card (extracted from Dashboard.tsx): derived
  * signals from the borrower graph — credit tier, DTI, income, max purchase,
  * verified assets, eligible programs — plus "areas to strengthen". */
-export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
+export function FinancialSnapshot({ graph, qualificationVerified }: { graph: BorrowerGraphData; qualificationVerified: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const { eligibility } = graph;
 
@@ -46,14 +46,14 @@ export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
   if (eligibility.creditScore) {
     signals.push({
       icon: Shield,
-      label: "Credit Score",
+      label: qualificationVerified ? "Verified Credit Score" : "Credit Score Provided",
       value: `${eligibility.creditScore} (${eligibility.creditTier === "unknown" ? "Not provided" : eligibility.creditTier.replace(/_/g, "-")})`,
       color: creditColor,
       testId: "signal-credit",
     });
   }
 
-  if (eligibility.estimatedDTI !== null) {
+  if (qualificationVerified && eligibility.estimatedDTI !== null) {
     signals.push({
       icon: Percent,
       label: "Debt-to-Income",
@@ -67,14 +67,14 @@ export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
   if (graph.bestAnnualIncome) {
     signals.push({
       icon: Briefcase,
-      label: "Annual Income",
+      label: qualificationVerified ? "Verified Annual Income" : "Income Provided",
       value: `$${Math.round(graph.bestAnnualIncome).toLocaleString()}`,
       color: "",
       testId: "signal-income",
     });
   }
 
-  if (eligibility.estimatedMaxPurchase) {
+  if (qualificationVerified && eligibility.estimatedMaxPurchase) {
     signals.push({
       icon: Target,
       label: "Est. Max Purchase",
@@ -94,7 +94,7 @@ export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
     });
   }
 
-  if (eligibility.eligibleLoanTypes.length > 0) {
+  if (qualificationVerified && eligibility.eligibleLoanTypes.length > 0) {
     signals.push({
       icon: CheckCircle2,
       label: "Eligible Programs",
@@ -118,7 +118,7 @@ export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
         data-testid="button-toggle-snapshot"
       >
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Your Financial Profile
+          {qualificationVerified ? "Verified Financial Profile" : "Information Provided"}
         </h3>
         {extraSignals.length > 0 && (
           expanded ? (
@@ -162,6 +162,11 @@ export function FinancialSnapshot({ graph }: { graph: BorrowerGraphData }) {
               </div>
             ))}
           </div>
+          {!qualificationVerified && (
+            <p className="mt-3 border-t pt-3 text-xs leading-relaxed text-muted-foreground" data-testid="text-qualification-pending">
+              Your loan team is verifying these inputs. Qualification ratios and confirmed program results appear after that review.
+            </p>
+          )}
           {graph.readiness.outstandingInputs.length > 0 && expanded && (
             <div className="mt-3 pt-3 border-t space-y-1.5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Areas to Strengthen</p>

@@ -26,6 +26,7 @@ import { ContactCard } from "@/components/dashboard/ContactCard";
 import { LoanTeamCard } from "@/components/dashboard/LoanTeamCard";
 import { RenterHome } from "@/pages/borrower/RenterHome";
 import { isStaffRole } from "@shared/roles";
+import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import PredictionInsights from "@/components/borrower/PredictionInsights";
 import type { LoanApplication, DealActivity, LoanAppStatus } from "@shared/schema";
 import {
@@ -194,8 +195,9 @@ export default function Dashboard() {
   // matched a value no backend path ever wrote, so this link never appeared.)
   const hasClosedLoan = applications.some((app) => app.status === "funded");
 
-  const isPreApproved = activeApplication?.status === "pre_approved";
-  const expirationInfo = activeApplication ? getExpirationInfo(activeApplication) : null;
+  const approvalVerified = isDecisionGrade(activeApplication?.financialDataProvenance as DataProvenance | undefined);
+  const isPreApproved = activeApplication?.status === "pre_approved" && approvalVerified;
+  const expirationInfo = activeApplication && approvalVerified ? getExpirationInfo(activeApplication) : null;
 
   const offerCount = activeApplication ? (data?.loanOptionCounts?.[activeApplication.id] || 0) : 0;
   const hasOffers = offerCount > 0;
@@ -447,7 +449,7 @@ export default function Dashboard() {
                       </span>
                     </div>
                   </div>
-                  <JourneyTracker status={activeApplication.status} variant="vertical" showEstimates details={journeyDetails} />
+                  <JourneyTracker status={activeApplication.status} approvalVerified={approvalVerified} variant="vertical" showEstimates details={journeyDetails} />
                   <div className="mt-4 pt-3 border-t flex items-center gap-2 text-xs text-muted-foreground/70" data-testid="text-automation-status">
                     <Zap className="h-3 w-3 text-primary" />
                     <span>Platform is automatically tracking compliance deadlines, verifying documents, and updating your progress</span>
@@ -459,14 +461,15 @@ export default function Dashboard() {
 
           {/* RIGHT column (narrower): pre-approval → contact → loan team */}
           <div className="space-y-4 sm:space-y-6 lg:col-span-1">
-            {activeApplication && activeApplication.status === "pre_approved" && (
+            {activeApplication && activeApplication.status === "pre_approved" && approvalVerified && (
               <PreApprovedCard
                 applicationId={activeApplication.id}
                 amount={activeApplication.preApprovalAmount || activeApplication.purchasePrice}
                 validUntil={expirationInfo && expirationInfo.urgency !== "expired" ? expirationInfo.label : null}
               />
             )}
-            {activeApplication && ["submitted", "analyzing"].includes(activeApplication.status) && (
+            {activeApplication && (["submitted", "analyzing"].includes(activeApplication.status) ||
+              (activeApplication.status === "pre_approved" && !approvalVerified)) && (
               <PreQualLetterCard applicationId={activeApplication.id} />
             )}
             {activeApplication && <ContactCard />}
@@ -487,11 +490,11 @@ export default function Dashboard() {
           <PartnerSharingCard />
 
           {activeApplication && activeApplication.status !== "draft" && (
-            <PredictionInsights applicationId={activeApplication.id} />
+            <PredictionInsights applicationId={activeApplication.id} financialsVerified={approvalVerified} />
           )}
 
           {borrowerGraph && !graphError && (
-            <FinancialSnapshot graph={borrowerGraph} />
+            <FinancialSnapshot graph={borrowerGraph} qualificationVerified={approvalVerified} />
           )}
 
           {activeApplication && (

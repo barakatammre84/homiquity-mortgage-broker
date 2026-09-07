@@ -24,6 +24,13 @@ const allText = (stepId: string, overrides: Partial<PreApprovalFormData> = {}) =
   return [c.title, c.subtext ?? "", c.why ?? ""].join(" ");
 };
 
+describe("pre-approval entry promise", () => {
+  it("does not call an unverified three-minute result a verified letter", () => {
+    expect(QUESTIONS_BY_ID.intro.subtitle).toMatch(/preliminary answer/i);
+    expect(QUESTIONS_BY_ID.intro.subtitle).not.toMatch(/verified pre-approval/i);
+  });
+});
+
 describe("resolveStepCopy — purchase path", () => {
   it("keeps the purchase wording by default", () => {
     expect(copyFor("purchasePrice").title).toBe("What is the estimated purchase price?");
@@ -89,6 +96,13 @@ describe("resolveStepCopy — self-employed income detail", () => {
     expect(copy.title).toBe("Let's detail your self-employment income");
     expect(copy.title).not.toMatch(/other income/i);
     expect(copy.subtext).toMatch(/1099|business/i);
+  });
+
+  it("labels the first self-employed income number as a rough total before detail", () => {
+    const copy = copyFor("annualIncome", { employmentType: "self_employed" });
+    expect(copy.title).toMatch(/about how much/i);
+    expect(copy.subtext).toMatch(/rough total/i);
+    expect(copy.subtext).toMatch(/business|1099/i);
   });
 
   it("keeps the other-income wording for everyone else", () => {

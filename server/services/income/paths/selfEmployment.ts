@@ -1,6 +1,7 @@
 import type { EmploymentHistory } from "@shared/schema";
 import type { DtiIncomePathResult } from "@shared/incomePaths";
 import { roundCents } from "@shared/incomePaths";
+import { isSelfEmploymentWorksheetComplete } from "@shared/lib/selfEmploymentWorksheet";
 import {
   computeSelfEmploymentQualifyingIncome,
   type SelfEmploymentIncomeResult,
@@ -12,9 +13,9 @@ import {
  * The math is NOT forked here; this only aggregates across a borrower's
  * self-employed jobs and adapts the result to the path envelope.
  *
- * A self-employed job with no worksheet contributes 0 and flags manual review
- * — self-employment income only counts through the worksheet (the doctrine the
- * whole beachhead rests on).
+ * An incomplete self-employed job contributes 0 and returns a borrower-facing
+ * missing item. Human review begins only after every listed business has a
+ * completed worksheet.
  */
 
 const SELF_EMPLOYMENT_CITATIONS = [
@@ -32,12 +33,13 @@ export function computeSelfEmploymentPath(employment: EmploymentHistory[]): Self
   const notes: string[] = [];
   let monthly = 0;
   let requiresManualReview = false;
-  let jobsWithoutWorksheet = 0;
+  const missingItems: string[] = [];
 
   for (const e of seJobs) {
-    if (!e.selfEmploymentIncome) {
-      jobsWithoutWorksheet += 1;
-      requiresManualReview = true;
+    if (!isSelfEmploymentWorksheetComplete(e.selfEmploymentIncome)) {
+      missingItems.push(
+        `Complete the self-employment income worksheet for ${e.employerName?.trim() || "each listed business"}`,
+      );
       continue;
     }
     const se = computeSelfEmploymentQualifyingIncome(e.selfEmploymentIncome);
@@ -47,9 +49,9 @@ export function computeSelfEmploymentPath(employment: EmploymentHistory[]): Self
     notes.push(...se.notes);
   }
 
-  if (jobsWithoutWorksheet > 0) {
+  if (missingItems.length > 0) {
     notes.push(
-      `${jobsWithoutWorksheet} self-employed position(s) have no completed income worksheet — self-employment income is $0 until the Form 1084 worksheet is provided.`,
+      `${missingItems.length} self-employed position(s) have no completed income worksheet and contribute $0 until the Form 1084 details are provided.`,
     );
   }
 
@@ -67,6 +69,7 @@ export function computeSelfEmploymentPath(employment: EmploymentHistory[]): Self
       appliedToDti: true,
       citations: SELF_EMPLOYMENT_CITATIONS,
       requiresManualReview,
+      ...(missingItems.length > 0 ? { missingItems } : {}),
       notes,
     },
   };

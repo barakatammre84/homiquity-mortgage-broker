@@ -91,6 +91,27 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
     expect(stats.dti).toBeCloseTo((baseStats.estMortgage / (180_000 / 12)) * 100, 5);
   });
 
+  it("replaces a self-employed borrower's rough total with detailed entity income", () => {
+    const stats = computePreApprovalAnalysis(
+      withOverrides({
+        annualIncome: "240,000",
+        employmentType: "self_employed",
+        incomeSources: [
+          { type: "self_employed", annualAmount: "140,000", employerName: "Northstar Consulting LLC" },
+          { type: "self_employed", annualAmount: "70,000", employerName: "Lakeview Design LLC" },
+          {
+            type: "rental",
+            annualAmount: "36,000",
+            rentalProperties: [{ address: "233 South Wacker Drive", monthlyRentalIncome: "3,000" }],
+          },
+        ],
+      }),
+      6.375,
+    );
+
+    expect(stats.qualifyingAnnualIncome).toBe(246_000);
+  });
+
   it("includes typed monthly debts in DTI and reports when they are present", () => {
     const noDebts = computePreApprovalAnalysis(base, 6.375);
     expect(noDebts.includesMonthlyDebts).toBe(false);

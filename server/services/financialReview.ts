@@ -719,6 +719,20 @@ export async function getFinancialReview(applicationId: string, actor: Financial
  * approval alone is insufficient after any underlying workpaper input changes.
  */
 export async function getCurrentApprovedCreditMemo(applicationId: string): Promise<CreditMemoView | null> {
+  return (await getCurrentApprovedFinancialVerificationEvidence(applicationId)).memo;
+}
+
+/**
+ * Decision-grade financial evidence by dimension. An approved memo is the
+ * package-level review, while the named workpaper proves that the package
+ * actually reviewed that dimension. This prevents an income-only memo from
+ * silently verifying assets (or vice versa).
+ */
+export async function getCurrentApprovedFinancialVerificationEvidence(applicationId: string): Promise<{
+  memo: CreditMemoView | null;
+  incomeWorkpaperId: string | null;
+  assetWorkpaperId: string | null;
+}> {
   const workspace = await db.transaction(
     tx => assembleWorkspace(tx, applicationId),
     { isolationLevel: "repeatable read" },
@@ -729,8 +743,20 @@ export async function getCurrentApprovedCreditMemo(applicationId: string): Promi
     || !workspace.memo?.isCurrent
     || workspace.memo.blockers.length > 0
     || workspace.memo.review?.action !== "approve"
-  ) return null;
-  return workspace.memo;
+  ) return { memo: null, incomeWorkpaperId: null, assetWorkpaperId: null };
+  const approvedWorkpaper = (kind: FinancialWorkpaperKind) =>
+    workspace.workpapers.find(workpaper =>
+      workpaper.kind === kind
+      && !!workpaper.id
+      && workpaper.isCurrent
+      && workpaper.blockers.length === 0
+      && workpaper.review?.action === "approve",
+    )?.id ?? null;
+  return {
+    memo: workspace.memo,
+    incomeWorkpaperId: approvedWorkpaper("income_summary"),
+    assetWorkpaperId: approvedWorkpaper("asset_reconciliation"),
+  };
 }
 
 export async function prepareFinancialWorkpapers(applicationId: string, actor: FinancialReviewActor) {

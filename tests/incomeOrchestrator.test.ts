@@ -38,6 +38,8 @@ function other(monthlyAmount: number | string, incomeSource = "rental"): OtherIn
 const scheduleCWorksheet = (net: number, prior: number): SelfEmploymentWorksheet =>
   ({
     businessStructure: "sole_proprietorship",
+    ownershipPercent: 100,
+    yearsSelfEmployed: 5,
     scheduleC: {
       currentYear: { year: 2025, netProfitOrLoss: net, depreciation: 3000, depletion: 0, amortizationOrCasualtyLoss: 0, businessUseOfHome: 1200, mealsExclusion: 0, nonRecurringIncome: 0 },
       priorYear: { year: 2024, netProfitOrLoss: prior, depreciation: 2800, depletion: 0, amortizationOrCasualtyLoss: 0, businessUseOfHome: 1000, mealsExclusion: 0, nonRecurringIncome: 0 },
@@ -71,6 +73,17 @@ describe("agency wage path", () => {
     expect(r.usedLineItems).toBe(false);
   });
 
+  it("never stacks the rough annual-income fallback onto self-employment", () => {
+    const r = computeAgencyWageIncome({
+      employment: [emp({ isSelfEmployed: true, selfEmploymentIncome: scheduleCWorksheet(60000, 54000) })],
+      otherIncome: [],
+      fallbackAnnualIncome: 240000,
+    });
+    expect(r.path.monthlyQualifyingIncome).toBe(0);
+    expect(r.path.status).toBe("not_indicated");
+    expect(r.path.notes.join(" ")).toMatch(/excluded.*self-employment/i);
+  });
+
   it("preserves a net-loss itemized total (no > 0 guard deleting losses)", () => {
     const r = computeAgencyWageIncome({ employment: [emp({ baseIncome: -1500 })], otherIncome: [] });
     expect(r.baseMonthlyIncome).toBe(-1500);
@@ -94,11 +107,21 @@ describe("self-employment path", () => {
     expect(r.path.citations[0].section).toMatch(/1084/);
   });
 
-  it("contributes $0 and flags review for an SE job with no worksheet", () => {
+  it("contributes $0 and returns a missing item for an SE job with no worksheet", () => {
     const r = computeSelfEmploymentPath([emp({ isSelfEmployed: true })]);
     expect(r.path.monthlyQualifyingIncome).toBe(0);
-    expect(r.path.requiresManualReview).toBe(true);
+    expect(r.path.requiresManualReview).toBe(false);
+    expect(r.path.missingItems).toEqual([expect.stringMatching(/complete.*worksheet/i)]);
     expect(r.path.notes.some((n) => /no completed income worksheet/i.test(n))).toBe(true);
+  });
+
+  it("does not count one business while another listed business has no completed worksheet", () => {
+    const r = computeSelfEmploymentPath([
+      emp({ employerName: "Complete LLC", isSelfEmployed: true, selfEmploymentIncome: scheduleCWorksheet(60000, 54000) }),
+      emp({ employerName: "Missing LLC", isSelfEmployed: true }),
+    ]);
+    expect(r.path.monthlyQualifyingIncome).toBeGreaterThan(0);
+    expect(r.path.missingItems).toEqual([expect.stringMatching(/Missing LLC/)]);
   });
 });
 
@@ -214,6 +237,18 @@ describe("orchestrator core", () => {
   it("reports application_summary basis only on the annual-income fallback", () => {
     expect(computeIncomePaths({ employment: [], otherIncome: [], rentalProperties: [], fallbackAnnualIncome: 60000 }).incomeBasis).toBe("application_summary");
     expect(computeIncomePaths(input).incomeBasis).toBe("urla_line_items");
+  });
+
+  it("uses only Form 1084 income when a self-employed intake also has a rough annual total", () => {
+    const r = computeIncomePaths({
+      employment: [emp({ isSelfEmployed: true, selfEmploymentIncome: scheduleCWorksheet(60000, 54000) })],
+      otherIncome: [],
+      rentalProperties: [],
+      fallbackAnnualIncome: 240000,
+    });
+    expect(r.primaryBreakdown.agencyBase).toBe(0);
+    expect(r.primaryMonthlyQualifyingIncome).toBe(r.primaryBreakdown.selfEmployment);
+    expect(r.incomeBasis).toBe("urla_line_items");
   });
 });
 

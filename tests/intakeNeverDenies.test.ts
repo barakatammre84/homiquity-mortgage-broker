@@ -65,6 +65,9 @@ vi.mock("../server/storage", () => ({
       return { ...application, ...patch };
     },
     createNotification: async () => ({}),
+    createDealActivity: async () => ({}),
+    deleteLoanOptionsByApplication: async () => {},
+    createLoanOption: async () => ({}),
     createActivity: async () => ({}),
     getPropertyById: async () => null,
     getPropertiesByUser: async () => [],
@@ -89,7 +92,11 @@ vi.mock("../server/services/outcomeTracker", () => ({
   recordStageTimestamp: async () => {},
 }));
 
-import { analyzeIntake, finalizeIntake } from "../server/services/loanAnalysis";
+import {
+  analyzeIntake,
+  finalizeIntake,
+  refreshEarlyStageIntakeAnalysis,
+} from "../server/services/loanAnalysis";
 
 function baseApplication(over: Record<string, unknown> = {}) {
   return {
@@ -273,5 +280,32 @@ describe("finalizeIntake guards (F-015: this function had no executing test)", (
     decisionResult = ENGINE_OUTCOMES[0].decision;
     await finalizeIntake(APP_ID);
     expect(updates[0]?.status).toBe("analyzing");
+  });
+});
+
+describe("URLA preliminary-analysis refresh", () => {
+  it("promotes an under-review file and persists the same current metrics", async () => {
+    application = baseApplication({ status: "under_review" });
+    decisionResult = ENGINE_OUTCOMES[0].decision;
+
+    const result = await refreshEarlyStageIntakeAnalysis(APP_ID, "urla_updated");
+
+    expect(result?.outcome).toBe("pre_approved");
+    expect(updates).toContainEqual(expect.objectContaining({
+      status: "pre_approved",
+      dtiRatio: "30.00",
+      ltvRatio: "80.00",
+    }));
+  });
+
+  it("never silently retracts an issued pre-approval when new facts require review", async () => {
+    application = baseApplication({ status: "pre_approved", preApprovalAmount: "500000" });
+    decisionResult = ENGINE_OUTCOMES[2].decision;
+
+    const result = await refreshEarlyStageIntakeAnalysis(APP_ID, "urla_updated");
+
+    expect(result?.outcome).toBe("under_review");
+    expect(updates.some((patch) => patch.status === "under_review")).toBe(false);
+    expect(updates.some((patch) => patch.preApprovalAmount === "0")).toBe(false);
   });
 });

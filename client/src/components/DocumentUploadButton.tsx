@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, applicationResourceKeys, coachContextKeys, dashboardKeys } from "@/lib/queryClient";
+import { apiRequest, applicationResourceKeys, coachContextKeys, dashboardKeys, taskKeys } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { friendlyApiError } from "@/lib/errorMessage";
@@ -74,6 +74,8 @@ export function DocumentUploadButton({
       // refreshed correctly.
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.all() });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       queryClient.invalidateQueries({ queryKey: ["/api/coach/insights"] });
       // The assistant's own checklist. NOT covered by the insights key above:
       // partialMatchKey is element-wise, so ["/api/coach/insights"] never

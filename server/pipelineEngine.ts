@@ -44,6 +44,7 @@ interface BorrowerProfile {
   ltvRatio: number;
   loanPurpose: string | null;
   propertyType: string | null;
+  propertyAddress: string | null;
   isVeteran: boolean;
   isFirstTimeBuyer: boolean;
   isSelfEmployed: boolean;
@@ -59,18 +60,18 @@ const BASE_DOCUMENT_REQUIREMENTS: DocumentRequirement[] = [
     conditionCategory: "compliance",
     conditionTitle: "Valid Government ID Required",
   },
-  {
-    documentType: "pay_stub",
-    yearsRequired: [currentYear],
-    description: "Most recent 30 days of pay stubs",
-    priority: "prior_to_approval",
-    conditionCategory: "income",
-    conditionTitle: "Recent Pay Stubs Required",
-  },
 ];
 
 const EMPLOYMENT_RULES: Record<string, DocumentRequirement[]> = {
   employed: [
+    {
+      documentType: "pay_stub",
+      yearsRequired: [currentYear],
+      description: "Most recent 30 days of pay stubs",
+      priority: "prior_to_approval",
+      conditionCategory: "income",
+      conditionTitle: "Recent Pay Stubs Required",
+    },
     {
       documentType: "w2",
       yearsRequired: [currentYear - 1, currentYear - 2],
@@ -247,7 +248,16 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
     }
   }
 
-  requirements.push(...PROPERTY_REQUIREMENTS);
+  // Do not turn a shopping-stage pre-approval into a nine-item closing list.
+  // A purchase contract cannot exist until a home is identified, and it is
+  // never applicable to a refinance. Insurance follows an identified subject
+  // property for either purpose.
+  if (profile.propertyAddress?.trim()) {
+    if (profile.loanPurpose === "purchase") {
+      requirements.push(PROPERTY_REQUIREMENTS[0]);
+    }
+    requirements.push(PROPERTY_REQUIREMENTS[1]);
+  }
 
   if (profile.creditScore) {
     for (const creditRule of CREDIT_BASED_REQUIREMENTS) {
@@ -388,6 +398,7 @@ export function getBorrowerProfileFromApplication(app: LoanApplication): Borrowe
     ltvRatio,
     loanPurpose: app.loanPurpose,
     propertyType: app.propertyType,
+    propertyAddress: app.propertyAddress,
     isVeteran: app.isVeteran || false,
     isFirstTimeBuyer: app.isFirstTimeBuyer || false,
     isSelfEmployed: app.employmentType === "self_employed",
@@ -423,6 +434,143 @@ export async function initializeLoanPipeline(
   );
 
   return { milestones: milestone, conditions, tasks };
+}
+
+/**
+ * Keep the borrower task list in lockstep with the condition checklist.
+ *
+ * A borrower can upload from Documents, To-Do, a task detail, or Homi. Only
+ * the To-Do path used to make a second request that linked the document to its
+ * task, so every other entry point left an already-satisfied upload task OPEN.
+ * Match centrally by the same alias-aware document vocabulary as conditions.
+ */
+export async function advanceMatchingDocumentTasks(args: {
+  applicationId: string;
+  documentId: string;
+  documentType: string;
+}): Promise<{ advancedTaskIds: string[] }> {
+  const { applicationId, documentId, documentType } = args;
+  const tasks = await storage.getTasksByApplication(applicationId);
+  const matches = tasks.filter(
+    (task) =>
+      task.taskType === "document_request" &&
+      task.ownerRole === "BORROWER" &&
+      task.status !== "COMPLETED" &&
+      task.status !== "EXPIRED" &&
+      !!task.documentCategory &&
+      documentTypesMatch(task.documentCategory, documentType),
+  );
+
+  for (const task of matches) {
+    const existingDocuments = await storage.getTaskDocuments(task.id);
+    if (!existingDocuments.some((entry) => entry.documentId === documentId)) {
+      await storage.createTaskDocument({ taskId: task.id, documentId });
+    }
+    await storage.updateTask(task.id, {
+      status: "IN_PROGRESS",
+      verificationStatus: "pending",
+    });
+  }
+
+  return { advancedTaskIds: matches.map((task) => task.id) };
+}
+
+/**
+ * Remove superseded document versions from the processor's active review
+ * queue. A replacement receives its own DOC_REVIEW task, so leaving the prior
+ * version OPEN asks staff to review evidence the file no longer considers
+ * current.
+ */
+export async function expireSupersededDocumentReviewTasks(args: {
+  applicationId: string;
+  replacedDocumentId: string;
+  replacedByUserId: string;
+}): Promise<{ expiredTaskIds: string[] }> {
+  const tasks = await storage.getTasksByApplication(args.applicationId);
+  const supersededReviewTasks = tasks.filter(
+    (task) =>
+      task.taskTypeCode === "DOC_REVIEW" &&
+      !["COMPLETED", "EXPIRED"].includes(task.status) &&
+      (task.triggerMetadata as { documentId?: string } | null)?.documentId === args.replacedDocumentId,
+  );
+
+  if (supersededReviewTasks.length === 0) return { expiredTaskIds: [] };
+
+  const { taskEngine } = await import("./services/taskEngine");
+  await Promise.all(
+    supersededReviewTasks.map((task) =>
+      taskEngine.updateTaskStatus(
+        task.id,
+        "EXPIRED",
+        args.replacedByUserId,
+        "Superseded by a newer document version",
+      ),
+    ),
+  );
+  return { expiredTaskIds: supersededReviewTasks.map((task) => task.id) };
+}
+
+/**
+ * Apply a human document verdict to every linked borrower upload task. The
+ * central Documents workbench and the task-detail workbench review the same
+ * evidence, so either entry point must produce the same borrower state.
+ */
+export async function reconcileDocumentReviewTasks(args: {
+  applicationId: string;
+  documentId: string;
+  status: "verified" | "rejected";
+  reason?: string;
+  reviewedBy: string;
+}): Promise<{ reconciledTaskIds: string[] }> {
+  const tasks = await storage.getTasksByApplication(args.applicationId);
+  const borrowerDocumentTasks = tasks.filter(
+    (task) => task.taskType === "document_request" && task.ownerRole === "BORROWER",
+  );
+  const reconciledTaskIds: string[] = [];
+
+  for (const task of borrowerDocumentTasks) {
+    const links = await storage.getTaskDocuments(task.id);
+    const reviewedLink = links.find((link) => link.documentId === args.documentId);
+    if (!reviewedLink) continue;
+
+    const verified = args.status === "verified";
+    await storage.updateTaskDocument(reviewedLink.id, {
+      isVerified: verified,
+      verificationNotes: args.reason ?? (verified ? "Document accepted" : "Document returned for correction"),
+    });
+
+    const anotherAcceptedDocument = links.some(
+      (link) => link.documentId !== args.documentId && link.isVerified === true,
+    );
+    if (verified || anotherAcceptedDocument) {
+      await storage.updateTask(task.id, {
+        status: "COMPLETED",
+        completedAt: task.completedAt ?? new Date(),
+        verificationStatus: "verified",
+        verifiedByUserId: args.reviewedBy,
+        verifiedAt: new Date(),
+        verificationNotes: verified ? "Document accepted" : "Another accepted document still satisfies this request",
+        documentInstructions: null,
+      });
+    } else {
+      const borrowerCorrection = args.reason ?? "Document returned for correction";
+      await storage.updateTask(task.id, {
+        status: "OPEN",
+        completedAt: null,
+        verificationStatus: "rejected",
+        verifiedByUserId: args.reviewedBy,
+        verifiedAt: new Date(),
+        verificationNotes: borrowerCorrection,
+        // The document-review reason is explicitly borrower-visible on the
+        // document row. Mirror it into the safe task field so To-Do gives the
+        // same exact correction instead of a generic "try again" message.
+        documentInstructions: borrowerCorrection,
+      });
+    }
+    reconciledTaskIds.push(task.id);
+  }
+
+  return { reconciledTaskIds };
 }
 
 /**
