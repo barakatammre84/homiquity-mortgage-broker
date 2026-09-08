@@ -1,3 +1,5 @@
+import { COMPANY_NMLS_ID } from "./companyLicense";
+
 /**
  * Public company identity — the single source for every customer-facing
  * mention of who Homiquity is. Shared because both the client (footer, LPs)
@@ -13,7 +15,7 @@ export const COMPANY_IDENTITY = {
   legalName: "Homiquity Mortgage Corporation",
   shortName: "Homiquity Mortgage Corp.",
   /** NMLS unique identifier — issued at F1 licensing (SAFE Act 12 CFR 1008). */
-  nmlsId: "427468",
+  nmlsId: COMPANY_NMLS_ID,
   contactEmail: "support@homiquity.com",
   contactPhone: "(224) 400-0531",
   /**
@@ -83,7 +85,7 @@ export function companyAddressLines(separator: "\n" | ", " = "\n"): string {
  * licensing is pending. Callers must render NOTHING when this is null — an
  * invented or placeholder NMLS ID on a public surface would itself be a
  * violation, so the display "lights up" only when F1 assigns the real ID
- * (one edit: the nmlsId constant above).
+ * (one edit: COMPANY_NMLS_ID in companyLicense.ts).
  */
 export function companyNmlsDisplay(): string | null {
   const id = COMPANY_IDENTITY.nmlsId as string;

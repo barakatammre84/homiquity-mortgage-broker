@@ -26,7 +26,6 @@ import {
   ArrowRight,
   ChevronLeft,
   DollarSign,
-  Home,
   Loader2,
   Check,
   AlertCircle,
@@ -36,7 +35,7 @@ import {
 
 import { FunnelProvider, useFunnel } from "@/funnel/FunnelContext";
 import { PRE_APPROVAL_DEFAULTS, routingSignature } from "@/funnel/preApprovalMachine";
-import { loanPurposeForEntryType, occupancyForEntryType } from "./preApproval/entryType";
+import { entryTypeFromSearchParams, loanPurposeForEntryType, occupancyForEntryType } from "./preApproval/entryType";
 import { useFunnelAutosave } from "@/funnel/useFunnelAutosave";
 import { VerificationPulse } from "@/funnel/VerificationPulse";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -53,7 +52,8 @@ import { RestoreDraftBanner, AuthGateOverlay, AffordabilityTeaserOverlay, Funnel
 import { calculateAffordabilityEstimate, type AffordabilityEstimateResults } from "@/lib/affordabilityEstimate";
 import { buildTeaserInputs, parseTargetPrice } from "./preApproval/affordabilityTeaser";
 import { FUNNEL_SOFT_PULL_CONSENT_TEXT } from "@shared/creditConsentCopy";
-import { Logo } from "@/components/brand/Logo";
+import { EditorialNavigation } from "@/components/EditorialNavigation";
+import { SkipLink } from "@/components/SkipLink";
 
 export default function PreApproval() {
   return (
@@ -98,7 +98,7 @@ function PreApprovalFunnel() {
   // changed ?type= left the page reading the old query string — and made the
   // component untestable without stubbing window.
   const [urlParams] = useSearchParams();
-  const urlType = urlParams.get("type");
+  const urlType = entryTypeFromSearchParams(urlParams);
   const urlPrice = urlParams.get("price");
   const urlState = urlParams.get("state");
   const urlPropertyType = urlParams.get("propertyType");
@@ -733,51 +733,43 @@ function PreApprovalFunnel() {
   ) : null;
 
   if (currentQ.type === "intro") {
+    const introLabel = urlType === "refinance"
+      ? "Refinance"
+      : urlType === "heloc" || urlType === "cashout"
+        ? "Home equity"
+        : "Purchase mortgage";
+
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-background text-center">
+      <div className="min-h-screen bg-background">
+        <SEOHead title="Start Your Mortgage Application" description="Start your Homiquity mortgage application and get a clear next step in about three minutes." />
+        <SkipLink />
+        <EditorialNavigation />
         {restoreBanner}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }} 
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl"
-        >
-          <div className="mb-10 flex justify-center">
-            <Logo size="lg" data-testid="logo-apply-intro" />
-          </div>
-          <div className="mb-8 flex justify-center">
-            <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center">
-              <Home className="h-10 w-10 text-primary" />
-            </div>
-          </div>
-          <h1 
-            className="text-4xl sm:text-5xl font-bold tracking-tight text-foreground mb-6"
-            data-testid="text-intro-title"
+        <main id="main" tabIndex={-1} className="flex min-h-[calc(100vh-6rem)] items-center justify-center px-5 py-16 text-center focus:outline-none sm:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl"
           >
-            {currentQ.title}
-          </h1>
-          <p className="text-xl text-muted-foreground mb-12">{currentQ.subtitle}</p>
-          <Button 
-            onClick={handleNext} 
-            size="lg" 
-            className="text-lg px-8 py-6 h-auto rounded-full"
-            data-testid="button-start-preapproval"
-          >
-            {currentQ.buttonText} <ArrowRight className="ml-2" />
-          </Button>
-          <p className="mt-8 text-sm text-muted-foreground">
-            Have a saved application?{" "}
-            <a href="/login" className="text-primary hover:underline">
-              Sign in to resume
-            </a>
-          </p>
-          {urlPropertyId && urlSource === "property-detail" && (
-            <Button asChild variant="ghost" size="sm" className="touch-target mt-4 gap-1.5 text-muted-foreground" data-testid="button-back-to-property">
-              <Link href={`/properties/${urlPropertyId}`}>
-                <ChevronLeft className="h-3.5 w-3.5" /> Back to property listing
-              </Link>
+            <p className="text-xs font-semibold uppercase tracking-widest text-flare-ink">{introLabel}</p>
+            <h1 className="mt-5 font-serif text-5xl font-bold leading-tight tracking-tighter text-foreground sm:text-6xl" data-testid="text-intro-title">
+              {currentQ.title}
+            </h1>
+            <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground sm:text-xl">{currentQ.subtitle}</p>
+            <Button onClick={handleNext} size="lg" className="mt-10 h-auto min-h-14 rounded-none bg-flare-ink px-8 py-4 text-base font-semibold text-primary-foreground hover:bg-flare-ink/90" data-testid="button-start-preapproval">
+              {currentQ.buttonText} <ArrowRight className="ml-2" />
             </Button>
-          )}
-        </motion.div>
+            <p className="mt-7 text-sm text-muted-foreground">
+              Have a saved application?{" "}
+              <a href="/login" className="font-medium text-foreground underline underline-offset-4">Sign in to resume</a>
+            </p>
+            {urlPropertyId && urlSource === "property-detail" && (
+              <Button asChild variant="ghost" size="sm" className="touch-target mt-4 gap-1.5 text-muted-foreground" data-testid="button-back-to-property">
+                <Link href={`/properties/${urlPropertyId}`}><ChevronLeft className="h-3.5 w-3.5" /> Back to property listing</Link>
+              </Button>
+            )}
+          </motion.div>
+        </main>
       </div>
     );
   }
