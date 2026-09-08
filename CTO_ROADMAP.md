@@ -4,7 +4,9 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Current production:** `1e7a81a0bbc62f39a240df6f5da7ee9314a41261`
+**Audited production baseline:** `958d7cf2cc15902a19f146ae23b80a8900d2cde7` on 2026-09-08.
+Read the current build from `/api/health`; this baseline records the review, not a permanent
+deployment pointer.
 
 ## The goal
 
@@ -78,19 +80,29 @@ underwriter and closer also remain unproven.
 **Outcome:** Homiquity can accept a controlled real file without losing evidence, corrupting a
 regulated record or presenting simulated output as real.
 
-- Prove production object storage across upload, restart, download, replacement and cross-account
-  access denial.
-- Run the production acceptance checklist against the exact deployed commit and data-backed routes.
-- Reverify and close the launch-critical integrity seams in current code: consent scope and
-  vocabulary; primary/co-applicant separation through HMDA and MISMO; adverse-action denial
-  notices; public pricing math; and ownership of the TRID clock.
-- Show every provider leg as live, disabled or simulated in one operational view. No hidden
-  fallback may promote a simulated result.
-- Capture the roadmap metrics below from the public application through lender readiness.
+Run the full [Phase 0 technical readiness gate](knowledge-base/runbooks/PHASE_0_TECH_READINESS.md):
 
-**Exit gate:** the production acceptance test is signed, the complete document lifecycle passes,
-and no verified critical defect can misstate an applicant, consent, decision, disclosure, price or
-delivered lender file.
+1. **0A — production truth:** exact build, database, configuration, dependencies, providers and
+   release controls are visible and current.
+2. **0B — durability and recovery:** document lifecycle, access matrix, retention and an isolated
+   database point-in-time restore are proven.
+3. **0C — security and privacy:** independent review, auth, role/resource access, encryption, PII
+   egress, CSP, MFA and control-plane access pass.
+4. **0D — regulated data integrity:** one complex primary/co-applicant case re-proves consent,
+   application clock, HMDA/MISMO, decisions/notices, pricing, TRID, evidence lineage and package
+   reproducibility.
+5. **0E — provider and background truth:** every external leg and scheduled process is visibly
+   live, simulated, disabled or failed; retry, idempotency and manual-evidence paths are proven.
+6. **0F — reliability and capacity:** alerts, scheduled jobs, service targets, pilot load, database
+   safeguards, graceful restart and incident response are measured.
+7. **0G — exact-build acceptance:** repeat the complete synthetic journey and failure set in
+   production, clean up, index the evidence and obtain technical, security and licensed/compliance
+   sign-off.
+
+**Exit gate:** every 0A–0G row passes on one current production architecture; database restore,
+document lifecycle, cross-account denial, rollback and alerting have been exercised; no verified
+critical/high security finding or launch-critical data-integrity defect remains; and no simulated or
+unknown provider result can satisfy an approval, disclosure, lock or lender-readiness gate.
 
 ## Phase 1 — establish one lender and one operating team
 
