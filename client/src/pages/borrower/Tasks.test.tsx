@@ -82,7 +82,7 @@ describe("Tasks — progress honesty", () => {
       task({ id: "t-3", status: "IN_PROGRESS" }),
     ]);
 
-    expect(screen.getByText("Tasks completed on this application")).toBeTruthy();
+    expect(screen.getByText("Assigned tasks completed")).toBeTruthy();
     expect(screen.getByTestId("tasks-progress-count").textContent).toBe("1 of 3");
   });
 

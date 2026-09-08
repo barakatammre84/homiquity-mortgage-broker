@@ -303,11 +303,14 @@ export function registerDashboardRoutes(
       // frequently-polled endpoint read-only after the one compatibility pass.
       const borrowerOwnsApplication = application.userId === user.id;
       const hasRentalIncome = getBorrowerProfileFromApplication(application).hasRentalIncome;
-      // Intake persists its decision before it initializes tasks. Give that
-      // normal path one minute to finish so this compatibility read cannot
-      // race the same read-then-create generators. Older files still repair on
-      // their next poll, while a failed fresh intake is handled by its recovery
-      // sweep and becomes eligible here after the grace period.
+      // Fresh intake deliberately remains in `analyzing` until its conditions
+      // and tasks exist. Never start the compatibility repair while that owner
+      // is still working: the generators are idempotent across completed runs,
+      // but two overlapping read-then-create runs can both observe an empty
+      // checklist and create the same rows. Older settled files still repair on
+      // their next poll; failed intake remains `submitted` for the recovery
+      // sweep instead of being re-driven by this frequently-polled GET.
+      const intakeIsSettled = !["draft", "submitted", "analyzing"].includes(application.status);
       const applicationAgeMs = application.createdAt
         ? Date.now() - new Date(application.createdAt).getTime()
         : 0;
@@ -334,6 +337,7 @@ export function registerDashboardRoutes(
       if (
         borrowerOwnsApplication &&
         hasRentalIncome &&
+        intakeIsSettled &&
         isPastIntakeInitializationWindow &&
         !isTerminalLoanAppStatus(application.status) &&
         (missingRentalTask || staleOpenTaxTask || missingRentalCondition || staleOpenTaxCondition)

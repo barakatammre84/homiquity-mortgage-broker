@@ -57,6 +57,8 @@ describe("IncomeSourcesStep", () => {
     expect(onEntries).toHaveBeenLastCalledWith([
       expect.objectContaining({ type: "investment", annualAmount: "" }),
     ]);
+    expect(screen.getByTestId("button-toggle-income-source-chooser").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("toggle-income-investment").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("derives rental annualAmount from Σ monthly rents × 12 — never typed directly", async () => {
@@ -172,18 +174,34 @@ describe("IncomeSourcesStep — restored entries render with no extra wiring", (
     } as IncomeSourceEntry,
   ];
 
-  it("shows the selected types, their details, and the rental rows", () => {
+  it("shows restored sources one editable card at a time", async () => {
+    const user = userEvent.setup();
     render(<Harness initialEntries={RESTORED} onEntries={vi.fn()} />);
 
     expect(screen.getByTestId("card-income-investment")).toBeTruthy();
-    expect(screen.getByTestId("card-income-rental")).toBeTruthy();
+    expect(screen.queryByTestId("card-income-rental")).toBeNull();
     expect(
       (screen.getByTestId("input-income-amount-investment") as HTMLInputElement).value,
     ).toBe("12,000");
+    await user.click(screen.getByTestId("button-edit-income-source-1"));
+    expect(screen.queryByTestId("card-income-investment")).toBeNull();
+    expect(screen.getByTestId("card-income-rental")).toBeTruthy();
     expect(
       (screen.getByTestId("input-rental-income-0") as HTMLInputElement).value,
     ).toBe("2,000");
     expect((screen.getByTestId("input-rental-debt-0") as HTMLInputElement).value).toBe("800");
+  });
+
+  it("connects every visible complex-income label to its control", async () => {
+    const user = userEvent.setup();
+    render(<Harness employmentType="self_employed" onEntries={vi.fn()} />);
+    await user.click(screen.getByTestId("toggle-income-self_employed"));
+
+    expect(screen.getByLabelText("Annual Amount")).toBeTruthy();
+    expect(screen.getByLabelText("Business or payer name")).toBeTruthy();
+    expect(screen.getByLabelText("Years receiving this income")).toBeTruthy();
+    expect(screen.getByLabelText("Business or income type")).toBeTruthy();
+    expect(screen.getByLabelText("Your ownership")).toBeTruthy();
   });
 
   it("reports the rental rows on the very first toggle, not only after typing", async () => {
