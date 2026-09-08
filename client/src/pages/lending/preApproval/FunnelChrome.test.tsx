@@ -95,6 +95,7 @@ describe("AffordabilityTeaserOverlay", () => {
       />,
     );
     expect(screen.getByTestId("text-teaser-target-comparison").textContent).toContain("above this estimate");
+    expect(screen.getByTestId("text-teaser-title").textContent).toBe("Here's your estimated range");
   });
 
   it("omits the target-price comparison when no target price is known", () => {
@@ -116,6 +117,8 @@ describe("RestoreDraftBanner", () => {
     const onRestore = vi.fn();
     const onDismiss = vi.fn();
     render(<RestoreDraftBanner onRestore={onRestore} onDismiss={onDismiss} />);
+    expect(screen.getByTestId("banner-restore-draft").textContent).toContain("saved application");
+    expect(screen.getByTestId("banner-restore-draft").textContent).not.toContain("unsaved");
     await user.click(screen.getByTestId("button-restore-draft"));
     expect(onRestore).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTestId("button-dismiss-restore"));
@@ -144,6 +147,6 @@ describe("FunnelProgressHeader", () => {
     );
 
     expect(screen.getByTestId("logo-apply")).toBeTruthy();
-    expect(screen.getByText("Step 3 of 12")).toBeTruthy();
+    expect(screen.getByTestId("text-step-counter").textContent).toContain("Application");
   });
 });

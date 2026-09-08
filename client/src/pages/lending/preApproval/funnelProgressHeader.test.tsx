@@ -11,12 +11,10 @@ import {
 import type { PreApprovalFormData } from "@shared/schema";
 
 // The funnel's orientation chrome. What a borrower must be able to read off the
-// top of the page at any moment: which numbered step they are on, how much of
-// the whole is behind them AS A PERCENTAGE, which named chapter they are
-// inside, and roughly how long is left. Before this component the page showed a
-// 1px hairline and a muted "Step 3 of 13" — no percentage anywhere, and a time
-// estimate hardcoded to step index that was wrong for any route but the base
-// one (a veteran answers 15 steps, a self-employed veteran 16).
+// top of the page at any moment: which named chapter they are inside and
+// roughly how long is left. Route length is adaptive, so no number, denominator,
+// or percentage is shown that could repeat or move backward after an answer
+// injects or removes a conditional question.
 
 function answers(overrides: Partial<PreApprovalFormData> = {}): PreApprovalFormData {
   return { ...PRE_APPROVAL_DEFAULTS, ...overrides };
@@ -37,14 +35,10 @@ function renderAt(stepId: FunnelStepId, overrides: Partial<PreApprovalFormData> 
 }
 
 describe("FunnelProgressHeader", () => {
-  it("shows the step number and the percentage complete", () => {
-    const { progress } = renderAt("annualIncome");
-    expect(screen.getByTestId("text-step-counter").textContent).toContain(
-      `Step ${progress.index} of ${progress.total}`,
-    );
-    expect(screen.getByTestId("text-progress-percent").textContent).toBe(
-      `${Math.round(progress.percent)}% complete`,
-    );
+  it("uses a stable application label instead of a changing route number", () => {
+    renderAt("annualIncome");
+    expect(screen.getByTestId("text-step-counter").textContent).toBe("Application");
+    expect(screen.queryByTestId("text-progress-percent")).toBeNull();
   });
 
   it("names all four chapters and marks the one the borrower is in", () => {
@@ -58,18 +52,18 @@ describe("FunnelProgressHeader", () => {
     expect(screen.getByTestId("icon-section-done-goal")).toBeTruthy();
     expect(screen.queryByTestId("icon-section-done-property")).toBeNull();
     // The chapter is named once, in the rail; row 3 gives the position inside it.
-    expect(screen.getByTestId("text-section-position").textContent).toBe("1 of 3 in this section");
+    expect(screen.getByTestId("text-section-position").textContent).toBe("The home");
   });
 
   it("reports position within the current chapter", () => {
     renderAt("propertyState");
     // Chapter 2 on the base route is purchasePrice → downPayment → propertyState.
-    expect(screen.getByTestId("text-section-position").textContent).toBe("3 of 3 in this section");
+    expect(screen.getByTestId("text-section-position").textContent).toBe("The home");
   });
 
   it("counts the VA residual-income steps into the chapter a veteran is in", () => {
     renderAt("propertyState", { isVeteran: true });
-    expect(screen.getByTestId("text-section-position").textContent).toBe("3 of 5 in this section");
+    expect(screen.getByTestId("text-section-position").textContent).toBe("The home");
   });
 
   it("derives the time estimate from the steps actually left", () => {
@@ -80,14 +74,14 @@ describe("FunnelProgressHeader", () => {
   it("says the last step is the last step", () => {
     renderAt("final");
     expect(screen.getByTestId("text-time-remaining").textContent).toBe("Last step");
-    expect(screen.getByTestId("text-progress-percent").textContent).toBe("100% complete");
+    expect(screen.queryByTestId("text-progress-percent")).toBeNull();
   });
 
-  it("exposes the overall figure to assistive tech", () => {
-    const { progress } = renderAt("employmentType");
-    const bar = screen.getByRole("progressbar");
-    expect(bar.getAttribute("aria-valuenow")).toBe(String(Math.round(progress.percent)));
-    expect(bar.getAttribute("aria-valuetext")).toContain(`Step ${progress.index} of ${progress.total}`);
+  it("exposes the current named section to assistive tech", () => {
+    renderAt("employmentType");
+    const rail = screen.getByRole("list", { name: /application progress/i });
+    expect(rail.getAttribute("aria-label")).toContain("Your finances");
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("goes back on request", () => {

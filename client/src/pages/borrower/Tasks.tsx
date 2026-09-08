@@ -321,7 +321,7 @@ export default function Tasks() {
                   <Card className="mb-8">
                     <CardContent className="p-6">
                       <TaskProgress
-                        label="Tasks completed on this application"
+                        label="Assigned tasks completed"
                         completed={completedCount}
                         total={totalTasks}
                         data-testid="tasks-progress"

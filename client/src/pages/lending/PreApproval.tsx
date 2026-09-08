@@ -232,7 +232,7 @@ function PreApprovalFunnel() {
 
       toast({
         title: "Application submitted",
-        description: "Your numbers were run against underwriting guidelines — no AI, just math.",
+        description: "We received what you shared. Upload the requested documents so your loan team can verify it.",
       });
       // A borrower may have an older workable file selected in this tab. Name
       // the new file in the URL so the shell, dashboard, tasks, and documents
@@ -494,6 +494,7 @@ function PreApprovalFunnel() {
               <Input
                 key={`currency-${fieldName}`}
                 ref={focusStepInput}
+                aria-label={stepCopy.title}
                 data-testid={`input-${currentQ.field}`}
                 value={displayValue}
                 onChange={(e) => {
@@ -527,6 +528,7 @@ function PreApprovalFunnel() {
               <Input
                 key={`number-${fieldName}`}
                 ref={focusStepInput}
+                aria-label={stepCopy.title}
                 data-testid={`input-${currentQ.field}`}
                 type="text"
                 inputMode="numeric"
@@ -552,7 +554,7 @@ function PreApprovalFunnel() {
 
       case "choice":
         return (
-          <div className="grid gap-3 w-full max-w-lg mx-auto">
+          <div className="grid gap-3 w-full max-w-lg mx-auto" role="radiogroup" aria-labelledby="apply-question-title">
             {currentQ.options?.map((option) => {
               const OptionIcon = option.icon;
               const fieldVal = form.watch(currentQ.field as keyof PreApprovalFormData);
@@ -563,6 +565,8 @@ function PreApprovalFunnel() {
                 <button
                   key={option.value}
                   type="button"
+                  role="radio"
+                  aria-checked={isSelected}
                   data-testid={`option-${currentQ.field}-${option.value}`}
                   onClick={() => {
                     if (currentQ.id === "hasAdditionalIncome") {
@@ -837,7 +841,8 @@ function PreApprovalFunnel() {
             className="w-full text-center"
           >
             {/* Question Title */}
-            <h2 
+            <h2
+              id="apply-question-title"
               className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground mb-4 leading-tight"
               data-testid="text-question"
             >

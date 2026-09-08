@@ -44,8 +44,8 @@ export function RestoreDraftBanner({
           <Clock className="h-4 w-4 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium">You have unsaved progress</p>
-          <p className="text-xs text-muted-foreground">Pick up where you left off?</p>
+          <p className="text-sm font-medium">You have a saved application</p>
+          <p className="text-xs text-muted-foreground">Continue where you left off?</p>
         </div>
         <div className="flex gap-2 shrink-0">
           <Button size="sm" className="touch-target" variant="ghost" onClick={onDismiss} data-testid="button-dismiss-restore">
@@ -96,7 +96,7 @@ export function AffordabilityTeaserOverlay({
           <TrendingUp className="h-8 w-8 text-primary" />
         </div>
         <h3 className="text-2xl font-bold text-foreground mb-1" data-testid="text-teaser-title">
-          You're likely in range
+          {withinRange ? "Your target looks in range" : "Here's your estimated range"}
         </h3>
         <p className="text-sm text-muted-foreground mb-4">Based on what you shared</p>
         <p className="text-3xl font-bold text-primary mb-1" data-testid="text-teaser-range">
@@ -292,19 +292,18 @@ export function FunnelFooter() {
  * Three things carry the borrower now:
  *
  *  1. A CHAPTER RAIL. Four fixed chapters (Your goal / The home / Your
- *     finances / Finish) each own a segment of the bar. The chapter list never
- *     reflows — only the fill inside it moves — so the rail stays a stable
- *     landmark even though the step list is dynamic (a self-employed veteran
- *     answers 16 steps, a W-2 buyer 13).
- *  2. A step counter and a PERCENTAGE, both legible rather than incidental.
+ *     finances / Finish) each own a segment of the bar. A current chapter is
+ *     half filled and a completed chapter is full, so adding a conditional
+ *     question cannot move the progress display backwards.
+ *  2. A concise application label instead of a route-dependent number.
  *  3. A time-to-finish derived from the steps actually left on this borrower's
  *     route (`estimateTimeRemaining`), not from a hardcoded index threshold.
  *
- * The percentage is honest, which means it can dip by a few points when an
- * answer adds steps (saying yes to military service injects the two VA
- * residual-income questions). That is the truth about an adaptive form, and
- * the chapter rail is what absorbs it: the borrower sees "still in The home",
- * not a bar that lurched backwards with no explanation.
+ * An adaptive route cannot promise a stable total before it knows the answers.
+ * The former "Step 9 of 14" changed to "Step 9 of 13" after a borrower chose
+ * self-employment; even "Step 9" repeated because that answer removed the
+ * employment-type screen from the revised route. Named chapters preserve
+ * orientation without making either false promise.
  */
 export function FunnelProgressHeader({
   progress,
@@ -317,13 +316,12 @@ export function FunnelProgressHeader({
   canGoBack: boolean;
   showSaved: boolean;
 }) {
-  const percent = Math.round(progress.percent);
   const currentSection = progress.sections.find((s) => s.status === "current");
 
   return (
     <div className="fixed top-0 w-full z-40 bg-background/90 backdrop-blur-sm border-b">
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-3 pb-2.5 sm:pt-4 sm:pb-3">
-        {/* Row 1 — back, counter + percentage, autosave */}
+        {/* Row 1 — back, stable application label, autosave */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
           <div className="flex min-w-0 items-center gap-1 sm:gap-2">
             <button
@@ -344,21 +342,9 @@ export function FunnelProgressHeader({
             />
           </div>
 
-          <div
-            className="flex min-w-0 items-baseline justify-center gap-x-2 gap-y-0"
-            data-testid="text-step-counter"
-          >
+          <div className="flex min-w-0 items-baseline justify-center" data-testid="text-step-counter">
             <span className="text-sm font-semibold text-foreground whitespace-nowrap">
-              Step {progress.index} of {progress.total}
-            </span>
-            <span className="hidden text-sm text-muted-foreground/50 sm:inline" aria-hidden="true">
-              ·
-            </span>
-            <span
-              className="hidden text-sm font-semibold text-primary whitespace-nowrap sm:inline"
-              data-testid="text-progress-percent"
-            >
-              {percent}% complete
+              Application
             </span>
           </div>
 
@@ -376,27 +362,22 @@ export function FunnelProgressHeader({
           </div>
         </div>
 
-        {/* Row 2 — the chapter rail. One segment per chapter, filled by how far
-            through that chapter the borrower is. `role="progressbar"` carries
-            the overall figure for assistive tech; the segments themselves are
-            decorative, so the whole strip is a single labelled control rather
-            than four unlabelled ones. */}
+        {/* Row 2 — stable named chapters. Conditional questions can change the
+            route length, so the rail shows completed/current/upcoming state
+            instead of a fraction or percentage that can move backwards. */}
         <div
           className="mt-2.5 flex items-stretch gap-1.5"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-          aria-valuetext={`Step ${progress.index} of ${progress.total}, ${percent} percent complete`}
+          role="list"
+          aria-label={`Application progress. Current section: ${currentSection?.label ?? "Introduction"}.`}
           data-testid="progress-section-rail"
         >
           {progress.sections.map((section) => (
-            <div key={section.id} className="flex-1 min-w-0" data-testid={`progress-section-${section.id}`}>
+            <div key={section.id} role="listitem" className="flex-1 min-w-0" data-testid={`progress-section-${section.id}`}>
               <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <motion.div
                   className="h-full rounded-full bg-primary"
                   initial={false}
-                  animate={{ width: `${section.percent}%` }}
+                  animate={{ width: section.status === "done" ? "100%" : section.status === "current" ? "50%" : "0%" }}
                   transition={{ duration: 0.35, ease: "easeOut" }}
                 />
               </div>
@@ -433,7 +414,7 @@ export function FunnelProgressHeader({
         {currentSection && (
           <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span data-testid="text-section-position">
-              {currentSection.stepsReached} of {currentSection.stepCount} in this section
+              {currentSection.label}
             </span>
             <span data-testid="text-time-remaining">{estimateTimeRemaining(progress.remaining)}</span>
           </div>

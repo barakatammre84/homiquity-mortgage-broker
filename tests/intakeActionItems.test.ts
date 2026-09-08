@@ -43,6 +43,20 @@ const UNDER_REVIEW_PAYLOAD = {
   isVeteran: false,
   isFirstTimeBuyer: true,
   propertyState: "IL", // the licensed footprint — intake 422s outside it
+  hasAdditionalIncome: true,
+  incomeSources: [
+    {
+      type: "rental",
+      annualAmount: "24000",
+      rentalProperties: [
+        {
+          address: "123 Test Street, Chicago, IL",
+          monthlyRentalIncome: "2000",
+          monthlyDebtPayment: "1200",
+        },
+      ],
+    },
+  ],
   softPullConsentAccepted: true,
 };
 
@@ -88,6 +102,17 @@ describe("under_review intake produces action items", () => {
     });
     expect(createRes.status, "create application").toBe(201);
     const app = await createRes.json();
+
+    // Recreate the first-page race from the borrower journey: loan options and
+    // dashboard surfaces poll as soon as the 201 arrives, while finalizeIntake
+    // still owns the application in `analyzing`. These reads must remain reads;
+    // a compatibility repair here used to launch a second pipeline run and
+    // duplicate every rental-file document request.
+    await Promise.all(
+      Array.from({ length: 3 }, () =>
+        getJson(borrower, `/api/applications/${app.id}/action-items`),
+      ),
+    );
 
     // Wait for finalizeIntake to resolve the outcome. The detail route wraps
     // the row: { application: {...} }.
@@ -153,6 +178,14 @@ describe("under_review intake produces action items", () => {
       return tasks?.length > 0 ? tasks : null;
     }, "open borrower tasks for an under_review file");
     expect(openTasks.length, "open borrower tasks exist").toBeGreaterThan(0);
+    const documentCategories = openTasks
+      .filter((task: any) => task.taskType === "document_request")
+      .map((task: any) => task.documentCategory);
+    expect(documentCategories.length, "document requests exist").toBeGreaterThan(0);
+    expect(
+      new Set(documentCategories).size,
+      "each required document category is requested once",
+    ).toBe(documentCategories.length);
 
     // (c) Loan options were generated for the under_review file too.
     const options = await pollUntil(async () => {

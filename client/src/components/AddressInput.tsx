@@ -27,13 +27,14 @@ type SearchMode = "address" | "location";
 interface AddressInputProps {
   onSelect: (result: AddressResult) => void;
   onChange?: (value: string) => void;
+  id?: string;
   placeholder?: string;
   className?: string;
   defaultValue?: string;
   mode?: SearchMode;
 }
 
-export function AddressInput({ onSelect, onChange, placeholder = "Enter an address...", className, defaultValue, mode = "address" }: AddressInputProps) {
+export function AddressInput({ onSelect, onChange, id, placeholder = "Enter an address...", className, defaultValue, mode = "address" }: AddressInputProps) {
   const [value, setValue] = useState(defaultValue || "");
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -182,6 +183,7 @@ export function AddressInput({ onSelect, onChange, placeholder = "Enter an addre
     <div ref={containerRef} className={`relative ${className || ""}`}>
       <div className="relative">
         <Input
+          id={id}
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}

@@ -12,7 +12,6 @@ import {
   MapPin,
   Shield,
   Users,
-  Check,
   HelpCircle,
   Minus,
   Percent,
@@ -260,11 +259,11 @@ export const QUESTIONS: Question[] = [
     subtext: "An estimate is fine -- we'll verify this later with a soft check that won't affect your score.",
     icon: CreditCard,
     options: [
-      { value: "760", label: "760+", icon: Check },
-      { value: "720", label: "720-759", icon: Check },
-      { value: "680", label: "680-719", icon: Check },
-      { value: "640", label: "640-679", icon: Check },
-      { value: "600", label: "Under 640", icon: Check },
+      { value: "760", label: "760+", icon: CreditCard },
+      { value: "720", label: "720-759", icon: CreditCard },
+      { value: "680", label: "680-719", icon: CreditCard },
+      { value: "640", label: "640-679", icon: CreditCard },
+      { value: "600", label: "Under 640", icon: CreditCard },
       { value: "not_sure", label: "Not sure", icon: HelpCircle }
     ]
   },
