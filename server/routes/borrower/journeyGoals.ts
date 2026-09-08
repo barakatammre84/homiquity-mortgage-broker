@@ -6,6 +6,7 @@ import { isAuthenticated } from "../../auth";
 import { insertHomeownershipGoalSchema, insertCreditActionSchema, insertSavingsTransactionSchema, type User } from "@shared/schema";
 import { z } from "zod";
 import { routeParam } from "../../http/routeParams";
+import { deriveHomebuyerPlanningStage } from "@shared/homebuyerJourney";
 
 // Verify that an internal staff user is actually assigned to the given application.
 // Returns true for admin (unrestricted), checks LO assignment for lo/loa, and
@@ -24,7 +25,7 @@ export function registerJourneyGoalRoutes(
       const goal = await storage.getHomeownershipGoal(user.id);
       
       if (!goal) {
-        return res.json({ goal: null });
+        return res.json({ goal: null, planningStage: deriveHomebuyerPlanningStage(null), milestones: [] });
       }
 
       const [creditActions, savingsTransactions, milestones] = await Promise.all([
@@ -35,6 +36,7 @@ export function registerJourneyGoalRoutes(
 
       res.json({
         goal,
+        planningStage: deriveHomebuyerPlanningStage(goal),
         creditActions,
         savingsTransactions,
         milestones,
@@ -73,7 +75,7 @@ export function registerJourneyGoalRoutes(
         pointsAwarded: 10,
       });
 
-      res.status(201).json({ goal });
+      res.status(201).json({ goal, planningStage: deriveHomebuyerPlanningStage(goal) });
     } catch (error) {
       console.error("Create homeownership goal error:", error);
       res.status(500).json({ error: "Failed to create homeownership goal" });
@@ -95,7 +97,7 @@ export function registerJourneyGoalRoutes(
         return res.status(404).json({ error: "Homeownership goal not found" });
       }
 
-      res.json({ goal });
+      res.json({ goal, planningStage: deriveHomebuyerPlanningStage(goal) });
     } catch (error) {
       console.error("Update homeownership goal error:", error);
       if (error instanceof z.ZodError) {

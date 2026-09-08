@@ -1,5 +1,6 @@
-import { Bot, User } from "lucide-react";
+import { User } from "lucide-react";
 import BorrowerPackageView from "@/components/BorrowerPackageView";
+import { Logo } from "@/components/brand/Logo";
 import { MessageContent } from "./MessageContent";
 import type { CoachMessage } from "./types";
 
@@ -12,7 +13,7 @@ export function ChatMessage({ message }: { message: CoachMessage }) {
       <div className={`shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${
         isUser ? "bg-primary text-primary-foreground" : "bg-success/10 text-success-subtle-foreground"
       }`}>
-        {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+        {isUser ? <User className="h-4 w-4" /> : <Logo size="sm" variant="mark" data-testid="logo-homi-message" />}
       </div>
       <div className={`flex-1 max-w-[85%] ${isUser ? "text-right" : ""}`}>
         <div className={`inline-block text-left rounded-xl px-4 py-3 text-sm leading-relaxed ${
@@ -56,7 +57,7 @@ export function StreamingMessage({ text }: { text: string }) {
   return (
     <div className="flex gap-3" data-testid="chat-message-streaming">
       <div className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center bg-success/10 text-success-subtle-foreground">
-        <Bot className="h-4 w-4" />
+        <Logo size="sm" variant="mark" data-testid="logo-homi-streaming" />
       </div>
       <div className="flex-1 max-w-[85%]">
         <div className="inline-block text-left rounded-xl px-4 py-3 text-sm leading-relaxed bg-muted text-foreground">
@@ -73,7 +74,7 @@ export function TypingIndicator({ label = "Thinking…" }: { label?: string }) {
   return (
     <div className="flex gap-3" data-testid="chat-typing-indicator">
       <div className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center bg-success/10 text-success-subtle-foreground">
-        <Bot className="h-4 w-4" />
+        <Logo size="sm" variant="mark" data-testid="logo-homi-typing" />
       </div>
       <div className="bg-muted rounded-xl px-4 py-3 flex items-center gap-1.5">
         <span className="sr-only">{label}</span>

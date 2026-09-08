@@ -71,6 +71,7 @@ FINANCIAL_VERIFICATION_ROLES	shared/loanApplicationStatus.ts	array	5	8401e578170
 FINANCIAL_WORKPAPER_KINDS	shared/financialReview.ts	array	6	163348536342	FinancialWorkpaperKind	2	internal	
 FURNISHING_STATE	shared/schema/rent.ts	array	6	f288323799cf	FurnishingState	3	internal	
 GATED_SITEMAP_PATHS	shared/seo/routeMeta.ts	array	6	08397f1a3d99		1	internal	
+HomebuyerPlanningStage	shared/homebuyerJourney.ts	union	3	a221f95e0340		2	internal	
 HOUSING_STATUS_TYPES	shared/schema/intelligence.ts	array	4	93ca79ca9101		0	internal	
 INCOME_PATH_IDS	shared/incomePaths.ts	array	5	2cf686b1fc72	IncomePathId	4	internal	
 INCOME_TYPES	shared/schema/underwritingTasks.ts	array	13	2743ad5a0e91	IncomeType	2	internal	

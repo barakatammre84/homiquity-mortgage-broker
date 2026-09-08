@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/brand/Logo";
 import { coachConversationKeys } from "@/lib/queryClient";
 import { Icons, iconSize } from "@/lib/icons";
 import { companyNmlsDisplay, COMPANY_IDENTITY } from "@shared/companyIdentity";
@@ -60,9 +61,10 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
       className="fixed bottom-36 right-4 z-40 flex h-[min(32rem,70vh)] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border bg-background shadow-xl focus:outline-none md:bottom-24 md:right-6"
     >
       <div className="flex items-center gap-2 border-b px-3 py-2">
+        <Logo size="sm" variant="mark" data-testid="logo-homi-dock" />
         <span className="text-sm font-semibold text-foreground">{ASSISTANT_NAME}</span>
         <div className="ml-auto flex items-center gap-1">
-          <Button asChild size="icon" variant="ghost" className="h-8 w-8" data-testid="link-homi-full-page">
+          <Button asChild size="icon" variant="ghost" className="touch-target h-11 w-11" data-testid="link-homi-full-page">
             <Link href="/ai-coach" aria-label={`Open ${ASSISTANT_NAME} full page`}>
               <Icons.externalLink className="h-4 w-4" />
             </Link>
@@ -70,7 +72,7 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8"
+            className="touch-target h-11 w-11"
             onClick={onClose}
             aria-label={`Minimize ${ASSISTANT_NAME}`}
             data-testid="button-homi-minimize"

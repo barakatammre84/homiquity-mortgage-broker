@@ -311,6 +311,7 @@ export type CoachStreamEvent =
        */
       source?: "file" | "assistant";
     }
+  | { type: "degraded"; reason: "temporarily_unavailable" }
   | { type: "lint_replaced"; categories: string[]; citations: string[] };
 
 export type CoachEmit = (event: CoachStreamEvent) => void;

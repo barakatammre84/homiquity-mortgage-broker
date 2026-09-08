@@ -57,10 +57,12 @@ beforeEach(() => {
 
 describe("HomiLauncher", () => {
   it("renders a launcher labelled with the assistant's actual name", () => {
-    renderLauncher(<HomiLauncher />);
+    const { container } = renderLauncher(<HomiLauncher />);
     const btn = screen.getByTestId("button-homi-launcher");
     expect(btn.getAttribute("aria-label")).toContain(ASSISTANT_NAME);
     expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("logo-homi-launcher")).toBeTruthy();
+    expect(container.querySelector("svg")).toBeNull();
   });
 
   it("does NOT mount the chat surface until it is opened", async () => {
@@ -134,14 +136,15 @@ describe("HomiLauncher stays off the critical path", () => {
   });
 
   it("imports nothing that is not already eager for another reason", () => {
-    // Button + lucide arrive via PrivateLayout, useLocation via App.tsx, and
-    // the identity module is a zero-import leaf. Anything else is new weight on
+    // Button + Logo arrive via PrivateLayout, useLocation via App.tsx, and the
+    // identity module is a zero-import leaf. Anything else is new weight on
     // every first-time page load.
     const allowed = [
       "react",
       "wouter",
       "lucide-react",
       "@/components/ui/button",
+      "@/components/brand/Logo",
       "@shared/assistant/identity",
       "@/components/homi/HomiDock",
     ];

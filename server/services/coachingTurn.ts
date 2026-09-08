@@ -86,7 +86,7 @@ export interface CoachTurnResult {
 
 function mapAnthropicError(err: unknown): CoachTurnError {
   if (err instanceof Anthropic.AuthenticationError) {
-    return new CoachTurnError("not_configured", "Homi's credentials are invalid on this environment.", false);
+    return new CoachTurnError("not_configured", "Homi is temporarily unavailable. Your file is safe.", false);
   }
   if (err instanceof Anthropic.RateLimitError) {
     return new CoachTurnError("provider_rate_limited", "The AI service is briefly rate-limited. Please try again in a moment.", true);
@@ -112,9 +112,9 @@ function mapAnthropicError(err: unknown): CoachTurnError {
  * Persistence of coach_messages / coach_conversations stays in the route (it
  * owns the response contract); this function only returns what to persist.
  *
- * Errors are HONEST: a provider failure throws CoachTurnError for the route to
- * surface with a retry affordance. The only canned-response path is offline
- * mode (no ANTHROPIC_API_KEY), which is explicitly labeled to the user.
+ * Provider failures before the first streamed token switch to clearly labeled,
+ * deterministic guidance. Mid-answer failures remain errors so a partial model
+ * answer can never be mistaken for a complete one.
  */
 export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnResult> {
   if (!isCoachConfigured()) {
@@ -239,6 +239,29 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
         errorMessage: `${mapped.code}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 1000),
         metadata: { promptVersion: COACH_PROMPT_VERSION, call },
       });
+      // A provider outage before any text or tool action can safely become a
+      // labeled deterministic guidance turn. The user's message is already in
+      // conversation history, but this fallback does not pretend to capture or
+      // update application data.
+      if (
+        call === 1 &&
+        visible.length === 0 &&
+        callText.length === 0 &&
+        ["not_configured", "network", "timeout", "provider_error"].includes(mapped.code)
+      ) {
+        const fallback = generateOfflineResponse(opts.userMessage, opts.history, opts.verifiedContext);
+        const fallbackMessage = `**Homi is temporarily unavailable.** Your connected file is safe. This standard guidance has not added new information to your file.\n\n${fallback.message}`;
+        guardedEmit({ type: "degraded", reason: "temporarily_unavailable" });
+        guardedEmit({ type: "text", delta: fallbackMessage });
+        guardedEmit({ type: "panel", profile: state.profile, source: "file" });
+        return {
+          message: fallbackMessage,
+          state,
+          lintReplaced: false,
+          degraded: true,
+          usage: { inputTokens: 0, outputTokens: 0, modelCalls: 0 },
+        };
+      }
       throw mapped;
     }
 
@@ -370,10 +393,9 @@ function buildDynamicContext(ctx: VerifiedUserContext, existingProfile?: unknown
 }
 
 // ---------------------------------------------------------------------------
-// Offline mode — deterministic guidance used ONLY when no ANTHROPIC_API_KEY is
-// configured (mirrors the repo's simulated-vendor convention). This is NOT an
-// error fallback: provider failures surface as CoachTurnError instead of
-// silently degrading to canned text.
+// Deterministic guidance for an unconfigured provider or a provider failure
+// before any text streams. It is always labeled in the response and never
+// claims that new information was captured in the borrower's file.
 // ---------------------------------------------------------------------------
 
 function formatNextRequiredInput(what: string, why: string, effort: string, unlocks: string): string {

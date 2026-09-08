@@ -91,6 +91,16 @@ export function BorrowerRequests({ applicationId, "data-testid": testId, hideWhe
         t.ownerRole !== "BORROWER" &&
         (t.status === "OPEN" || t.status === "IN_PROGRESS"),
     ) || [];
+  // Several internal tasks can intentionally share the same borrower-facing
+  // status line (for example, one review task per document). Repeating that
+  // sentence dozens of times makes the dashboard look broken and adds no new
+  // borrower information, so this surface shows each distinct update once.
+  const distinctInProgressTasks = Array.from(
+    new Map(
+      inProgressTasks.map((task) => [task.borrowerDisplayText || task.title, task] as const),
+    ).values(),
+  );
+  const visibleInProgressTasks = distinctInProgressTasks.slice(0, 3);
 
   if (isLoading) {
     return (
@@ -215,7 +225,7 @@ export function BorrowerRequests({ applicationId, "data-testid": testId, hideWhe
               In progress on our side
             </p>
             <div className="space-y-2">
-              {inProgressTasks.map((task) => (
+              {visibleInProgressTasks.map((task) => (
                 <div
                   key={task.id}
                   className="flex items-center gap-3 rounded-md bg-muted/30 px-3 py-2"
@@ -227,6 +237,11 @@ export function BorrowerRequests({ applicationId, "data-testid": testId, hideWhe
                   </p>
                 </div>
               ))}
+              {distinctInProgressTasks.length > visibleInProgressTasks.length && (
+                <p className="px-3 text-xs text-muted-foreground" data-testid="text-in-progress-overflow">
+                  {distinctInProgressTasks.length - visibleInProgressTasks.length} more updates are in progress.
+                </p>
+              )}
             </div>
           </div>
         )}
