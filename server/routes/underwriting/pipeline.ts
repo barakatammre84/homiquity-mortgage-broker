@@ -5,7 +5,7 @@ import { isAdmin } from "@shared/roles";
 import type { IStorage } from "../../storage";
 import { isAuthenticated, requireRole } from "../../auth";
 import { isInFlightLoanAppStatus, isLoanAppStatus, isStaffRole, LOAN_APP_STATUSES, LOAN_CONDITION_STATUSES, canSetConditionVerdict } from "@shared/schema";
-import type { User, LoanAppStatus } from "@shared/schema";
+import type { User, LoanAppStatus, LoanApplication, DealTeamMember } from "@shared/schema";
 import { toBorrowerConditionViews } from "@shared/borrowerConditionView";
 import { getLenderIdentifiers } from "../../services/lenderIdentifiers";
 import { z } from "zod";
@@ -42,6 +42,23 @@ const STAGE_TRANSITION_ROLES: Record<string, string[]> = {
   clear_to_close: ["admin", "underwriter"],
   funded: ["admin", "closer"],
 };
+
+/**
+ * A staffer can legitimately have more than one active deal-team role on a
+ * file, and historical data may contain repeated rows for the same role. The
+ * work queue is a list of applications, so its identity is applicationId — not
+ * membership id. Returning one row per membership inflated pipeline totals and
+ * repeated the same borrower throughout the command center.
+ */
+export function uniqueMemberApplications(
+  memberships: Array<Pick<DealTeamMember, "applicationId"> & { application?: LoanApplication }>,
+): LoanApplication[] {
+  const byId = new Map<string, LoanApplication>();
+  for (const membership of memberships) {
+    if (membership.application) byId.set(membership.application.id, membership.application);
+  }
+  return [...byId.values()];
+}
 
 export function registerPipelineRoutes(
   app: Express,
@@ -429,9 +446,7 @@ export function registerPipelineRoutes(
         applications = await storage.getAllLoanApplications();
       } else {
         const teamMemberships = await storage.getTeamMembersByUser(user.id);
-        applications = teamMemberships
-          .map(m => m.application)
-          .filter((a): a is NonNullable<typeof a> => a !== null && a !== undefined);
+        applications = uniqueMemberApplications(teamMemberships);
       }
 
       // The work queue holds in-flight files only: no drafts, no terminal

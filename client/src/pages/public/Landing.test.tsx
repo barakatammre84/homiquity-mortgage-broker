@@ -9,7 +9,8 @@ import { render, screen } from "@testing-library/react";
  *    founder's CV and a trust row that was four facts about Homiquity — years in
  *    banking, our architecture, our compliance, our encryption. A visitor cannot
  *    use any of those, and credential copy creeps back in easily.
- * 2. It stays a front door, not a sitemap. Four journey cards, one trust row.
+ * 2. It stays a front door, not a sitemap. Three mortgage goals, one trust row,
+ *    and one explanation of the complex-income advantage.
  * 3. The advertising rails hold. This is a soliciting surface, so a stray rate,
  *    payment or APR figure is a Reg Z §1026.24 trigger-term problem with no
  *    disclosure attached, and approval language is a Reg N problem.
@@ -60,30 +61,35 @@ function marketingCopy(): string {
 }
 
 describe("Landing", () => {
-  it("lets a ready visitor start the mortgage application from the hero", () => {
+  it("opens the three mortgage goals in the correct funnel mode", () => {
     render(<Landing />);
-    expect(screen.getByTestId("button-hero-apply").getAttribute("href")).toBe("/apply");
+    expect(screen.getByTestId("goal-buy").getAttribute("href")).toBe("/apply");
+    expect(screen.getByTestId("goal-refinance").getAttribute("href")).toBe("/apply?type=refinance");
+    expect(screen.getByTestId("goal-equity").getAttribute("href")).toBe("/apply?type=cashout");
   });
 
-  it("leads with Homi, above the journey cards", () => {
+  it("puts the goal choice before the calculator and keeps Homi available later", () => {
     render(<Landing />);
 
     const hero = screen.getByTestId("section-hero");
-    expect(hero.contains(screen.getByTestId("coach-prompt-bar"))).toBe(true);
-
+    expect(hero.contains(screen.getByTestId("hero-goal-picker"))).toBe(true);
+    expect(hero.contains(screen.getByTestId("coach-prompt-bar"))).toBe(false);
+    const estimator = screen.getByTestId("section-estimator");
     const journeys = screen.getByTestId("section-journeys");
-    expect(hero.compareDocumentPosition(journeys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(hero.compareDocumentPosition(estimator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(estimator.compareDocumentPosition(journeys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(journeys.contains(screen.getByTestId("coach-prompt-bar"))).toBe(true);
   });
 
-  it("opens four doors — renting, self-employed, owner, moving up", () => {
+  it("makes mixed income concrete instead of flattening it into a wage claim", () => {
     render(<Landing />);
 
-    // All four audiences the business serves. Dropping one strands a segment;
-    // adding a fifth is how this page became a six-persona sitemap last time.
-    expect(screen.getAllByTestId(/^card-journey-/)).toHaveLength(4);
-    for (const id of ["renting", "self-employed", "owner", "moving-up"]) {
-      expect(screen.getByTestId(`card-journey-${id}`)).toBeTruthy();
+    expect(screen.getAllByTestId(/^income-path-/)).toHaveLength(3);
+    for (const id of ["work", "business", "rental"]) {
+      expect(screen.getByTestId(`income-path-${id}`)).toBeTruthy();
     }
+    expect(screen.getByTestId("income-path-rental").textContent).toMatch(/Schedule E/i);
+    expect(screen.getByTestId("income-path-business").textContent).toMatch(/K-1s/i);
   });
 
   it("says nothing about the founder's credentials", () => {

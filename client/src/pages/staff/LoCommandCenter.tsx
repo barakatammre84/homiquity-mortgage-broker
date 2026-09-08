@@ -71,6 +71,14 @@ export default function LoCommandCenter() {
     () => queue.find((f) => f.applicationId === selectedId)?.borrowerName ?? "Borrower",
     [queue, selectedId],
   );
+  const selectedFile = useMemo(
+    () => queue.find((f) => f.applicationId === selectedId),
+    [queue, selectedId],
+  );
+  const selectedSignals = useMemo(
+    () => signals.filter((signal) => signal.applicationId === selectedId),
+    [signals, selectedId],
+  );
 
   const handleExportMismo = async (applicationId: string) => {
     setExportingId(applicationId);
@@ -139,9 +147,9 @@ export default function LoCommandCenter() {
         </p>
       </div>
 
-      <div className="grid flex-1 gap-4 overflow-hidden p-4 md:px-6 lg:grid-cols-[300px_1fr_240px]">
+      <div className="grid flex-1 gap-4 p-4 md:px-6 lg:min-h-0 lg:grid-cols-[300px_1fr_240px] lg:overflow-hidden">
         {/* Left: attention rail (hidden on mobile once a file is open) */}
-        <aside className={`overflow-y-auto ${selectedId ? "hidden lg:block" : "block"}`} aria-label="Attention rail">
+        <aside className={`lg:overflow-y-auto ${selectedId ? "hidden lg:block" : "block"}`} aria-label="Attention rail">
           {canClaim && <IntakeInboxCard onClaim={setSelectedId} />}
           <AttentionRail
             queue={queue}
@@ -153,9 +161,14 @@ export default function LoCommandCenter() {
         </aside>
 
         {/* Center: active borrower */}
-        <main className={`overflow-y-auto rounded-lg border border-border ${selectedId ? "block" : "hidden lg:block"}`}>
+        <main className={`rounded-lg border border-border lg:overflow-y-auto ${selectedId ? "block" : "hidden lg:block"}`}>
           {selectedId ? (
-            <ActiveBorrowerPane applicationId={selectedId} onBack={() => setSelectedId(null)} />
+            <ActiveBorrowerPane
+              applicationId={selectedId}
+              file={selectedFile}
+              signals={selectedSignals}
+              onBack={() => setSelectedId(null)}
+            />
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <div>
@@ -170,7 +183,7 @@ export default function LoCommandCenter() {
         </main>
 
         {/* Right: actions (only when a file is active) */}
-        <aside className={`overflow-y-auto ${selectedId ? "block" : "hidden lg:block"}`} aria-label="Actions">
+        <aside className={`lg:overflow-y-auto ${selectedId ? "block" : "hidden lg:block"}`} aria-label="Actions">
           {selectedId ? (
             <ActionsRail
               applicationId={selectedId}

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ActiveBorrowerPane } from "./ActiveBorrowerPane";
-import type { CockpitData } from "./types";
+import { ActiveBorrowerPane, loanOfficerNextAction } from "./ActiveBorrowerPane";
+import type { CockpitData, StaffSignal } from "./types";
 
 /**
  * The LO reads the same evaluation the borrower does, and inherited the same
@@ -33,13 +33,13 @@ const cockpit = (paths: CockpitData["income"] extends null ? never : NonNullable
   activity: { totalPageViews: 0, propertySearches: 0, calculatorUses: 0, propertyViews: 0 },
 });
 
-function renderPane(data: CockpitData) {
+function renderPane(data: CockpitData, signals: StaffSignal[] = []) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, queryFn: async () => data } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ActiveBorrowerPane applicationId="app-1" onBack={() => {}} />
+      <ActiveBorrowerPane applicationId="app-1" signals={signals} onBack={() => {}} />
     </QueryClientProvider>,
   );
 }
@@ -103,5 +103,59 @@ describe("ActiveBorrowerPane — the qualifying-income list reconciles", () => {
     expect(pane.textContent).toContain("self-reported");
     expect(pane.textContent).toMatch(/Verify income, assets, credit, and property evidence/i);
     expect(pane.textContent).not.toContain("Pre-Approved");
+  });
+
+  it("carries a complex-file signal into a concrete next-action plan", async () => {
+    const data = cockpit([
+      {
+        pathId: "self_employment", role: "component", status: "applicable", kind: "dti_income",
+        monthlyQualifyingIncome: 15000, appliedToDti: true, requiresManualReview: true,
+      },
+      {
+        pathId: "rental", role: "component", status: "applicable", kind: "dti_income",
+        monthlyQualifyingIncome: 0, appliedToDti: true, requiresManualReview: true,
+      },
+    ]);
+    data.application.financialDataProvenance = "self_reported";
+    data.conditions = {
+      total: 6,
+      open: 6,
+      items: Array.from({ length: 6 }, (_, index) => ({
+        id: `condition-${index}`,
+        title: `Document ${index}`,
+        category: "income",
+        status: "outstanding",
+        priority: "prior_to_approval",
+      })),
+    };
+    data.documents = {
+      uploadedCount: 1,
+      verifiedCount: 0,
+      byType: [{ type: "profit_loss", status: "rejected", fileName: "p-and-l.pdf" }],
+    };
+    const signal: StaffSignal = {
+      type: "preuw_flag",
+      priority: 1,
+      applicationId: "app-1",
+      borrowerName: "Test Borrower",
+      title: "complex income check, rental income offset",
+      detail: "Self-employed income must be documented before approval-grade decisions.",
+    };
+
+    renderPane(data, [signal]);
+
+    await waitFor(() => expect(screen.getByTestId("cockpit-file-plan")).toBeTruthy());
+    expect(screen.getByTestId("cockpit-next-action").textContent).toMatch(/focused request for the 6 open items/i);
+    expect(screen.getByTestId("cockpit-next-action-control").textContent).toMatch(/draft doc request/i);
+    expect(screen.getByTestId("cockpit-top-signal").textContent).toMatch(/rental income offset/i);
+    expect(screen.getByTestId("cockpit-file-plan").textContent).toMatch(/0\/1 verified · 6 open/i);
+  });
+
+  it("prioritizes an unread borrower message ahead of document follow-up", () => {
+    const data = cockpit([]);
+    data.messages.unreadFromBorrower = 2;
+    data.conditions = { total: 4, open: 4, items: [] };
+
+    expect(loanOfficerNextAction(data)).toBe("Reply to 2 unread borrower messages.");
   });
 });
