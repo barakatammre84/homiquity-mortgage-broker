@@ -31,8 +31,16 @@ import {
 import type { AnalyticsDomain } from "@shared/schema";
 import { firstQueryValue } from "./queryParams";
 import { routeParam, routeParams } from "../http/routeParams";
+import { getCoreCapabilityReport } from "../services/coreCapabilityStatus";
 
 export function registerDataIntelligenceRoutes(app: Express) {
+
+  app.get("/api/analytics/core-capabilities",
+    requireRole("admin", "lo", "loa", "processor", "underwriter"),
+    (_req, res) => {
+      res.json(getCoreCapabilityReport());
+    }
+  );
 
   app.post("/api/analytics/event", isAuthenticated, async (req, res) => {
     try {

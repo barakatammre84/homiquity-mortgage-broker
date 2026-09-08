@@ -34,9 +34,10 @@ interface DocAccuracy {
   documentType: string;
   avgConfidence: number;
   totalExtractions: number;
-  humanReviewedCount: number;
+  reviewedCount: number;
+  gradedReviewCount: number;
   needsReviewCount: number;
-  avgAccuracyAfterReview: number | null;
+  avgAccuracy: number | null;
 }
 
 interface OutcomeSegment {
@@ -47,6 +48,25 @@ interface OutcomeSegment {
   withdrawn: number;
   avgDaysToClose: number | null;
   conversionRate: number;
+}
+
+type CoreCapabilityState = "live" | "simulated" | "disabled" | "configuration_error";
+
+interface CoreCapabilityReport {
+  generatedAt: string;
+  environment: "production" | "non_production";
+  readyForLiveLoanLifecycle: boolean;
+  counts: Record<CoreCapabilityState, number>;
+  capabilities: Array<{
+    id: string;
+    label: string;
+    provider: string;
+    state: CoreCapabilityState;
+    criticalForLiveLoan: boolean;
+    lastSuccessfulVerificationAt: string | null;
+    detail: string;
+    nextAction: string | null;
+  }>;
 }
 
 export default function IntelligenceTab() {
@@ -66,7 +86,11 @@ export default function IntelligenceTab() {
     queryKey: ["/api/outcomes/segments/creditScoreBucket"],
   });
 
-  const isLoading = funnelLoading || automationLoading || docLoading || segmentsLoading;
+  const { data: coreCapabilities, isLoading: coreCapabilitiesLoading } = useQuery<CoreCapabilityReport>({
+    queryKey: ["/api/analytics/core-capabilities"],
+  });
+
+  const isLoading = funnelLoading || automationLoading || docLoading || segmentsLoading || coreCapabilitiesLoading;
 
   if (isLoading) {
     return (
@@ -161,6 +185,10 @@ export default function IntelligenceTab() {
             <TrendingUp className="h-4 w-4 mr-1" />
             Outcome Segments
           </TabsTrigger>
+          <TabsTrigger value="systems" data-testid="tab-core-systems">
+            <Activity className="h-4 w-4 mr-1" />
+            Core Systems
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="funnel" className="space-y-4 mt-4">
@@ -237,7 +265,7 @@ export default function IntelligenceTab() {
                         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <CheckCircle2 className="h-3 w-3" />
-                            {doc.humanReviewedCount} reviewed
+                            {doc.reviewedCount} documents reviewed
                           </span>
                           {doc.needsReviewCount > 0 && (
                             <span className="flex items-center gap-1 text-warning-subtle-foreground">
@@ -245,11 +273,14 @@ export default function IntelligenceTab() {
                               {doc.needsReviewCount} need review
                             </span>
                           )}
-                          {doc.avgAccuracyAfterReview !== null && (
+                          {doc.avgAccuracy !== null && (
                             <span className="flex items-center gap-1">
                               <TrendingUp className="h-3 w-3" />
-                              {(doc.avgAccuracyAfterReview * 100).toFixed(0)}% post-review accuracy
+                              {doc.avgAccuracy.toFixed(0)}% field accuracy ({doc.gradedReviewCount} graded)
                             </span>
+                          )}
+                          {doc.avgAccuracy === null && doc.reviewedCount > 0 && (
+                            <span>No field-level accuracy measured yet</span>
                           )}
                         </div>
                       </div>
@@ -368,6 +399,85 @@ export default function IntelligenceTab() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="systems" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="text-base">Live capability truth</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Configuration and integration state for the mortgage workflow.
+                  </p>
+                </div>
+                <Badge variant={coreCapabilities?.readyForLiveLoanLifecycle ? "default" : "secondary"}>
+                  {coreCapabilities?.readyForLiveLoanLifecycle
+                    ? "Live lifecycle ready"
+                    : "External connections incomplete"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!coreCapabilities ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  Capability status is unavailable.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {(["live", "simulated", "disabled", "configuration_error"] as const).map(state => (
+                      <div key={state} className="rounded-lg border p-3">
+                        <p className="text-xs capitalize text-muted-foreground">
+                          {state.replace(/_/g, " ")}
+                        </p>
+                        <p className="text-xl font-semibold">{coreCapabilities.counts[state]}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {coreCapabilities.capabilities.map(capability => (
+                    <div
+                      key={capability.id}
+                      className="rounded-lg border p-4"
+                      data-testid={`core-capability-${capability.id}`}
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-medium">{capability.label}</p>
+                          <p className="text-xs text-muted-foreground">{capability.provider}</p>
+                        </div>
+                        <Badge
+                          variant={
+                            capability.state === "configuration_error"
+                              ? "destructive"
+                              : capability.state === "live"
+                                ? "default"
+                                : capability.state === "disabled"
+                                  ? "outline"
+                                  : "secondary"
+                          }
+                        >
+                          {capability.state.replace(/_/g, " ")}
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-sm">{capability.detail}</p>
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Last successful verification:{" "}
+                        {capability.lastSuccessfulVerificationAt
+                          ? new Date(capability.lastSuccessfulVerificationAt).toLocaleString()
+                          : "not recorded"}
+                      </div>
+                      {capability.nextAction && (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Next: {capability.nextAction}
+                        </p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

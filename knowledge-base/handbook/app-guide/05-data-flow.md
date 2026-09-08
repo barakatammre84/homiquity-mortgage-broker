@@ -9,9 +9,9 @@ just supporting detail.
   1. Affordability check   →  propertyAnalyzer + calculators
   2. Pre-approval form     →  loan_applications + URLA tables
      (conversational 1003)
-  3. Coach conversation    →  coachingService (OpenAI) → structured intake
+  3. Coach conversation    →  coachingService (Anthropic Claude) → structured intake
   4. Document upload       →  GCS (signed URL) → extractionService
-                               → Gemini extraction → extraction results
+                               → Claude extraction → extraction results
                                → documentConfidence scoring
   5. Plaid link            →  verification.ts → income/employment/asset data
                                       │
@@ -59,11 +59,12 @@ just supporting detail.
 ### 4. Documents
 - Client asks `server/routes/documents.ts` for an **upload URL** → uploads the
   file **directly to GCS** (the server never proxies bytes).
-- The `server/extraction*.ts` family runs OCR/AI extraction (paystubs, W-2s,
-  bank statements, tax returns; `extractionService.ts` is the re-export shim,
+- The `server/extraction*.ts` family runs document extraction (pay stubs,
+  bank statements, leases and tax returns; `extractionService.ts` is the re-export shim,
   per-doc extractors live in `extractionDocuments.ts`);
   `server/services/documentConfidence.ts` scores how trustworthy the
-  extraction is.
+  extraction is. Ordinary borrower uploads launch this work in the web process;
+  a durable extraction queue and restart recovery remain open.
 
 ### 5. Verification
 - `server/plaid.ts` + `server/services/verification.ts`: borrower links
@@ -101,9 +102,11 @@ just supporting detail.
 - `server/services/emailService.ts` — notifications (console-logged until an
   SMTP/SendGrid provider is configured).
 
-### 9. GSE handoff
+### 9. GSE and lender handoff
 - `server/mismo.ts` exports MISMO 3.4 XML; `mismoValidation.ts` checks
   completeness/ULDD requirements (tested by `tests/mismoValidation.test.ts`).
+  DU/LPA and the lender receiver are still simulations until onboarding and
+  receiver acceptance are completed.
 
 ### 10. Feedback loop
 - `analyticsEventPipeline.ts`, `outcomeTracker.ts`, `predictiveEngine.ts`,

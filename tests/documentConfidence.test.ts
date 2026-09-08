@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  classifyDocTypeAccuracyStatus,
   coarseConfidenceToNumeric,
   getReviewThreshold,
 } from "../server/services/documentConfidence";
@@ -49,5 +50,40 @@ describe("tax-return review gate (tiering × threshold)", () => {
     expect(clearsTaxReturnGate("high")).toBe(true);
     expect(clearsTaxReturnGate("medium")).toBe(false);
     expect(clearsTaxReturnGate("low")).toBe(false);
+  });
+});
+
+describe("classifyDocTypeAccuracyStatus", () => {
+  it("does not treat document approvals without field grading as measured accuracy", () => {
+    expect(classifyDocTypeAccuracyStatus({
+      gradedReviewCount: 0,
+      avgAccuracy: null,
+      targetAccuracyPct: 85,
+      minReviews: 10,
+    })).toBe("insufficient_reviews");
+  });
+
+  it("requires the minimum number of field-graded reviews", () => {
+    expect(classifyDocTypeAccuracyStatus({
+      gradedReviewCount: 9,
+      avgAccuracy: 99,
+      targetAccuracyPct: 85,
+      minReviews: 10,
+    })).toBe("insufficient_reviews");
+  });
+
+  it("flags measured accuracy below target and clears accuracy at target", () => {
+    expect(classifyDocTypeAccuracyStatus({
+      gradedReviewCount: 10,
+      avgAccuracy: 84.99,
+      targetAccuracyPct: 85,
+      minReviews: 10,
+    })).toBe("below_target");
+    expect(classifyDocTypeAccuracyStatus({
+      gradedReviewCount: 10,
+      avgAccuracy: 85,
+      targetAccuracyPct: 85,
+      minReviews: 10,
+    })).toBe("ok");
   });
 });

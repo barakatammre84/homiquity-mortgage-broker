@@ -205,6 +205,7 @@ export async function getAccuracyByDocType(daysBack: number = 90): Promise<Array
   totalExtractions: number;
   avgConfidence: number;
   reviewedCount: number;
+  gradedReviewCount: number;
   avgAccuracy: number | null;
   avgProcessingTimeMs: number | null;
   needsReviewCount: number;
@@ -216,7 +217,8 @@ export async function getAccuracyByDocType(daysBack: number = 90): Promise<Array
     totalExtractions: sql<number>`count(*)::int`,
     avgConfidence: sql<number>`avg(${documentConfidenceScores.overallConfidence}::numeric)::numeric(5,4)`,
     reviewedCount: sql<number>`count(*) filter (where ${documentConfidenceScores.humanReviewCompleted} = true)::int`,
-    avgAccuracy: sql<number>`avg(${documentConfidenceScores.fieldAccuracyPct}::numeric) filter (where ${documentConfidenceScores.humanReviewCompleted} = true)::numeric(5,2)`,
+    gradedReviewCount: sql<number>`count(*) filter (where ${documentConfidenceScores.fieldAccuracyPct} is not null)::int`,
+    avgAccuracy: sql<number>`avg(${documentConfidenceScores.fieldAccuracyPct}::numeric)::numeric(5,2)`,
     avgProcessingTime: sql<number>`avg(${documentConfidenceScores.processingTimeMs})::int`,
     needsReviewCount: sql<number>`count(*) filter (where ${documentConfidenceScores.humanReviewRequired} = true and ${documentConfidenceScores.humanReviewCompleted} = false)::int`,
   }).from(documentConfidenceScores)
@@ -225,12 +227,16 @@ export async function getAccuracyByDocType(daysBack: number = 90): Promise<Array
 
   return rows.map(r => ({
     documentType: r.documentType,
-    totalExtractions: r.totalExtractions,
-    avgConfidence: r.avgConfidence || 0,
-    reviewedCount: r.reviewedCount,
-    avgAccuracy: r.avgAccuracy || null,
-    avgProcessingTimeMs: r.avgProcessingTime || null,
-    needsReviewCount: r.needsReviewCount,
+    totalExtractions: Number(r.totalExtractions),
+    avgConfidence: Number(r.avgConfidence ?? 0),
+    reviewedCount: Number(r.reviewedCount),
+    gradedReviewCount: Number(r.gradedReviewCount),
+    // PostgreSQL returns numeric values as strings with the standard driver
+    // even when the query builder is annotated as <number>. Normalize at the
+    // API boundary so client formatting never calls number methods on a string.
+    avgAccuracy: r.avgAccuracy === null ? null : Number(r.avgAccuracy),
+    avgProcessingTimeMs: r.avgProcessingTime === null ? null : Number(r.avgProcessingTime),
+    needsReviewCount: Number(r.needsReviewCount),
   }));
 }
 
@@ -242,11 +248,30 @@ export interface DocTypeAccuracyStatus {
   documentType: string;
   totalExtractions: number;
   reviewedCount: number;
+  gradedReviewCount: number;
   avgConfidence: number;
   avgAccuracy: number | null; // percent
   targetAccuracyPct: number;
   needsReviewCount: number;
   status: "ok" | "below_target" | "insufficient_reviews";
+}
+
+/**
+ * A document approval only says that a person completed the review step. It is
+ * not an OCR accuracy observation unless the reviewer graded the extracted
+ * fields. Keep that distinction in one pure function so reports cannot turn a
+ * run of one-click approvals into a false green quality signal.
+ */
+export function classifyDocTypeAccuracyStatus(input: {
+  gradedReviewCount: number;
+  avgAccuracy: number | null;
+  targetAccuracyPct: number;
+  minReviews: number;
+}): DocTypeAccuracyStatus["status"] {
+  if (input.gradedReviewCount < input.minReviews || input.avgAccuracy === null) {
+    return "insufficient_reviews";
+  }
+  return input.avgAccuracy < input.targetAccuracyPct ? "below_target" : "ok";
 }
 
 export interface ExtractionAccuracyReport {
@@ -265,18 +290,17 @@ export async function getExtractionAccuracyReport(
 
   const docTypes: DocTypeAccuracyStatus[] = rows.map((r) => {
     const targetAccuracyPct = getReviewThreshold(r.documentType) * 100;
-    let status: DocTypeAccuracyStatus["status"];
-    if (r.reviewedCount < minReviews) {
-      status = "insufficient_reviews";
-    } else if (r.avgAccuracy !== null && r.avgAccuracy < targetAccuracyPct) {
-      status = "below_target";
-    } else {
-      status = "ok";
-    }
+    const status = classifyDocTypeAccuracyStatus({
+      gradedReviewCount: r.gradedReviewCount,
+      avgAccuracy: r.avgAccuracy,
+      targetAccuracyPct,
+      minReviews,
+    });
     return {
       documentType: r.documentType,
       totalExtractions: r.totalExtractions,
       reviewedCount: r.reviewedCount,
+      gradedReviewCount: r.gradedReviewCount,
       avgConfidence: r.avgConfidence,
       avgAccuracy: r.avgAccuracy,
       targetAccuracyPct,
@@ -289,7 +313,7 @@ export async function getExtractionAccuracyReport(
     .filter((d) => d.status === "below_target")
     .map(
       (d) =>
-        `${d.documentType}: avg accuracy ${d.avgAccuracy}% is below the ${d.targetAccuracyPct}% target over ${d.reviewedCount} human reviews — investigate model/prompt drift.`,
+        `${d.documentType}: avg accuracy ${d.avgAccuracy}% is below the ${d.targetAccuracyPct}% target over ${d.gradedReviewCount} field-graded reviews — investigate model/prompt drift.`,
     );
 
   return {
