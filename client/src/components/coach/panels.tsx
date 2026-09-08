@@ -418,6 +418,123 @@ export function StatusPanel({ status }: { status: LoanStatusView }) {
   );
 }
 
+/**
+ * The compact rail for Homi. Stage, evidence, and one next action come from the
+ * same file context, without turning unrelated completion measures into a row
+ * of competing percentages.
+ */
+export function FileSnapshotPanel({
+  status,
+  docs,
+}: {
+  status: LoanStatusView;
+  docs: ChecklistItemView[];
+}) {
+  const verified = docs.filter((doc) => doc.status === "verified").length;
+  const received = docs.filter((doc) => doc.status === "uploaded" || doc.status === "verifying").length;
+  const nextAction = status.hasApplication && status.nextAction
+    ? status.nextAction
+    : {
+        title: "Build your homebuyer plan",
+        description: "Set a target, organize your income, and choose the next milestone.",
+        href: "/gap-calculator",
+        buttonLabel: "Open My Plan",
+      };
+
+  return (
+    <Card data-testid="card-file-snapshot">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Your connected file</p>
+            <CardTitle className="font-display mt-1 text-xl">File snapshot</CardTitle>
+          </div>
+          <PanelSource source="file" />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="border-l-2 border-flare pl-3" data-testid="file-snapshot-stage">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current stage</p>
+          <p className="mt-1 font-semibold text-foreground">
+            {status.hasApplication && status.stage ? status.stage.label : "Homebuyer planning"}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {status.hasApplication && status.stage
+              ? status.stage.description
+              : "No mortgage application has been started yet."}
+          </p>
+        </div>
+
+        {status.hasApplication && docs.length > 0 && (
+          <div data-testid="file-snapshot-evidence">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evidence</p>
+            <p className="mt-1 text-sm font-medium text-foreground">{verified} of {docs.length} verified</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {received > 0 ? `${received} received and being reviewed` : "Nothing else is currently in review"}
+            </p>
+            <Button asChild variant="outline" size="sm" className="touch-target mt-3 w-full" data-testid="button-view-documents">
+              <Link href="/documents">View document checklist</Link>
+            </Button>
+          </div>
+        )}
+
+        <div className="border-t border-border pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Next action</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{nextAction.title}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{nextAction.description}</p>
+          <Button asChild className="mt-3 w-full" data-testid="button-file-snapshot-next">
+            <Link href={nextAction.href} data-testid="link-file-snapshot-next">{nextAction.buttonLabel}</Link>
+          </Button>
+        </div>
+
+        <Button asChild variant="outline" className="w-full" data-testid="button-message-loan-officer">
+          <Link href="/messages" data-testid="link-message-loan-officer">Message my loan officer</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Resolves the connected-file request into a terminal UI state. Access errors
+ * used to leave staff and other non-borrower sessions on a permanent loading
+ * message even though the server had already returned 403.
+ */
+export function ConnectedFilePanel({
+  status,
+  docs,
+  loading,
+}: {
+  status: LoanStatusView | null;
+  docs: ChecklistItemView[];
+  loading: boolean;
+}) {
+  if (status) {
+    return (
+      <div data-testid="coach-side-panel">
+        <FileSnapshotPanel status={status} docs={docs} />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground" data-testid="coach-side-panel-loading">
+        Loading your connected file…
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4" data-testid="coach-side-panel-unavailable">
+      <p className="font-semibold text-foreground">No connected file for this session</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        Homi can still provide educational guidance. File facts and document status will appear only when an accessible borrower file is connected.
+      </p>
+    </div>
+  );
+}
+
 export function DocumentChecklistPanel({
   docs,
   applicationId,
@@ -466,30 +583,36 @@ export function DocumentChecklistInline({
   docs: ChecklistItemView[];
   applicationId?: string | null;
 }) {
-  const grouped = groupByCategory(docs);
+  const active = docs.filter((doc) => doc.status === "needed" || doc.status === "rejected");
+  const received = docs.filter((doc) => doc.status === "uploaded" || doc.status === "verifying").length;
+  const visible = active.slice(0, 3);
 
   return (
     <div
-      className="mx-auto mb-2 w-full max-w-2xl rounded-xl border border-border bg-muted/30 px-3 py-2.5"
+      className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-border bg-muted/30 px-4 py-3"
       data-testid="coach-checklist-inline"
     >
-      <div className="mb-1.5 flex items-center gap-2">
-        <FileText className="h-4 w-4 text-primary shrink-0" />
-        <p className="text-xs font-medium text-foreground">
-          Upload right here — tap any item and I'll add it to your file
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Document plan</p>
+          <p className="mt-0.5 text-sm font-medium text-foreground">
+            {active.length > 0 ? `${active.length} ${active.length === 1 ? "item" : "items"} to gather` : "Everything requested has been received"}
+          </p>
+        </div>
+        {received > 0 && <Badge variant="secondary">{received} in review</Badge>}
       </div>
-      <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
-        {Object.entries(grouped).map(([category, items]) => (
-          <div key={category}>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{category}</p>
-            <div className="space-y-1">
-              {items.map((doc) => (
-                <ChecklistItemRow key={doc.id} doc={doc} applicationId={applicationId} />
-              ))}
-            </div>
-          </div>
-        ))}
+      {visible.length > 0 && (
+        <div className="mt-2 divide-y divide-border border-y border-border">
+          {visible.map((doc) => <ChecklistItemRow key={doc.id} doc={doc} applicationId={applicationId} />)}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        {active.length > visible.length ? (
+          <p className="text-xs text-muted-foreground">Plus {active.length - visible.length} more in your full checklist.</p>
+        ) : <span />}
+        <Button asChild variant="outline" size="sm" className="touch-target" data-testid="button-open-full-checklist">
+          <Link href="/documents">View full checklist</Link>
+        </Button>
       </div>
     </div>
   );

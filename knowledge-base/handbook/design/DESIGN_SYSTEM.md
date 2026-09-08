@@ -46,24 +46,24 @@ sites actually use it.
 
 | Capability | State | Measured |
 |---|---|---|
-| `PageShell` page geometry | **BUILT · ADOPTED 17%** | 49 of 285 page files import it — *pnpm guard:ui → `pageShellDrift`* |
-| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 25 file(s) import the registry, 323 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
+| `PageShell` page geometry | **BUILT · ADOPTED 18%** | 50 of 285 page files import it — *pnpm guard:ui → `pageShellDrift`* |
+| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 23 file(s) import the registry, 319 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
 | `PageShell fullHeight` | **BUILT · ADOPTED 0%** | zero call sites — correct: it is for `BareLayout` routes only, and none use PageShell yet |
 | `Heading` / `Text` (`ui/typography.tsx`) | **BUILT · ADOPTED 0%** | zero call sites — allowlisted in `scripts/orphan-scan.cjs` as known-unused |
-| `Logo` + `BrandingProvider` | **BUILT · ADOPTED** | 21 call site(s) |
-| Raw `<button>` with no height, padding or `.touch-target` | **NEEDS REVIEW** | 34 in 25 file(s) — each is EITHER a sub-44px control or a button wrapping a large area; only a human can tell which |
+| `Logo` + `BrandingProvider` | **BUILT · ADOPTED** | 26 call site(s) |
+| Raw `<button>` with no height, padding or `.touch-target` | **NEEDS REVIEW** | 36 in 27 file(s) — each is EITHER a sub-44px control or a button wrapping a large area; only a human can tell which |
 | `EmptyState` | **BUILT** | 10 file(s) use it |
-| `bg-surface` app ground | **ADOPTED (via layout)** | set once on `PrivateLayout`'s `<main>`; 3 file(s) name it directly — pages inherit it |
+| `bg-surface` app ground | **ADOPTED (via layout)** | set once on `PrivateLayout`'s `<main>`; 5 file(s) name it directly — pages inherit it |
 | Component tests / `components/ui` primitives | **BUILT** | colocated `*.test.tsx` beside components; 34 primitives — *pnpm test:client* |
 | `pageShellDrift` — PageShell drift (hand-rolled min-h-screen in a file that also imports PageShell) | **HELD** | **0** file(s) — **at zero; any hit is a regression** |
-| `directLucideImports` — direct lucide-react import (icon-registry drift) | ratcheting down | **323** file(s) |
+| `directLucideImports` — direct lucide-react import (icon-registry drift) | ratcheting down | **319** file(s) |
 | `nestedInteractive` — nested interactive control (a link wrapping a button) | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `rawHexLiterals` — raw hex colour literal | ratcheting down | **11** occurrence(s) |
 | `arbitraryColorValues` — arbitrary colour value (bg-[#…], to-[hsl(…)]) | ratcheting down | **3** occurrence(s) |
-| `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **151** occurrence(s) |
+| `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **149** occurrence(s) |
 | `blindSpotPaletteClasses` — palette class in a shape the token guard cannot see | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `subMinTouchTarget` — Button size="sm" (h-9 = 36px) with no .touch-target | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
-| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **58** occurrence(s) |
+| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **57** occurrence(s) |
 
 <!-- END GENERATED -->
 

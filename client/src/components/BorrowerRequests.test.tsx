@@ -106,6 +106,21 @@ describe("BorrowerRequests — transparency rows", () => {
     expect(screen.queryByTestId("row-request-t-act")).toBeNull();
   });
 
+  it("shows repeated internal review work as one clear borrower update", async () => {
+    tasks = Array.from({ length: 8 }, (_, index) => ({
+      ...transparency,
+      id: `review-${index}`,
+      borrowerDisplayText: "We're reviewing a document you uploaded.",
+    }));
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("section-in-progress")).toBeTruthy();
+    });
+    expect(screen.getAllByText("We're reviewing a document you uploaded.")).toHaveLength(1);
+    expect(screen.queryByTestId("text-in-progress-overflow")).toBeNull();
+  });
+
   it("still shows the all-caught-up state when there are no tasks at all", async () => {
     tasks = [];
     renderCard();

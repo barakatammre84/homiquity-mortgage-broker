@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render as rtlRender, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
-import { DocumentChecklistPanel, ReadinessPanel, StatusPanel } from "./panels";
+import { ConnectedFilePanel, DocumentChecklistPanel, FileSnapshotPanel, ReadinessPanel, StatusPanel } from "./panels";
 import type { ChecklistItemView } from "@/lib/documentChecklist";
 import type { CoachProfile, LoanStatusView } from "./types";
 
@@ -142,6 +142,45 @@ describe("StatusPanel — where the file stands", () => {
       <StatusPanel status={{ ...status, hasApplication: false, stage: null }} />,
     );
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("FileSnapshotPanel — one source of truth", () => {
+  it("shows the file stage, evidence count, next action, and human handoff without competing percentages", () => {
+    render(
+      <FileSnapshotPanel
+        status={status}
+        docs={[
+          item({ status: "verified" }),
+          item({ id: "cond-2", documentType: "w2", status: "uploaded" }),
+          item({ id: "cond-3", documentType: "bank_statement", status: "needed" }),
+        ]}
+      />,
+    );
+
+    const panel = screen.getByTestId("card-file-snapshot");
+    expect(screen.getByTestId("file-snapshot-stage").textContent).toContain("Underwriting");
+    expect(screen.getByTestId("file-snapshot-evidence").textContent).toMatch(/1 of 3 verified/i);
+    expect(screen.getByTestId("file-snapshot-evidence").textContent).toMatch(/1 received/i);
+    expect(screen.getByTestId("link-file-snapshot-next").getAttribute("href")).toBe("/documents");
+    expect(screen.getByTestId("link-message-loan-officer").getAttribute("href")).toBe("/messages");
+    expect(panel.textContent).not.toMatch(/65%|43%/);
+    expect(panel.querySelector('[data-testid^="doc-item-"]')).toBeNull();
+  });
+
+  it("gives an aspiring owner a homebuyer-plan action before an application exists", () => {
+    render(<FileSnapshotPanel status={{ ...status, hasApplication: false, stage: null, nextAction: null }} docs={[]} />);
+    expect(screen.getByTestId("file-snapshot-stage").textContent).toMatch(/planning/i);
+    expect(screen.getByTestId("link-file-snapshot-next").getAttribute("href")).toBe("/gap-calculator");
+  });
+});
+
+describe("ConnectedFilePanel", () => {
+  it("stops loading when no accessible borrower file is available", () => {
+    render(<ConnectedFilePanel status={null} docs={[]} loading={false} />);
+
+    expect(screen.getByTestId("coach-side-panel-unavailable").textContent).toMatch(/no connected file/i);
+    expect(screen.queryByTestId("coach-side-panel-loading")).toBeNull();
   });
 });
 

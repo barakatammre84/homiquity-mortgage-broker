@@ -10,6 +10,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // These journeys share and deliberately mutate one disposable database.
+    // Running files in parallel creates lock contention between fixture setup,
+    // route side effects, and cleanup, which can turn healthy endpoints into
+    // hook timeouts. Keep the lane deterministic locally and in CI.
+    fileParallelism: false,
+    maxWorkers: 1,
     testTimeout: 15000,
     hookTimeout: 30000,
     include: [

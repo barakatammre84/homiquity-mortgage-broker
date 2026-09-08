@@ -4,254 +4,195 @@ import { homeownershipGoalKeys } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { PageShell } from "@/components/PageShell";
 import { HomeReadinessPassport } from "@/components/HomeReadinessPassport";
 import { TaxReturnInsightCard } from "@/components/TaxReturnInsightCard";
 import { PartnerSharingCard } from "@/components/PartnerSharingCard";
 import { formatCurrency } from "@/lib/formatters";
-import {
-  ArrowRight,
-  Bot,
-  Calculator,
-  ClipboardList,
-  Home,
-  PiggyBank,
-  Scale,
-  Search,
-  Target,
-} from "lucide-react";
-
-/**
- * The Incubator: home surface for authenticated users with no loan
- * application yet (renters and prospective buyers). Composes the existing
- * homeownership-goal engine, the readiness passport, and the calculator
- * toolkit into one path-to-homeownership view, teeing users up for the
- * origination journey (/apply -> Dashboard).
- */
+import type { HomebuyerPlanningStage } from "@shared/homebuyerJourney";
 
 interface HomeownershipGoalRecord {
   currentSavingsBalance: string | null;
   currentMonthlySavings: string | null;
   currentRent: string | null;
+  monthlyIncome: string | null;
   targetDownPayment: string | null;
   targetHomePrice: string | null;
   currentPhase: string | null;
   journeyDay: number | null;
 }
 
-interface GoalResponse {
-  goal: HomeownershipGoalRecord | null;
+interface JourneyMilestoneRecord {
+  id: string;
+  title: string;
+  description: string | null;
 }
 
+interface GoalResponse {
+  goal: HomeownershipGoalRecord | null;
+  planningStage?: HomebuyerPlanningStage;
+  milestones?: JourneyMilestoneRecord[];
+}
+
+const STAGES: Record<HomebuyerPlanningStage, { label: string; description: string }> = {
+  exploring: { label: "Exploring", description: "Choose a target and understand the path before you apply." },
+  preparing: { label: "Preparing", description: "Keep your income, savings, and supporting information current." },
+  ready: { label: "Ready to plan", description: "Review the connected file with a loan officer and choose the next step." },
+};
+
 const TOOLKIT = [
-  {
-    href: "/calculators/rent-vs-buy",
-    icon: Scale,
-    title: "Rent vs. Buy",
-    description: "See how your rent compares to owning in your area.",
-    testId: "renter-tool-rent-vs-buy",
-  },
-  {
-    href: "/calculators/affordability",
-    icon: Calculator,
-    title: "Buying Power",
-    description: "How much home your income and debts support.",
-    testId: "renter-tool-affordability",
-  },
-  {
-    href: "/calculators/rent-to-own",
-    icon: Home,
-    title: "Rent-to-Own Path",
-    description: "Structured plans for getting to the down payment.",
-    testId: "renter-tool-rent-to-own",
-  },
-  {
-    // The rent ledger's front door for the renter persona. Shipped 2026-08-17 as an
-    // orphan route — the audit found /my-lease had zero inbound links anywhere.
-    href: "/my-lease",
-    icon: ClipboardList,
-    title: "My Lease & Rent Record",
-    description: "Keep a record of your lease and rent payments.",
-    testId: "renter-tool-my-lease",
-  },
-  {
-    href: "/ai-coach",
-    icon: Bot,
-    title: "Homi",
-    description: "Ask anything — credit, savings, timelines, programs.",
-    testId: "renter-tool-coach",
-  },
-];
+  { href: "/gap-calculator", title: "Update my homebuyer plan", description: "Rent, income, debts, savings, and target.", testId: "renter-tool-plan" },
+  { href: "/calculators/rent-vs-buy", title: "Compare renting and buying", description: "Explore the tradeoffs for your situation.", testId: "renter-tool-rent-vs-buy" },
+  { href: "/my-lease", title: "Keep my lease record", description: "Store lease details and your own rent-payment record.", testId: "renter-tool-my-lease" },
+  { href: "/calculators/affordability", title: "Explore buying power", description: "Build a planning estimate without applying.", testId: "renter-tool-affordability" },
+] as const;
 
-export function RenterHome({
-  userName,
-}: {
-  userName?: string;
-}) {
-  // Pre-signup attribution (CPA /cpa and LO /ref codes) is applied centrally by
-  // usePendingAttribution in PrivateLayout as soon as the user authenticates, so
-  // it lands regardless of whether they first hit the incubator or went straight
-  // to /apply — no per-surface consumption needed here anymore.
-  const { data: goalData } = useQuery<GoalResponse>({
-    queryKey: homeownershipGoalKeys.all(),
-  });
-
-  // Single source of truth for readiness: the server-side /100 score (the same
-  // one the HomeReadinessPassport renders below). This replaces a former
-  // client-side heuristic % that could disagree with the passport on-screen.
-  const { data: graph } = useQuery<{ readiness: { score: number } }>({
-    queryKey: ["/api/borrower-graph"],
-    staleTime: 60000,
-  });
-  const readinessScore = graph?.readiness?.score ?? null;
-
+export function RenterHome({ userName }: { userName?: string }) {
+  const { data: goalData } = useQuery<GoalResponse>({ queryKey: homeownershipGoalKeys.all() });
   const goal = goalData?.goal ?? null;
+  const stage = goalData?.planningStage ?? (goal ? "preparing" : "exploring");
+  const stageMeta = STAGES[stage];
+  const milestones = goalData?.milestones ?? [];
+
   const target = goal?.targetDownPayment ? Number(goal.targetDownPayment) : null;
   const saved = goal?.currentSavingsBalance ? Number(goal.currentSavingsBalance) : 0;
-  const monthly = goal?.currentMonthlySavings ? Number(goal.currentMonthlySavings) : 0;
   const remaining = target !== null ? Math.max(0, target - saved) : null;
-  const progressRatio = target ? Math.min(saved / target, 1) : 0;
-  const monthsToGoal =
-    remaining !== null && remaining > 0 && monthly > 0 ? Math.ceil(remaining / monthly) : null;
+  const savingsProgress = target && target > 0 ? Math.min((saved / target) * 100, 100) : 0;
+
+  const planFacts = [
+    { label: "Current rent", value: goal?.currentRent ? formatCurrency(Number(goal.currentRent)) : "Add to plan" },
+    { label: "Household income", value: goal?.monthlyIncome ? "Self-reported" : "Add to plan" },
+    { label: "Savings target", value: target ? formatCurrency(target) : "Add to plan" },
+  ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-xl px-4 py-8 sm:px-6 sm:py-10 space-y-8">
-        {/* Greeting + readiness score */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold" data-testid="text-renter-greeting">
-              {userName ? `Hi, ${userName}` : "Welcome"}
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              Let's get you home-ready — one step at a time.
-            </p>
-          </div>
-          {readinessScore !== null && (
-            <div className="text-right shrink-0" data-testid="text-renter-readiness">
-              <span className="text-3xl font-bold text-primary">{readinessScore}</span>
-              <span className="text-lg font-semibold text-muted-foreground">/100</span>
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">home-ready</p>
-            </div>
-          )}
+    <PageShell width="wide" className="space-y-8" data-testid="page-renter-home">
+      <header className="grid gap-5 border-b border-border pb-8 sm:grid-cols-[1fr_auto] sm:items-end">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-flare-ink">Homi Homebuyer Plan</p>
+          <h1 className="font-display mt-2 text-3xl font-bold tracking-tight sm:text-4xl" data-testid="text-renter-greeting">
+            {userName ? `${userName}, your path starts here.` : "Your path to homeownership starts here."}
+          </h1>
+          <p className="mt-3 max-w-2xl leading-relaxed text-muted-foreground">Keep the plan useful before an application exists, then carry the same information into your mortgage file when you are ready.</p>
         </div>
+        <div className="border-l-2 border-flare pl-4" data-testid="renter-planning-stage">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Planning stage</p>
+          <p className="font-display mt-1 text-2xl font-bold">{stageMeta.label}</p>
+          <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">{stageMeta.description}</p>
+        </div>
+      </header>
 
-        {/* Progress-sharing with a referring partner (PH-2). Self-hides when the
-            renter has no partner referrer. */}
-        <PartnerSharingCard />
+      <PartnerSharingCard />
 
-        {/* Down-payment goal */}
-        {goal && target ? (
-          <Card data-testid="card-renter-goal">
-            <CardContent className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <PiggyBank className="h-4 w-4 text-primary" />
-                  <p className="text-sm font-semibold">Down payment goal</p>
-                </div>
-                <Link href="/gap-calculator" className="text-xs font-medium text-primary">
-                  Adjust
-                </Link>
-              </div>
-              <Progress value={progressRatio * 100} />
-              <p className="text-sm">
-                {remaining !== null && remaining > 0 ? (
-                  <>
-                    You're <span className="font-semibold">{formatCurrency(remaining)}</span> away
-                    from your <span className="font-semibold">{formatCurrency(target)}</span> goal
-                    {goal.targetHomePrice
-                      ? ` on a ${formatCurrency(Number(goal.targetHomePrice))} home`
-                      : ""}
-                    .
-                  </>
-                ) : (
-                  <>
-                    Goal reached — you've saved{" "}
-                    <span className="font-semibold">{formatCurrency(saved)}</span>. Time to get
-                    pre-approved.
-                  </>
-                )}
+      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-6">
+          <Card data-testid="renter-next-action">
+            <CardContent className="p-6">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">One next action</p>
+              <h2 className="font-display mt-2 text-2xl font-bold">{goal ? "Keep your plan current" : "Build your starting plan"}</h2>
+              <p className="mt-2 leading-relaxed text-muted-foreground">
+                {goal
+                  ? remaining !== null && remaining > 0
+                    ? `Your savings plan has ${formatCurrency(remaining)} remaining. Review the target, income, and monthly savings before your next check-in.`
+                    : "Your saved target is in place. Review the connected information with a loan officer before starting an application."
+                  : "Add your rent, income, debts, savings, and target so Homi can keep the next milestone in one place."}
               </p>
-              {monthsToGoal !== null && (
-                <p className="text-xs text-muted-foreground">
-                  About {monthsToGoal} {monthsToGoal === 1 ? "month" : "months"} to go at{" "}
-                  {formatCurrency(monthly)}/mo.
-                </p>
-              )}
+              <Button asChild className="mt-4" data-testid="button-renter-plan">
+                <Link href="/gap-calculator">{goal ? "Review My Plan" : "Build My Plan"}</Link>
+              </Button>
             </CardContent>
           </Card>
-        ) : (
-          <Link href="/gap-calculator">
-            <Card className="hover-elevate cursor-pointer" data-testid="card-renter-set-goal">
-              <CardContent className="flex items-center justify-between p-5">
-                <div className="flex items-center gap-3">
-                  <Target className="h-5 w-5 text-primary" />
+
+          {goal && target ? (
+            <Card data-testid="card-renter-goal">
+              <CardContent className="space-y-3 p-6">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm font-semibold">Set your down payment goal</p>
-                    <p className="text-xs text-muted-foreground">
-                      Tell us your target and we'll map the fastest path to it.
-                    </p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Down payment savings</p>
+                    <p className="mt-1 font-semibold">{formatCurrency(saved)} of {formatCurrency(target)}</p>
                   </div>
+                  <Link href="/gap-calculator" className="touch-target inline-flex items-center text-sm font-semibold underline underline-offset-4">Adjust</Link>
                 </div>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                <Progress value={savingsProgress} aria-label={`${Math.round(savingsProgress)} percent of down payment savings target`} />
+                {goal.currentMonthlySavings && (
+                  <p className="text-xs text-muted-foreground">Current monthly savings plan: {formatCurrency(Number(goal.currentMonthlySavings))}.</p>
+                )}
               </CardContent>
             </Card>
-          </Link>
-        )}
+          ) : null}
 
-        {/* Readiness passport (credit / income / assets verification state) */}
-        <HomeReadinessPassport compact />
-
-        {/* Tax return upload → income readiness signals */}
-        <TaxReturnInsightCard />
-
-        {/* Toolkit */}
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-            Your toolkit
-          </h2>
-          <div className="grid grid-cols-2 gap-3">
-            {TOOLKIT.map((tool) => (
-              <Link key={tool.href} href={tool.href}>
-                <Card className="h-full hover-elevate cursor-pointer" data-testid={tool.testId}>
-                  <CardContent className="p-4 space-y-1.5">
-                    <tool.icon className="h-5 w-5 text-primary" />
-                    <p className="text-sm font-semibold leading-tight">{tool.title}</p>
-                    <p className="text-xs text-muted-foreground leading-snug">{tool.description}</p>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Connected plan</p>
+            <div className="divide-y divide-border border-y border-border">
+              {planFacts.map((fact, index) => (
+                <div key={fact.label} className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-4" data-testid={`renter-plan-fact-${index}`}>
+                  <span className="text-xs font-semibold text-flare-ink">0{index + 1}</span>
+                  <span className="font-medium">{fact.label}</span>
+                  <span className="text-sm text-muted-foreground">{fact.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
+
+          <HomeReadinessPassport compact />
+          <TaxReturnInsightCard />
         </div>
 
-        {/* The on-ramp to the origination journey */}
-        <Card className="bg-sidebar text-sidebar-foreground border-transparent" data-testid="card-renter-cta">
-          <CardContent className="p-5 space-y-3">
-            <p className="text-base font-semibold">Ready sooner than you think?</p>
-            <p className="text-sm opacity-80">
-              A pre-approval takes about 3 minutes, uses a soft credit check, and shows sellers
-              you're serious.
-            </p>
-            <div className="flex gap-2">
-              <Button asChild data-testid="button-renter-preapproval">
-                <Link href="/apply">
-                  Start pre-approval
+        <div className="space-y-6">
+          <Card data-testid="renter-human-checkin">
+            <CardContent className="p-6">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Human check-in</p>
+              <h2 className="font-display mt-2 text-2xl font-bold">Bring in your mortgage team.</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Ask Homi to organize the question, or message your team when personal review matters.</p>
+              <div className="mt-4 grid gap-2">
+                <Button asChild data-testid="button-renter-ask-homi"><Link href="/ai-coach" data-testid="link-renter-ask-homi">Ask Homi</Link></Button>
+                <Button asChild variant="outline" data-testid="button-renter-message-team"><Link href="/messages" data-testid="link-renter-message-team">Message My Mortgage Team</Link></Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card data-testid="renter-milestones">
+            <CardContent className="p-6">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Milestones</p>
+              {milestones.length > 0 ? (
+                <div className="mt-3 divide-y divide-border border-y border-border">
+                  {milestones.slice(-3).reverse().map((milestone) => (
+                    <div key={milestone.id} className="py-3">
+                      <p className="text-sm font-semibold">{milestone.title}</p>
+                      {milestone.description && <p className="mt-1 text-xs text-muted-foreground">{milestone.description}</p>}
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="mt-2 text-sm text-muted-foreground">Your first milestone appears after you save a homebuyer goal.</p>}
+            </CardContent>
+          </Card>
+
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Planning tools</p>
+            <div className="divide-y divide-border border-y border-border">
+              {TOOLKIT.map((tool, index) => (
+                <Link key={tool.href} href={tool.href} className="touch-target grid grid-cols-[2rem_1fr] gap-3 py-4 transition-colors hover:bg-muted" data-testid={tool.testId}>
+                  <span className="text-xs font-semibold text-flare-ink">0{index + 1}</span>
+                  <span>
+                    <span className="block text-sm font-semibold">{tool.title}</span>
+                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{tool.description}</span>
+                  </span>
                 </Link>
-              </Button>
-              <Button asChild
-                  variant="ghost"
-                  className="text-sidebar-foreground"
-                  data-testid="button-renter-browse"
-                >
-                <Link href="/properties">
-                  <Search className="h-4 w-4" />
-                  Browse homes
-                </Link>
-              </Button>
+              ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+
+          <Card className="border-transparent bg-sidebar text-sidebar-foreground" data-testid="card-renter-cta">
+            <CardContent className="p-6">
+              <p className="font-display text-xl font-bold">Ready to begin a mortgage application?</p>
+              <p className="mt-2 text-sm leading-relaxed text-sidebar-foreground/75">Your saved planning information can help you start with a clearer picture.</p>
+              <Button asChild className="mt-4" data-testid="button-renter-preapproval"><Link href="/apply">Start My Application</Link></Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">Planning stages and estimates are educational. They are not a loan approval, offer, or commitment.</p>
+    </PageShell>
   );
 }

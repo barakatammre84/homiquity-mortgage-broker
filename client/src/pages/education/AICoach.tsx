@@ -2,10 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, coachContextKeys, coachConversationKeys } from "@/lib/queryClient";
 import { clearPendingCoachQuestion, readPendingCoachQuestion } from "@/lib/pendingCoachQuestion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageSquare, Sparkles, WifiOff } from "lucide-react";
-import { Icons, iconSize } from "@/lib/icons";
 import { companyNmlsDisplay } from "@shared/companyIdentity";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
@@ -13,10 +10,10 @@ import { usePageView, useTrackActivity, useTrackCoachSession } from "@/hooks/use
 import { useCoachStream } from "@/components/coach/useCoachStream";
 import { MessageList } from "@/components/coach/MessageList";
 import { Composer } from "@/components/coach/Composer";
-import { CapturePanel } from "@/components/coach/CapturePanel";
 import { ConversationSidebar } from "@/components/coach/ConversationSidebar";
+import { Logo } from "@/components/brand/Logo";
 import { InsightsBanner, WelcomeState } from "@/components/coach/WelcomeState";
-import { ActionPlanPanel, DocumentChecklistInline, DocumentChecklistPanel, ReadinessPanel, StatusPanel } from "@/components/coach/panels";
+import { ActionPlanPanel, ConnectedFilePanel, DocumentChecklistInline } from "@/components/coach/panels";
 import type {
   ActionPlanItem,
   CoachConversation,
@@ -122,7 +119,7 @@ export default function AICoach() {
    * they typed again — stale figures presented as current, on a file that may
    * have moved days ago.
    */
-  const { data: fileContext } = useQuery<{
+  const { data: fileContext, isLoading: fileContextLoading } = useQuery<{
     hasApplication: boolean;
     loanStatus: LoanStatusView;
     documentChecklist: ChecklistItemView[];
@@ -219,7 +216,6 @@ export default function AICoach() {
   // invented ones: a docType matching no loan_condition, rendered next to an
   // Upload button that could never clear it. Reading them again would
   // reintroduce the bug for every borrower with history.
-  const profile = (turn.panel.profile ?? fileContext?.readiness ?? null) as CoachProfile | null;
   const loanStatus = (turn.panel.loanStatus ?? fileContext?.loanStatus ?? null) as LoanStatusView | null;
   const documentChecklist = (turn.panel.documentChecklist
     ?? fileContext?.documentChecklist
@@ -249,29 +245,24 @@ export default function AICoach() {
   };
 
   const sidePanelContent = (
-    <div className="space-y-3" data-testid="coach-side-panel">
-      {loanStatus?.hasApplication && <StatusPanel status={loanStatus} />}
-      <CapturePanel captured={turn.captured} />
-      {profile && <ReadinessPanel profile={profile} />}
-      {actionPlan && actionPlan.length > 0 && (
-        <ActionPlanPanel plan={actionPlan} onToggle={(itemId) => toggleActionItem.mutate(itemId)} />
-      )}
-      {documentChecklist && documentChecklist.length > 0 && (
-        <DocumentChecklistPanel docs={documentChecklist} applicationId={capturedAppId} />
-      )}
-    </div>
+    <ConnectedFilePanel
+      status={loanStatus}
+      docs={documentChecklist ?? []}
+      loading={fileContextLoading}
+    />
   );
 
   const conversationListContent = (
     <>
-      <div className="flex items-center gap-2 mb-4 px-1">
-        <Sparkles className="h-5 w-5 text-success-subtle-foreground" />
-        <h2 className="font-semibold text-foreground text-sm">Homi</h2>
+      <div className="mb-4 flex items-center gap-3 border-b border-border px-1 pb-4">
+        <Logo variant="mark" tone="mono" size="sm" data-testid="logo-homi-history" />
+        <div>
+          <h2 className="font-semibold text-foreground">Conversation history</h2>
+          <p className="text-xs text-muted-foreground">Return to an earlier question or start fresh.</p>
+        </div>
       </div>
       {loadingConvs ? (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
+        <p className="py-8 text-center text-sm text-muted-foreground">Loading conversations…</p>
       ) : (
         <ConversationSidebar
           conversations={conversations}
@@ -283,79 +274,56 @@ export default function AICoach() {
     </>
   );
 
+  const activeArtifact = hasChecklist ? (
+    <DocumentChecklistInline docs={documentChecklist!} applicationId={capturedAppId} />
+  ) : actionPlan && actionPlan.length > 0 ? (
+    <div className="mx-auto mb-2 w-full max-w-3xl px-3">
+      <ActionPlanPanel plan={actionPlan} onToggle={(itemId) => toggleActionItem.mutate(itemId)} />
+    </div>
+  ) : null;
+
   return (
-    <div className="flex h-[calc(100vh-4rem)]" data-testid="page-ai-coach">
-      <div className="w-64 border-r p-3 overflow-y-auto hidden lg:block">
-        {conversationListContent}
-      </div>
-
-      <div className="flex-1 flex flex-col min-w-0">
-        {hasActiveChat && (
-          <div className="flex items-center gap-2 border-b px-3 py-2">
-            <Sheet open={mobileConvOpen} onOpenChange={setMobileConvOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Conversations" className="lg:hidden" data-testid="button-mobile-conversations">
-                  <MessageSquare className="h-4 w-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-3">
-                <SheetHeader className="pb-2">
-                  <SheetTitle className="text-sm">Conversations</SheetTitle>
-                </SheetHeader>
-                {conversationListContent}
-              </SheetContent>
-            </Sheet>
-
-            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-medium truncate" data-testid="text-active-conversation-title">
-                {activeConv?.title || "New Conversation"}
-              </p>
-              {sourceContext && !activeConversationId && (
-                <Badge variant="secondary" className="text-xs" data-testid="badge-source-context">
-                  {sourceContext.banner}
-                </Badge>
-              )}
-            </div>
-
-            <Sheet open={mobilePanelOpen} onOpenChange={setMobilePanelOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Profile & assessment panel" className="xl:hidden" data-testid="button-mobile-panel">
-                  <Sparkles className="h-4 w-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-80 p-3 overflow-y-auto">
-                <SheetHeader className="pb-2">
-                  <SheetTitle className="text-sm">Your Pre-App Profile</SheetTitle>
-                </SheetHeader>
-                {sidePanelContent}
-              </SheetContent>
-            </Sheet>
+    <div className="flex h-[calc(100vh-4rem)] bg-surface" data-testid="page-ai-coach">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-3 border-b border-border bg-background px-3 py-3 sm:px-5" data-testid="homi-workspace-header">
+          <Logo variant="mark" tone="mono" size="md" data-testid="logo-homi-workspace" />
+          <div className="min-w-0 flex-1">
+            <h1 className="font-display text-lg font-bold leading-tight">Homi Workspace</h1>
+            <p className="truncate text-xs text-muted-foreground" data-testid="text-active-conversation-title">
+              {activeConv?.title || "Your mortgage questions and connected file"}
+            </p>
           </div>
-        )}
+
+          <Sheet open={mobileConvOpen} onOpenChange={setMobileConvOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="touch-target" data-testid="button-mobile-conversations">History</Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-80 p-4">
+              <SheetHeader className="sr-only"><SheetTitle>Conversation history</SheetTitle></SheetHeader>
+              {conversationListContent}
+            </SheetContent>
+          </Sheet>
+
+          <Sheet open={mobilePanelOpen} onOpenChange={setMobilePanelOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="touch-target xl:hidden" data-testid="button-mobile-panel">My file</Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-80 overflow-y-auto p-4">
+              <SheetHeader className="sr-only"><SheetTitle>Your connected file</SheetTitle></SheetHeader>
+              {sidePanelContent}
+            </SheetContent>
+          </Sheet>
+        </header>
 
         {turn.degraded && (
-          <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground" data-testid="banner-degraded">
-            <WifiOff className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Offline guidance mode — Homi isn't configured in this environment. Answers are standard
-              guidance and nothing is saved to your profile.
-            </span>
+          <div className="border-b border-border bg-muted px-4 py-2 text-xs text-muted-foreground" data-testid="banner-degraded">
+            Homi is using standard guidance right now. Your connected file remains available, and your loan officer can still help.
           </div>
         )}
 
-        {/* First-contact disclosure — static copy, deliberately not model-
-            generated: AI identity, educational-guidance limitation, PII
-            channel rule, and the SAFE Act unique-identifier line (renders
-            only once licensed, via companyNmlsDisplay). */}
-        <div
-          className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground"
-          data-testid="banner-coach-disclosure"
-        >
-          <Icons.security className={`${iconSize.dense} shrink-0`} />
+        <div className="border-b border-border bg-background px-4 py-2 text-xs text-muted-foreground" data-testid="banner-coach-disclosure">
           <span>
-            You're chatting with Homiquity's AI assistant. Its guidance is educational — estimates
-            aren't offers or approvals, and final terms come from underwriting review and official
-            disclosures. Please don't share your Social Security number or date of birth in chat.
+            You're chatting with Homiquity's AI assistant. Its guidance is educational — estimates aren't offers or approvals, and final terms come from underwriting review and official disclosures. Please don't share your Social Security number or date of birth in chat.
             {companyNmlsDisplay() ? ` ${companyNmlsDisplay()} · ` : " "}Equal Housing Opportunity.
           </span>
         </div>
@@ -371,23 +339,16 @@ export default function AICoach() {
           </>
         )}
 
-        {hasActiveChat && hasChecklist && (
-          <DocumentChecklistInline docs={documentChecklist!} applicationId={capturedAppId} />
-        )}
+        {hasActiveChat && activeArtifact}
 
         {hasActiveChat && (
-          <Composer
-            onSend={handleSend}
-            busy={isBusy}
-            usage={usage}
-            suggestions={turn.panel.suggestions}
-          />
+          <Composer onSend={handleSend} busy={isBusy} usage={usage} suggestions={turn.panel.suggestions} />
         )}
       </div>
 
-      <div className="w-80 border-l overflow-y-auto p-3 hidden xl:block">
+      <aside className="hidden w-80 overflow-y-auto border-l border-border bg-background p-4 xl:block" aria-label="Connected file">
         {sidePanelContent}
-      </div>
+      </aside>
     </div>
   );
 }

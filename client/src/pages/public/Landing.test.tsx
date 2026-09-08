@@ -61,24 +61,35 @@ function marketingCopy(): string {
 }
 
 describe("Landing", () => {
-  it("opens the three mortgage goals in the correct funnel mode", () => {
+  it("opens the three mortgage goals and the future-homeowner plan in the correct place", () => {
     render(<Landing />);
     expect(screen.getByTestId("goal-buy").getAttribute("href")).toBe("/apply");
     expect(screen.getByTestId("goal-refinance").getAttribute("href")).toBe("/apply?type=refinance");
     expect(screen.getByTestId("goal-equity").getAttribute("href")).toBe("/apply?type=cashout");
+    expect(screen.getByTestId("goal-plan").getAttribute("href")).toBe("#homebuyer-plan");
   });
 
-  it("puts the goal choice before the calculator and keeps Homi available later", () => {
+  it("shows the financial story in the hero and gives future homeowners value before signup", () => {
     render(<Landing />);
 
     const hero = screen.getByTestId("section-hero");
     expect(hero.contains(screen.getByTestId("hero-goal-picker"))).toBe(true);
-    expect(hero.contains(screen.getByTestId("coach-prompt-bar"))).toBe(false);
+    expect(hero.contains(screen.getByTestId("homi-financial-story"))).toBe(true);
+    expect(screen.getByTestId("hero-goal-picker").querySelector("svg")).toBeNull();
+    const plan = screen.getByTestId("section-homebuyer-plan");
     const estimator = screen.getByTestId("section-estimator");
     const journeys = screen.getByTestId("section-journeys");
-    expect(hero.compareDocumentPosition(estimator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(hero.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(plan.compareDocumentPosition(estimator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(estimator.compareDocumentPosition(journeys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(journeys.contains(screen.getByTestId("coach-prompt-bar"))).toBe(true);
+    expect(plan.contains(screen.getByTestId("homebuyer-plan-preview"))).toBe(true);
+  });
+
+  it("uses a typography-led proof band without generic trust icons", () => {
+    render(<Landing />);
+    const trust = screen.getByTestId("section-trust");
+    expect(trust.querySelector("svg")).toBeNull();
+    expect(screen.getAllByTestId(/^item-trust-/)).toHaveLength(3);
   });
 
   it("makes mixed income concrete instead of flattening it into a wage claim", () => {

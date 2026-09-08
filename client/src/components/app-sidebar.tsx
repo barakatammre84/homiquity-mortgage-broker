@@ -58,7 +58,6 @@ import {
   Gauge,
   Handshake,
   Building2,
-  Bot,
   CircleUser,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
@@ -76,7 +75,8 @@ interface TeamMember {
 interface NavItem {
   title: string;
   href: string;
-  icon: ComponentType<{ className?: string }>;
+  icon?: ComponentType<{ className?: string }>;
+  brandMark?: boolean;
   testId: string;
   showBadge?: boolean;
   showMessageBadge?: boolean;
@@ -94,7 +94,7 @@ const aspiringOwnerNavigation: NavSection[] = [
     section: "Explore",
     items: [
       { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, testId: "link-borrower-dashboard" },
-      { title: "Homi", href: "/ai-coach", icon: Bot, testId: "link-ai-coach" },
+      { title: "Homi", href: "/ai-coach", brandMark: true, testId: "link-ai-coach" },
       { title: "My Profile", href: "/profile", icon: CircleUser, testId: "link-my-profile" },
       { title: "Messages", href: "/messages", icon: MessageCircle, testId: "link-messages", showMessageBadge: true },
     ],
@@ -119,7 +119,7 @@ const activeBuyerNavigation: NavSection[] = [
       { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, testId: "link-borrower-dashboard" },
       { title: "To-Do", href: "/tasks", icon: CheckSquare, testId: "link-tasks", showBadge: true },
       { title: "Documents", href: "/documents", icon: Upload, testId: "link-documents" },
-      { title: "Homi", href: "/ai-coach", icon: Bot, testId: "link-ai-coach" },
+      { title: "Homi", href: "/ai-coach", brandMark: true, testId: "link-ai-coach" },
       { title: "Messages", href: "/messages", icon: MessageCircle, testId: "link-messages", showMessageBadge: true },
     ],
   },
@@ -311,7 +311,9 @@ export function AppSidebar() {
                   <SidebarMenuItem key={`${section.section}-${item.title}`}>
                     <SidebarMenuButton asChild isActive={isActive(item.href)}>
                       <Link href={item.href} className="cursor-pointer" data-testid={item.testId}>
-                        <item.icon className="h-4 w-4" />
+                        {item.brandMark
+                          ? <Logo size="sm" variant="mark" tone="onDark" data-testid="logo-sidebar-homi" />
+                          : item.icon ? <item.icon className="h-4 w-4" /> : null}
                         <span>{item.title}</span>
                         {item.showBadge && pendingTaskCount > 0 && (
                           <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-xs font-medium text-warning-foreground" data-testid="badge-pending-tasks">
@@ -342,7 +344,9 @@ export function AppSidebar() {
                   <SidebarMenuItem key={`${section.section}-${item.title}`}>
                     <SidebarMenuButton asChild isActive={isActive(item.href)}>
                       <Link href={item.href} className="cursor-pointer" data-testid={item.testId}>
-                        <item.icon className="h-4 w-4" />
+                        {item.brandMark
+                          ? <Logo size="sm" variant="mark" tone="onDark" data-testid="logo-sidebar-homi-admin" />
+                          : item.icon ? <item.icon className="h-4 w-4" /> : null}
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>

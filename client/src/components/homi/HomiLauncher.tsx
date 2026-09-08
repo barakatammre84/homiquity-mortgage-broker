@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/brand/Logo";
 import { ASSISTANT_NAME } from "@shared/assistant/identity";
 
 /**
@@ -17,23 +17,10 @@ import { ASSISTANT_NAME } from "@shared/assistant/identity";
  * would drag `useCoachStream`, the markdown renderer, the panels, Plaid and the
  * upload button onto the landing page's critical path.
  *
- * Everything it imports is ALREADY eager for other reasons: `Button` and
- * `lucide-react` come in via PrivateLayout itself, `useLocation` via App.tsx,
- * and `ASSISTANT_NAME` is a zero-import leaf. So this costs the entry chunk
- * roughly the size of its own JSX.
- *
- * 🚨 THE DIRECT `lucide-react` IMPORT IS DELIBERATE, AND IT IS THE ONE PLACE
- * THAT EXCEPTION IS EARNED. The icon ratchet (`pnpm guard:ui` →
- * directLucideImports) wants `Icons.coach` from `@/lib/icons` instead, and on
- * any lazy surface that is right — HomiDock does exactly that. But `@/lib/icons`
- * is NOT in the eager graph today, so importing it HERE drags the whole
- * registry onto the critical path. Measured, not assumed: swapping this one
- * line for `Icons.coach` grew the eager bundle by 2,535 raw bytes — more than
- * double this entire component. That is the "#482 icon set imported whole"
- * shape, and 1 lint count is the cheaper side of the trade.
- *
- * If `@/lib/icons` ever becomes eager for another reason, this exception stops
- * costing anything and should be reverted to `Icons.coach`.
+ * Everything it imports is ALREADY eager for other reasons: `Button` and the
+ * brand `Logo` are used by the private shell, `useLocation` by App.tsx, and
+ * `ASSISTANT_NAME` is a zero-import leaf. So this costs the entry chunk roughly
+ * the size of its own JSX while giving Homi the same identity everywhere.
  *
  * The chat lives in `HomiDock`, behind `lazy()`. The dock and the /ai-coach
  * page are both lazy importers of the same modules, so Rollup puts the shared
@@ -91,7 +78,7 @@ export function HomiLauncher() {
          */
         className="touch-target fixed bottom-20 right-4 z-40 h-14 w-14 rounded-full shadow-lg md:bottom-6 md:right-6"
       >
-        <MessageCircle className="h-6 w-6" />
+        <Logo size="sm" variant="mark" tone="onDark" data-testid="logo-homi-launcher" />
       </Button>
 
       {everOpened && (

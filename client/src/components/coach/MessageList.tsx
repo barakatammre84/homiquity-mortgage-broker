@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Link } from "wouter";
 import { AlertCircle, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage, PendingUserMessage, StreamingMessage, TypingIndicator } from "./ChatMessage";
@@ -38,6 +39,7 @@ export function MessageList({
     (turn.status === "connecting" || turn.status === "streaming" || turn.status === "finalizing") &&
     turn.streamingText.length === 0 &&
     !turn.lintReplaced;
+  const unavailable = turn.error?.code === "not_configured";
 
   return (
     <div className="flex-1 overflow-y-auto p-4" data-testid="chat-messages-container">
@@ -65,20 +67,33 @@ export function MessageList({
             data-testid="chat-turn-error"
           >
             <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-foreground">{turn.error.message}</p>
-            </div>
-            <div className="flex gap-1 shrink-0">
-              {turn.error.retryable && (
-                <Button variant="outline" size="sm" className="touch-target text-xs gap-1" onClick={onRetry} data-testid="button-retry-turn">
-                  <RefreshCw className="h-3 w-3" />
-                  Retry
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-foreground">
+                {unavailable
+                  ? "Homi is temporarily unavailable. Your file is safe, and you can keep moving with any of these options."
+                  : turn.error.message}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {turn.error.retryable && (
+                  <Button variant="outline" size="sm" className="touch-target gap-1 text-xs" onClick={onRetry} data-testid="button-retry-turn">
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                  </Button>
+                )}
+                <Button asChild variant="outline" size="sm" className="touch-target text-xs">
+                  <Link href="/apply" data-testid="link-error-application">Continue application</Link>
                 </Button>
-              )}
-              <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Dismiss" onClick={onDismissError} data-testid="button-dismiss-error">
-                <X className="h-3.5 w-3.5" />
-              </Button>
+                <Button asChild variant="outline" size="sm" className="touch-target text-xs">
+                  <Link href="/documents" data-testid="link-error-documents">Review documents</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm" className="touch-target text-xs">
+                  <Link href="/messages" data-testid="link-error-loan-officer">Message loan officer</Link>
+                </Button>
+              </div>
             </div>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="Dismiss" onClick={onDismissError} data-testid="button-dismiss-error">
+              <X className="h-3.5 w-3.5" />
+            </Button>
           </div>
         )}
 

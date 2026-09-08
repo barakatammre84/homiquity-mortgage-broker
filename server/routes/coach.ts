@@ -787,10 +787,10 @@ export function registerCoachRoutes(app: Express) {
 
       if (verifiedContext.hasApplication && !hasAssessment) {
         insights.push({
-          type: "readiness_check",
-          title: "Get Your Readiness Assessment",
-          description: "You have application data on file. Ask Homi to assess your mortgage readiness for a personalized action plan.",
-          action: "Assess my mortgage readiness based on my application",
+          type: "organize_file",
+          title: "Organize Your Connected File",
+          description: "Your application is connected. Ask Homi to map the income story and identify one useful next action.",
+          action: "Map the income and evidence already connected to my file",
         });
       }
 
@@ -799,8 +799,8 @@ export function registerCoachRoutes(app: Express) {
         if (uploaded === 0) {
           insights.push({
             type: "missing_docs",
-            title: "Upload Your Documents",
-            description: "No documents uploaded yet. Homi can create a personalized checklist for you.",
+            title: "Build Your Document Plan",
+            description: "Nothing has been received yet. Ask Homi which documents fit the income sources on your application.",
             action: "What documents do I need to upload?",
           });
         }
@@ -827,8 +827,8 @@ export function registerCoachRoutes(app: Express) {
       if (!verifiedContext.hasApplication && totalConversations === 0) {
         insights.push({
           type: "get_started",
-          title: "Start Your Homebuying Journey",
-          description: "Chat with Homi to understand what you need for a mortgage and create a personalized plan.",
+          title: "Build Your Homebuyer Plan",
+          description: "Tell Homi how you earn, what you own, and what feels unclear to get one useful next step.",
         });
       }
 

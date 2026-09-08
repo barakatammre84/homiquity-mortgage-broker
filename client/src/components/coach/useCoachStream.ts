@@ -175,6 +175,9 @@ export function useCoachStream(opts: {
           case "panel":
             setTurn((t) => ({ ...t, panel: { ...t.panel, ...(data as CoachPanelState) } }));
             break;
+          case "degraded":
+            setTurn((t) => ({ ...t, degraded: true }));
+            break;
           case "lint_replaced":
             // The streamed draft was replaced server-side; the persisted safe
             // message arrives with the refetch after `done`.

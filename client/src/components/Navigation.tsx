@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LayoutDashboard, Menu, X, Phone, ChevronDown, Home, Calculator, FileText, Percent, Bot, ArrowRight, Users, Gauge, CircleUser } from "lucide-react";
+import { LayoutDashboard, Menu, X, Phone, ChevronDown, Home, Calculator, FileText, Percent, ArrowRight, Users, Gauge, CircleUser } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { PRELAUNCH_GATED } from "@/lib/prelaunch";
@@ -293,7 +293,7 @@ export function Navigation() {
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/ai-coach" className="w-full cursor-pointer" data-testid="menu-ai-coach">
-                      <Bot className="mr-2 h-4 w-4" />
+                      <Logo size="sm" variant="mark" className="mr-2" data-testid="logo-menu-homi" />
                       Homi
                     </Link>
                   </DropdownMenuItem>
@@ -352,7 +352,9 @@ export function Navigation() {
 
             <Button
               variant="ghost"
-              size="icon" aria-label="Close"
+              size="icon"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
               className="lg:hidden"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               data-testid="button-mobile-menu"
