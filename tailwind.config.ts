@@ -184,7 +184,7 @@ export default {
       fontFamily: {
         sans: ["var(--font-sans)"],
         serif: ["var(--font-serif)"],
-        display: ["var(--font-display)"], /* hero/display headings (Bricolage Grotesque) */
+        display: ["var(--font-display)"], /* hero/display headings (Geist, heavier and larger) */
         mono: ["var(--font-mono)"],
       },
       keyframes: {

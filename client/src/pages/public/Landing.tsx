@@ -69,16 +69,16 @@ export default function Landing() {
           <div className="mx-auto grid max-w-screen-2xl items-stretch gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-12">
             <div className="flex max-w-3xl flex-col justify-center py-2 lg:py-16 xl:py-20">
               <p className="text-xs font-semibold uppercase tracking-widest text-precision-500">Complex people. A clearer path.</p>
-              <h1 className="mt-7 text-balance font-serif text-5xl font-bold leading-none tracking-tighter text-foreground sm:text-6xl lg:text-7xl 2xl:text-8xl" data-testid="text-hero-title">
+              <h1 className="mt-7 text-balance font-display text-5xl font-bold leading-none tracking-tighter text-foreground sm:text-6xl lg:text-7xl 2xl:text-8xl" data-testid="text-hero-title">
                 Complex income.<br />A simpler mortgage.
               </h1>
-              <p className="mt-7 max-w-2xl font-serif text-lg leading-relaxed text-foreground/75 sm:text-xl lg:text-2xl" data-testid="text-hero-subtitle">
+              <p className="mt-7 max-w-2xl font-display text-lg leading-relaxed text-foreground/75 sm:text-xl lg:text-2xl" data-testid="text-hero-subtitle">
                 We organize your salary, business income, and rental properties into one clear mortgage plan, so you can move forward with confidence.
               </p>
 
               <div className="mt-8 space-y-3" data-testid="hero-goal-picker">
                 {GOALS.map((goal) => (
-                  <Link key={goal.id} href={goal.href} className="touch-target flex min-h-16 items-center justify-between border border-precision-300 bg-card/40 px-5 font-serif text-xl font-bold transition-colors hover:border-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid={`goal-${goal.id}`}>
+                  <Link key={goal.id} href={goal.href} className="touch-target flex min-h-16 items-center justify-between rounded-xl border border-precision-300 bg-card/40 px-5 font-display text-xl font-bold transition-colors hover:border-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid={`goal-${goal.id}`}>
                     <span>{goal.title}</span>
                     <span aria-hidden="true" className="font-sans text-3xl font-light">›</span>
                   </Link>
@@ -91,7 +91,7 @@ export default function Landing() {
               <p className="mt-7 text-xs font-semibold uppercase tracking-widest text-precision-500">More complex income. A more capable brokerage.</p>
             </div>
 
-            <div className="-mx-5 flex items-center bg-precision-700 px-5 py-8 sm:-mx-8 sm:px-8 lg:mx-0 lg:px-8 lg:py-10 2xl:px-12">
+            <div className="-mx-5 flex items-center bg-precision-700 px-5 py-8 sm:-mx-8 sm:px-8 lg:mx-0 lg:rounded-3xl lg:px-8 lg:py-10 2xl:px-12">
               <HomiFinancialStory />
             </div>
           </div>
@@ -101,7 +101,7 @@ export default function Landing() {
           <ul className="mx-auto grid max-w-screen-2xl gap-7 md:grid-cols-3 md:gap-0">
             {TRUST_POINTS.map((point, index) => (
               <li key={point.id} className={`py-1 md:px-10 ${index > 0 ? "border-t border-primary-foreground/25 pt-7 md:border-l md:border-t-0 md:pt-1" : ""}`} data-testid={`item-trust-${point.id}`}>
-                <p className="font-serif text-xl font-bold leading-snug sm:text-2xl">{point.title}</p>
+                <p className="font-display text-xl font-bold leading-snug sm:text-2xl">{point.title}</p>
                 <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-primary-foreground/65">{point.label}</p>
               </li>
             ))}
@@ -112,7 +112,7 @@ export default function Landing() {
           <div className="mx-auto max-w-screen-2xl">
             <div className="max-w-3xl">
               <p className="text-xs font-semibold uppercase tracking-widest text-precision-500">Start where you are</p>
-              <h2 className="mt-4 font-serif text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Choose the path that fits where you are.</h2>
+              <h2 className="mt-4 font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Choose the path that fits where you are.</h2>
               <p className="mt-5 text-lg leading-relaxed text-precision-500">Prepare for a mortgage now, or build toward one over time. Your work stays connected as your goals change.</p>
             </div>
 
@@ -120,7 +120,7 @@ export default function Landing() {
               {PATHWAYS.map((pathway, pathwayIndex) => (
                 <article key={pathway.id} className={`py-9 lg:p-10 xl:p-14 ${pathwayIndex > 0 ? "border-t border-precision-100 lg:border-l lg:border-t-0" : ""}`} data-testid={`pathway-${pathway.id}`}>
                   <p className="text-sm font-semibold text-flare-ink">{pathway.label}</p>
-                  <h3 className="mt-4 max-w-xl font-serif text-3xl font-bold leading-tight tracking-tight">{pathway.title}</h3>
+                  <h3 className="mt-4 max-w-xl font-display text-3xl font-bold leading-tight tracking-tight">{pathway.title}</h3>
                   <p className="mt-4 max-w-xl leading-relaxed text-precision-500">{pathway.description}</p>
                   <ol className="mt-7 space-y-3 border-t border-precision-100 pt-6">
                     {pathway.steps.map((step, index) => (
@@ -130,7 +130,7 @@ export default function Landing() {
                       </li>
                     ))}
                   </ol>
-                  <Link href={pathway.href} className="touch-target mt-8 inline-flex min-h-12 items-center justify-center bg-precision-700 px-6 text-sm font-semibold text-primary-foreground transition-colors hover:bg-precision-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-testid={`pathway-${pathway.id}-action`}>
+                  <Link href={pathway.href} className="touch-target mt-8 inline-flex min-h-12 items-center justify-center rounded-full bg-precision-700 px-6 text-sm font-semibold text-primary-foreground transition-colors hover:bg-precision-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-testid={`pathway-${pathway.id}-action`}>
                     {pathway.action}
                   </Link>
                 </article>
@@ -143,7 +143,7 @@ export default function Landing() {
           <div className="mx-auto grid max-w-7xl items-start gap-10 lg:grid-cols-[0.76fr_1.24fr] lg:gap-20">
             <div className="lg:sticky lg:top-28">
               <p className="text-sm font-semibold text-flare-ink">Renter Pathway</p>
-              <h2 className="mt-3 font-serif text-4xl font-bold leading-tight tracking-tight sm:text-5xl">See your path before you apply.</h2>
+              <h2 className="mt-3 font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">See your path before you apply.</h2>
               <p className="mt-5 text-lg leading-relaxed text-precision-500">Three choices give you a practical starting plan. No account, credit check, or contact details required.</p>
             </div>
             <HomebuyerPlanPreview />
@@ -154,7 +154,7 @@ export default function Landing() {
           <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:gap-20">
             <div>
               <p className="text-sm font-semibold text-flare-ink">Explore before you apply</p>
-              <h2 className="mt-3 font-serif text-4xl font-bold leading-tight tracking-tight">See what may fit your budget.</h2>
+              <h2 className="mt-3 font-display text-4xl font-bold leading-tight tracking-tight">See what may fit your budget.</h2>
               <p className="mt-5 text-lg leading-relaxed text-precision-500">Pick a few ranges and get a planning estimate. No sign-up, no credit check, and nothing leaves your device until you decide to continue.</p>
             </div>
             <BuyingPowerEstimator />
@@ -166,7 +166,7 @@ export default function Landing() {
             <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-20">
               <div>
                 <p className="text-sm font-semibold text-flare-ink">The whole financial story</p>
-                <h2 className="mt-3 font-serif text-4xl font-bold leading-tight tracking-tight">Keep each income source clear.</h2>
+                <h2 className="mt-3 font-display text-4xl font-bold leading-tight tracking-tight">Keep each income source clear.</h2>
                 <p className="mt-5 text-lg leading-relaxed text-precision-500">Homiquity keeps each source and its evidence separate, then brings the picture together for review.</p>
                 <Button asChild variant="outline" className="mt-7" data-testid="button-self-employed-learn"><Link href="/self-employed">See the self-employed process</Link></Button>
               </div>
@@ -175,7 +175,7 @@ export default function Landing() {
                 {COMPLEX_INCOME.map((item) => (
                   <li key={item.id} className="grid grid-cols-[2.5rem_1fr] gap-3 py-5" data-testid={`income-path-${item.id}`}>
                     <span className="pt-1 text-xs font-semibold text-flare-ink">{item.number}</span>
-                    <span><span className="block font-serif text-lg font-bold">{item.title}</span><span className="mt-1 block leading-relaxed text-precision-500">{item.description}</span></span>
+                    <span><span className="block font-display text-lg font-bold">{item.title}</span><span className="mt-1 block leading-relaxed text-precision-500">{item.description}</span></span>
                   </li>
                 ))}
               </ul>

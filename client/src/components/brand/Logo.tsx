@@ -20,6 +20,7 @@ const wordmarkSize = {
   sm: "text-lg",
   md: "text-xl",
   lg: "text-2xl",
+  xl: "text-3xl",
 } as const;
 
 // Height only. `.brand-mark` carries the artwork's real aspect-ratio, so the
@@ -29,12 +30,14 @@ const markSize = {
   sm: "h-5",
   md: "h-6",
   lg: "h-7",
+  xl: "h-9",
 } as const;
 
 const imgHeight = {
   sm: "h-6",
   md: "h-7",
   lg: "h-9",
+  xl: "h-11",
 } as const;
 
 const toneClass = {
