@@ -112,6 +112,7 @@ MATERIALITY_CATEGORIES	shared/schema/underwritingConditions.ts	array	5	9df372996
 MESSAGE_TYPES	shared/schema/lendingWholesale.ts	array	3	f94476875458	MessageType	0	internal	
 MILITARY_STATUS_TYPES	shared/schema/intelligence.ts	array	6	ef723c5a7302		0	internal	
 MortgageType	shared/mismo.ts	union	5	21acce0dc8ae		4	ULAD	MortgageType
+OCCUPANCY_TYPES	shared/occupancy.ts	array	3	69d7391fa2b2	OccupancyType	1	internal	
 OPEN_RATE_LOCK_STATUSES	shared/statusVocabularies.ts	array	2	530435164a7f		4	internal	
 OTHER_INCOME_TYPE_IDS	shared/incomeTypes.ts	array	20	8464cf565d0f	OtherIncomeTypeId	1	internal	
 PaidByOtherPartyIneligibleReason	shared/liabilityExclusions.ts	union	4	1f975ddad262		0	internal	

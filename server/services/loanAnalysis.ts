@@ -530,35 +530,29 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
       console.warn("[OPT-5] State sync failed for analyzing (non-fatal):", syncErr);
     }
 
+    // Decisioning reads subject-property facts from URLA. The fast intake also
+    // stores them on the application for pricing, so reconcile the two before
+    // any outcome is calculated. A failed sync is retryable and must not
+    // degrade into an analysis that silently assumes the property details.
+    if (app.occupancyType) {
+      await storage.upsertUrlaPropertyInfo({
+        applicationId,
+        occupancyType: app.occupancyType,
+        numberOfUnits: app.numberOfUnits ?? (app.propertyType === "multi_family" ? null : 1),
+        estimatedMarketRent: app.subjectMonthlyRentalIncome ?? null,
+      });
+    }
+
     const analysisResult = await analyzeIntake(applicationId);
     const newStatus = analysisResult.outcome;
 
-    try {
-      const { syncApplicationStatusToStateMachine } = await import("./optimizationEngine");
-      await syncApplicationStatusToStateMachine(userId, applicationId, newStatus);
-    } catch (syncErr) {
-      console.warn(`[OPT-5] State sync failed for ${newStatus} (non-fatal):`, syncErr);
-    }
-
     await storage.updateLoanApplication(applicationId, {
-      status: newStatus,
       preApprovalAmount: analysisResult.preApprovalAmount,
       dtiRatio: analysisResult.dtiRatio,
       ltvRatio: analysisResult.ltvRatio,
       aiAnalysis: analysisResult.analysis,
       aiAnalyzedAt: new Date(),
     });
-
-    // The automated intake decision sets pre_approved directly (not via
-    // updatePipelineStage), so record the outcome timestamp here too — otherwise
-    // the conversion funnel would miss the whole auto-pre-approval path
-    // ("under_review" is a no-op in the recorder). Best-effort (F-002 wiring).
-    try {
-      const { recordStageTimestamp } = await import("./outcomeTracker");
-      await recordStageTimestamp(applicationId, newStatus);
-    } catch (outcomeErr) {
-      console.warn("[Analysis] Outcome stamp failed (non-fatal):", outcomeErr);
-    }
 
     // Clear then recreate options so a re-drive never duplicates scenarios.
     try {
@@ -574,6 +568,55 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
       }
     }
 
+    // Document collection starts for BOTH outcomes. This used to run only for
+    // auto-approved files, which left an under_review borrower with zero
+    // conditions and zero tasks — every action surface (dashboard nextAction,
+    // borrower tasks, the document checklist, /loan-options next steps)
+    // rendered "nothing needed from you" at the exact moment verification
+    // documents were the one thing that could move the file. The requirements
+    // engine is deterministic off the borrower's own answers, and both
+    // generators are idempotent, so a later human approval re-drives safely.
+    // A settled status tells every borrower surface that analysis is finished.
+    // Keep the file in `analyzing` until its conditions and upload tasks exist;
+    // otherwise the first dashboard render can truthfully read the status but
+    // receive a partial checklist until the next 30-second refresh.
+    const updatedApp = await storage.getLoanApplication(applicationId);
+    if (!updatedApp) throw new Error("Application disappeared during intake finalization");
+    const { initializeLoanPipeline } = await import("../pipelineEngine");
+    await initializeLoanPipeline(updatedApp, userId);
+    await storage.createDealActivity({
+      applicationId,
+      activityType: "status_change",
+      title: "Document Collection Started",
+      description: analysisResult.isApproved
+        ? "Required documents have been identified. Please upload them to continue your application."
+        : "Required documents have been identified. Uploading them now gives your underwriter what they need to verify your file.",
+    });
+
+    try {
+      const { runPreUnderwriting } = await import("./preUnderwriting");
+      await runPreUnderwriting(applicationId, "intake");
+    } catch (preUwErr) {
+      console.error("[Analysis] Pre-underwriting validation failed (non-fatal):", preUwErr);
+    }
+
+    await storage.updateLoanApplication(applicationId, { status: newStatus });
+    try {
+      const { syncApplicationStatusToStateMachine } = await import("./optimizationEngine");
+      await syncApplicationStatusToStateMachine(userId, applicationId, newStatus);
+    } catch (syncErr) {
+      console.warn(`[OPT-5] State sync failed for ${newStatus} (non-fatal):`, syncErr);
+    }
+
+    // The automated intake decision sets pre_approved directly (not via
+    // updatePipelineStage), so record the outcome timestamp here too — otherwise
+    // the conversion funnel would miss the whole auto-pre-approval path.
+    try {
+      const { recordStageTimestamp } = await import("./outcomeTracker");
+      await recordStageTimestamp(applicationId, newStatus);
+    } catch (outcomeErr) {
+      console.warn("[Analysis] Outcome stamp failed (non-fatal):", outcomeErr);
+    }
     try {
       const firstReason = analysisResult.analysis.concerns[0];
       await storage.createDealActivity({
@@ -635,41 +678,6 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
       console.error("[Analysis] Failed to send notifications:", notifErr);
     }
 
-    // Document collection starts for BOTH outcomes. This used to run only for
-    // auto-approved files, which left an under_review borrower with zero
-    // conditions and zero tasks — every action surface (dashboard nextAction,
-    // borrower tasks, the document checklist, /loan-options next steps)
-    // rendered "nothing needed from you" at the exact moment verification
-    // documents were the one thing that could move the file. The requirements
-    // engine is deterministic off the borrower's own answers, and both
-    // generators are idempotent, so a later human approval re-drives safely.
-    try {
-      const updatedApp = await storage.getLoanApplication(applicationId);
-      if (updatedApp) {
-        const { initializeLoanPipeline } = await import("../pipelineEngine");
-        await initializeLoanPipeline(updatedApp, userId);
-        await storage.createDealActivity({
-          applicationId,
-          activityType: "status_change",
-          title: "Document Collection Started",
-          description: analysisResult.isApproved
-            ? "Required documents have been identified. Please upload them to continue your application."
-            : "Required documents have been identified. Uploading them now gives your underwriter what they need to verify your file.",
-          // performedBy omitted: this is a system action, and "system" is not
-          // a real user id (the performed_by FK rejects it). Leaving it null
-          // fixes a latent FK violation carried over from the original handler.
-        });
-      }
-    } catch (pipelineErr) {
-      console.error("[Analysis] Pipeline initialization failed (non-fatal):", pipelineErr);
-    }
-
-    try {
-      const { runPreUnderwriting } = await import("./preUnderwriting");
-      await runPreUnderwriting(applicationId, "intake");
-    } catch (preUwErr) {
-      console.error("[Analysis] Pre-underwriting validation failed (non-fatal):", preUwErr);
-    }
   } catch (analysisError) {
     console.error(`[Analysis] finalizeIntake failed for ${applicationId}:`, analysisError);
     // Reset so the application isn't stranded in "analyzing" — the recovery

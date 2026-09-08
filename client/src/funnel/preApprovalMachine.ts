@@ -38,7 +38,10 @@ import { toNum as toNumber } from "@shared/lib/number";
 export type FunnelStepId =
   | "intro"
   | "loanPurpose"
+  | "occupancyType"
   | "propertyType"
+  | "numberOfUnits"
+  | "subjectMonthlyRentalIncome"
   | "veteranAndFirstTime"
   | "purchasePrice"
   | "downPayment"
@@ -58,7 +61,10 @@ export type FunnelStepId =
 export const CANONICAL_ORDER: readonly FunnelStepId[] = [
   "intro",
   "loanPurpose",
+  "occupancyType",
   "propertyType",
+  "numberOfUnits",
+  "subjectMonthlyRentalIncome",
   "veteranAndFirstTime",
   "purchasePrice",
   "downPayment",
@@ -82,7 +88,10 @@ export const PRE_APPROVAL_DEFAULTS: PreApprovalFormData = {
   monthlyDebts: "",
   creditScore: "",
   loanPurpose: "purchase",
+  occupancyType: undefined,
   propertyType: "single_family",
+  numberOfUnits: "",
+  subjectMonthlyRentalIncome: "",
   purchasePrice: "",
   downPayment: "",
   isVeteran: false,
@@ -142,6 +151,8 @@ export function computeFlags(answers: PreApprovalFormData): FunnelFlags {
 export const ROUTING_ANSWER_FIELDS: readonly (keyof PreApprovalFormData)[] = [
   "isVeteran", // route: injects the VA residual-income steps; flags: vaZeroDown
   "loanPurpose", // flags: vaZeroDown
+  "occupancyType", // route: asks projected rent for investment properties
+  "propertyType", // route: asks unit count and projected rent for 2–4 units
   "employmentType", // flags: complexIncome
   "hasAdditionalIncome", // route: injects incomeSources
   "incomeSources", // route + flags: rental count drives complexIncome
@@ -163,12 +174,14 @@ export function computeRoute(answers: PreApprovalFormData): FunnelStepId[] {
   const route: FunnelStepId[] = [
     "intro",
     "loanPurpose",
+    "occupancyType",
     "propertyType",
-    "veteranAndFirstTime",
-    "purchasePrice",
-    "downPayment",
-    "propertyState",
   ];
+  if (answers.propertyType === "multi_family") route.push("numberOfUnits");
+  if (answers.propertyType === "multi_family" || answers.occupancyType === "investment") {
+    route.push("subjectMonthlyRentalIncome");
+  }
+  route.push("veteranAndFirstTime", "purchasePrice", "downPayment", "propertyState");
   // VA residual-income inputs (38 CFR 36.4340(e)): family size and square
   // footage are required to underwrite any veteran, so the steps are injected
   // whenever the borrower reports military service.
@@ -300,6 +313,32 @@ export function stepGate(
           ok: false,
           errors: [
             "Each income source needs at least an annual amount. Rental properties need an address and monthly income.",
+          ],
+        };
+      }
+      const incompleteBusiness = sources.find((source) =>
+        source.type === "self_employed" && (
+          !source.employerName?.trim()
+          || !source.yearsInRole?.trim()
+          || !source.businessStructure
+          || !source.ownershipPercent?.trim()
+        ),
+      );
+      if (incompleteBusiness) {
+        return {
+          ok: false,
+          errors: [
+            "Each business or 1099 source needs a name, years received, business type, and ownership percentage. Use 0% for a payer you do not own.",
+          ],
+        };
+      }
+      const householdTotal = toNumber(answers.annualIncome);
+      const detailedTotal = sources.reduce((sum, source) => sum + toNumber(source.annualAmount), 0);
+      if (householdTotal > 0 && detailedTotal > householdTotal) {
+        return {
+          ok: false,
+          errors: [
+            "Your income breakdown is higher than your household total. Update one of the amounts so income is not counted twice.",
           ],
         };
       }
@@ -465,7 +504,10 @@ export const FUNNEL_SECTIONS: readonly { id: FunnelSectionId; label: string }[] 
 export const STEP_SECTION: Record<FunnelStepId, FunnelSectionId> = {
   intro: "goal",
   loanPurpose: "goal",
+  occupancyType: "goal",
   propertyType: "goal",
+  numberOfUnits: "property",
+  subjectMonthlyRentalIncome: "property",
   veteranAndFirstTime: "goal",
   purchasePrice: "property",
   downPayment: "property",

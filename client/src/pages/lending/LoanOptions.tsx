@@ -19,7 +19,7 @@ import { LoanOptionCard } from "./loanOptions/LoanOptionCard";
 import { LoanLetterButton } from "./loanOptions/LoanLetterButton";
 import { WhatIfPanel } from "./loanOptions/WhatIfPanel";
 import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
-import { getLoanOptionsPresentation } from "./loanOptions/loanOptionsPresentation";
+import { getLoanOptionsPresentation, isIntakeStillFinalizing } from "./loanOptions/loanOptionsPresentation";
 
 interface LoanOptionsData {
   application: LoanApplication;
@@ -42,12 +42,11 @@ export default function LoanOptions() {
     // withdrawn, …) legitimately have no options; don't poll those.
     refetchInterval: (query) => {
       const current = query.state.data;
-      if (!current || current.options.length > 0) return false;
-      return ["submitted", "analyzing", "under_review", "pre_approved"].includes(
+      if (!current) return 4000;
+      if (isIntakeStillFinalizing(current.application.status)) return 2000;
+      return current.options.length === 0 && ["under_review", "pre_approved"].includes(
         current.application.status,
-      )
-        ? 4000
-        : false;
+      ) ? 4000 : false;
     },
   });
 
@@ -193,7 +192,10 @@ export default function LoanOptions() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         {/* The first thing after the status banner is what to DO — the
             server-computed action items (documents, consents, conditions). */}
-        <ActionItemsSection applicationId={application.id} stillAnalyzing={options.length === 0} />
+        <ActionItemsSection
+          applicationId={application.id}
+          stillAnalyzing={isIntakeStillFinalizing(application.status) || options.length === 0}
+        />
         {!steeringAcknowledged && (
           <div className="mb-8 flex justify-center" data-testid="section-anti-steering">
             <ConsentGateCard
@@ -229,7 +231,7 @@ export default function LoanOptions() {
           <div className="flex items-center gap-4">
             <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
               <Shield className="h-4 w-4" />
-              <span>Rates as of today</span>
+              <span>{marketPriced ? "Rates as of today" : "Planning estimates"}</span>
             </div>
             {options.length > 1 && (
               <div className="flex rounded-lg border p-0.5" role="group" aria-label="View mode">

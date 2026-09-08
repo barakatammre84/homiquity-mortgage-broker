@@ -52,10 +52,12 @@ sitemap routes returned successfully, and the service reported SendGrid email co
 repository has a strict required test gate, automatic production migrations and post-deploy commit
 verification.
 
-The internal complex-borrower journey is proven. A fictional borrower with two businesses and one
-rental moved through the public application, full URLA, database persistence, personalized
-document work, borrower corrections and the loan-officer file. Homiquity correctly refused to
-present simulated evidence as a verified approval or lender-ready submission.
+The internal complex-borrower journey is proven. Fictional multi-business, rental and mixed W-2
+plus side-business borrowers moved through the public application, full URLA, database
+persistence, personalized document work, borrower corrections and the loan-officer file. Reported
+household income is reconciled once, while every detailed source survives into the appropriate
+workpaper. Homiquity correctly refuses to present self-reported or simulated evidence as verified
+qualifying income, an approval or a lender-ready submission.
 
 No approved wholesale lender, current lender receiver, production credit/AUS/verification suite,
 real lender acceptance or funded Homiquity loan has been proven. Production object-storage
@@ -69,7 +71,7 @@ underwriter and closer also remain unproven.
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · Proven internally** | Production upload → restart → download → replacement, with access control, on a pilot file. |
-| Review complicated income | **Built · Proven internally** | A licensed reviewer reproduces and approves the result from a real client's accepted evidence. |
+| Review complicated income | **Built · Proven internally** | A licensed reviewer reproduces the mixed-income calculation, approves it from a real client's accepted evidence and reconciles it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built** | One approved lender accepts the package and completes an acknowledgement/correction exchange. |
@@ -219,6 +221,7 @@ The next decisions are:
 
 Current evidence: [Core integration](knowledge-base/specs/CORE_INTEGRATION.md) ·
 [complex borrower and loan-officer walk](knowledge-base/feature-review/journey-walks/2026-09-07-complex-borrower-lo-loop.md) ·
+[mixed-income analysis walk](knowledge-base/feature-review/journey-walks/2026-09-08-mixed-income-analysis-loop.md) ·
 [production acceptance test](knowledge-base/runbooks/PROD_ACCEPTANCE_TEST.md) ·
 [fact and assumption register](knowledge-base/governance/ASSUMPTIONS.md) ·
 [verified findings](knowledge-base/feature-review/FINDINGS.md).

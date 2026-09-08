@@ -15,6 +15,7 @@ import { assertVerifiedForDecisioning, type DataProvenance } from "@shared/dataP
 import { assertStageRequirements } from "@shared/stageRequirements";
 import { evaluateTridTrigger, tridHardStopError } from "../../services/trid";
 import { routeParams } from "../../http/routeParams";
+import { incomeBreakdownExceedsHouseholdTotal } from "@shared/preApprovalForm";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -96,6 +97,25 @@ export function registerStatusDecisionRoutes(
 
       const formData = parsed.data;
 
+      // Partial updates must preserve the same income invariant as a full
+      // submission. Compare the incoming side with the stored counterpart so
+      // a direct API caller cannot lower the household total or raise the
+      // source breakdown into an internally contradictory draft.
+      const nextAnnualIncome = formData.annualIncome !== undefined
+        ? formData.annualIncome
+        : application.annualIncome;
+      const nextIncomeSources = formData.incomeSources !== undefined
+        ? formData.incomeSources
+        : (application.incomeSources as Array<{ annualAmount?: string | number | null }> | null);
+      if (incomeBreakdownExceedsHouseholdTotal(nextAnnualIncome, nextIncomeSources)) {
+        return res.status(400).json({
+          error: "Invalid input",
+          details: {
+            incomeSources: ["Your income breakdown is higher than your household total. Update one of the amounts so income is not counted twice."],
+          },
+        });
+      }
+
       // Licensed-state gate (roadmap A5): a draft edit can supply the property
       // state — same footprint rule as intake creation.
       const stateRejection = unlicensedStateRejection(formData.propertyState);
@@ -108,6 +128,7 @@ export function registerStatusDecisionRoutes(
       const UPDATABLE_COLUMNS = [
         "annualIncome", "monthlyDebts", "creditScore", "employmentType",
         "employmentYears", "propertyType", "purchasePrice", "downPayment",
+        "occupancyType", "numberOfUnits", "subjectMonthlyRentalIncome",
         "loanPurpose", "isVeteran", "isFirstTimeBuyer", "propertyState",
         "employerName", "propertyAddress", "propertyCity", "propertyZip",
         "incomeSources",
@@ -131,7 +152,7 @@ export function registerStatusDecisionRoutes(
       // put a string into an integer column. The validator lets "" through as
       // "not answered", so an empty string is treated as absent rather than
       // written as NaN; neither field is clearable, so null never arrives.
-      for (const key of ["householdFamilySize", "homeSquareFootage"] as const) {
+      for (const key of ["householdFamilySize", "homeSquareFootage", "numberOfUnits"] as const) {
         if (typeof updateData[key] !== "string") continue;
         const n = parseInt(updateData[key] as string, 10);
         if (Number.isFinite(n)) updateData[key] = n;
@@ -139,6 +160,26 @@ export function registerStatusDecisionRoutes(
       }
 
       const updated = await storage.updateLoanApplication(id, updateData);
+      if (!updated) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      if (
+        updateData.occupancyType !== undefined ||
+        updateData.numberOfUnits !== undefined ||
+        updateData.subjectMonthlyRentalIncome !== undefined
+      ) {
+        try {
+          await storage.upsertUrlaPropertyInfo({
+            applicationId: id,
+            occupancyType: updated.occupancyType ?? null,
+            numberOfUnits: updated.numberOfUnits ?? null,
+            estimatedMarketRent: updated.subjectMonthlyRentalIncome ?? null,
+          });
+        } catch (propertySyncErr) {
+          console.error("[Intake] Subject-property URLA sync failed (recoverable):", propertySyncErr);
+        }
+      }
 
       // TRID §1026.2(a)(3): this PATCH can supply the property address or
       // another of the six items — evaluate the Loan Estimate trigger.

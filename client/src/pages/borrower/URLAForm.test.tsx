@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { dashboardKeys, urlaKeys } from "@/lib/queryClient";
-import { orderEmploymentRecords, prefillPrimaryEmployment, prefillPrimaryPersonalInfo, prefillRealEstateOwned } from "./urla/types";
+import { orderEmploymentRecords, prefillOtherIncomeSources, prefillPrimaryEmployment, prefillPrimaryPersonalInfo, prefillRealEstateOwned } from "./urla/types";
 
 // The #451 defect, for the OTHER borrower.
 //
@@ -67,16 +67,81 @@ describe("URLA intake handoff", () => {
       employmentYears: 6,
       annualIncome: "240000",
       incomeSources: [
-        { type: "self_employed", annualAmount: "140000", employerName: "Northstar Consulting LLC", yearsInRole: "6" },
+        { type: "self_employed", annualAmount: "140000", employerName: "Northstar Consulting LLC", yearsInRole: "6", businessStructure: "s_corporation", ownershipPercent: "100" },
         { type: "rental", annualAmount: "36000" },
-        { type: "self_employed", annualAmount: "70000", employerName: "Lakeview Design LLC", yearsInRole: "3" },
+        { type: "self_employed", annualAmount: "70000", employerName: "Lakeview Design LLC", yearsInRole: "3", businessStructure: "single_member_llc", ownershipPercent: "100" },
       ],
     } as never);
 
     expect(records).toEqual([
-      expect.objectContaining({ employerName: "Northstar Consulting LLC", baseIncome: "11666.67", isSelfEmployed: true, employmentType: "current" }),
-      expect.objectContaining({ employerName: "Lakeview Design LLC", baseIncome: "5833.33", isSelfEmployed: true, employmentType: "additional" }),
+      expect.objectContaining({ employerName: "Northstar Consulting LLC", baseIncome: "11666.67", isSelfEmployed: true, employmentType: "current", selfEmploymentIncome: expect.objectContaining({ businessStructure: "s_corporation", ownershipPercent: 100, yearsSelfEmployed: 6 }) }),
+      expect.objectContaining({ employerName: "Lakeview Design LLC", baseIncome: "5833.33", isSelfEmployed: true, employmentType: "additional", selfEmploymentIncome: expect.objectContaining({ businessStructure: "single_member_llc", ownershipPercent: 100, yearsSelfEmployed: 3 }) }),
     ]);
+  });
+
+  it("carries a W-2 borrower's side business separately without double counting household income", () => {
+    const records = prefillPrimaryEmployment([], {
+      ...application,
+      employmentType: "employed",
+      employmentYears: 5,
+      annualIncome: "170000",
+      incomeSources: [{
+        type: "self_employed",
+        annualAmount: "45000",
+        employerName: "Harbor Studio LLC",
+        yearsInRole: "4",
+        businessStructure: "single_member_llc",
+        ownershipPercent: "100",
+      }],
+    } as never);
+
+    expect(records).toEqual([
+      expect.objectContaining({ employmentType: "current", baseIncome: "10416.67", isSelfEmployed: false }),
+      expect.objectContaining({
+        employmentType: "additional",
+        employerName: "Harbor Studio LLC",
+        baseIncome: "3750",
+        isSelfEmployed: true,
+        selfEmploymentIncome: expect.objectContaining({
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 4,
+        }),
+      }),
+    ]);
+    const monthlyTotal = records.reduce((sum, record) => sum + Number(record.baseIncome ?? 0), 0);
+    expect(monthlyTotal).toBeCloseTo(170_000 / 12, 2);
+  });
+
+  it("carries an additional W-2 job and non-employment income into the right URLA sections", () => {
+    const mixedApplication = {
+      ...application,
+      employmentType: "employed",
+      employmentYears: 5,
+      annualIncome: "175000",
+      incomeSources: [
+        { type: "w2", annualAmount: "25000", employerName: "Weekend Clinic", yearsInRole: "2" },
+        { type: "pension", annualAmount: "12000" },
+        { type: "investment", annualAmount: "8000" },
+      ],
+    } as never;
+
+    expect(prefillPrimaryEmployment([], mixedApplication)).toEqual([
+      expect.objectContaining({ employmentType: "current", baseIncome: "10833.33" }),
+      expect.objectContaining({ employmentType: "additional", employerName: "Weekend Clinic", baseIncome: "2083.33" }),
+    ]);
+    expect(prefillOtherIncomeSources([], mixedApplication)).toEqual([
+      expect.objectContaining({ incomeSource: "Retirement (e.g., Pension, IRA)", monthlyAmount: "1000" }),
+      expect.objectContaining({ incomeSource: "Other", monthlyAmount: "666.67" }),
+    ]);
+  });
+
+  it("does not recreate intake income after the borrower has saved URLA rows", () => {
+    const saved = [{ id: "income-1", applicationId: APP_ID, incomeSource: "Other", monthlyAmount: "900" }];
+    expect(prefillOtherIncomeSources(saved as never, {
+      ...application,
+      incomeSources: [{ type: "pension", annualAmount: "12000" }],
+    } as never)).toBe(saved);
   });
 
   it("keeps current and additional businesses in the borrower's intended order after refetch", () => {

@@ -38,6 +38,9 @@ export interface IncomeSource {
   employerName?: string | null;
   documentYear?: string | null;
   confidence?: string | null;
+  /** False when this record explains part of an aggregate already present in
+   * the graph. It stays visible as source detail but is not summed again. */
+  includedInBestIncome?: boolean;
 }
 
 export interface AssetRecord {
@@ -243,6 +246,55 @@ function parseNum(val: string | number | null | undefined): number | null {
   if (val === null || val === undefined) return null;
   const n = typeof val === "number" ? val : parseFloat(val);
   return isNaN(n) ? null : n;
+}
+
+/**
+ * Turn the fast application's one household total and its source breakdown
+ * into graph records without treating the breakdown as additional income.
+ * The detail remains available to the coach and staff surfaces, while exactly
+ * one representation contributes to the advisory best-income figure.
+ */
+export function applicationReportedIncomeRecords(
+  annualIncome: string | number | null | undefined,
+  rawSources: unknown,
+): IncomeSource[] {
+  const total = parseNum(
+    typeof annualIncome === "string" ? annualIncome.replace(/[,$]/g, "") : annualIncome,
+  );
+  const sources = Array.isArray(rawSources) ? rawSources : [];
+  const records: IncomeSource[] = [];
+
+  if (total && total > 0) {
+    records.push({
+      source: "application",
+      trust: "tier2",
+      type: "application_stated_household_total",
+      amount: total,
+      period: "annual",
+      includedInBestIncome: true,
+    });
+  }
+
+  for (const candidate of sources) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const source = candidate as Record<string, unknown>;
+    const rawAmount = source.annualAmount;
+    const amount = parseNum(
+      typeof rawAmount === "string" ? rawAmount.replace(/[,$]/g, "") : rawAmount as number | null | undefined,
+    );
+    if (!amount || amount <= 0) continue;
+    records.push({
+      source: "application",
+      trust: "tier2",
+      type: typeof source.type === "string" ? source.type : "additional_income",
+      amount,
+      period: "annual",
+      employerName: typeof source.employerName === "string" ? source.employerName : null,
+      includedInBestIncome: !(total && total > 0),
+    });
+  }
+
+  return records;
 }
 
 /** A zero on the application row is the schema default, not a calculated DTI. */
@@ -516,33 +568,17 @@ export async function buildBorrowerGraph(
     console.warn("[BorrowerGraph] Failed to fetch document facts:", err);
   }
 
-  if (activeApp) {
-    const hasLineItemIncome = activeApp.incomeSources && Array.isArray(activeApp.incomeSources) && (activeApp.incomeSources as any[]).length > 0;
+  const applicationHouseholdTotal = parseNum(activeApp?.annualIncome) ?? 0;
+  const applicationIncomeBreakdown = Array.isArray(activeApp?.incomeSources)
+    ? activeApp.incomeSources
+    : [];
+  const hasLineItemIncome = applicationIncomeBreakdown.length > 0;
+  const hasApplicationRentalBreakdown = applicationIncomeBreakdown.some((source) =>
+    !!source && typeof source === "object" && "type" in source && source.type === "rental",
+  );
 
-    if (hasLineItemIncome) {
-      for (const src of activeApp.incomeSources as any[]) {
-        const amt = parseNum(src.annualAmount?.toString().replace(/[,$]/g, ""));
-        if (amt && amt > 0) {
-          incomeSources.push({
-            source: "application",
-            trust: "tier2",
-            type: src.type || "additional_income",
-            amount: amt,
-            period: "annual",
-            employerName: src.employerName || null,
-          });
-        }
-      }
-    } else if (activeApp.annualIncome) {
-      incomeSources.push({
-        source: "application",
-        trust: "tier2",
-        type: "application_stated",
-        amount: parseNum(activeApp.annualIncome) || 0,
-        period: "annual",
-        employerName: activeApp.employerName || null,
-      });
-    }
+  if (activeApp) {
+    incomeSources.push(...applicationReportedIncomeRecords(activeApp.annualIncome, activeApp.incomeSources));
 
     if (activeApp.monthlyDebts) {
       liabilityRecords.push({
@@ -588,6 +624,7 @@ export async function buildBorrowerGraph(
         amount: parseNum(emp.totalMonthlyIncome) || 0,
         period: "monthly",
         employerName: emp.employerName || null,
+        includedInBestIncome: applicationHouseholdTotal <= 0 && !hasLineItemIncome,
       });
     }
   }
@@ -702,6 +739,7 @@ export async function buildBorrowerGraph(
           amount: rentalIncome * 0.75,
           period: "monthly",
           employerName: null,
+          includedInBestIncome: applicationHouseholdTotal <= 0 && !hasApplicationRentalBreakdown,
         });
       }
     }
@@ -718,10 +756,10 @@ export async function buildBorrowerGraph(
     }
   }
 
-  const tier1Income = incomeSources.filter(i => i.trust === "tier1" && i.period === "annual");
-  const tier2Income = incomeSources.filter(i => i.trust === "tier2" && i.period === "annual");
-  const tier1Monthly = incomeSources.filter(i => i.trust === "tier1" && i.period === "monthly");
-  const tier2Monthly = incomeSources.filter(i => i.trust === "tier2" && i.period === "monthly");
+  const tier1Income = incomeSources.filter(i => i.trust === "tier1" && i.period === "annual" && i.includedInBestIncome !== false);
+  const tier2Income = incomeSources.filter(i => i.trust === "tier2" && i.period === "annual" && i.includedInBestIncome !== false);
+  const tier1Monthly = incomeSources.filter(i => i.trust === "tier1" && i.period === "monthly" && i.includedInBestIncome !== false);
+  const tier2Monthly = incomeSources.filter(i => i.trust === "tier2" && i.period === "monthly" && i.includedInBestIncome !== false);
 
   const sumAnnual = (items: IncomeSource[]) => items.reduce((sum, i) => sum + i.amount, 0);
   const sumMonthlyToAnnual = (items: IncomeSource[]) => items.reduce((sum, i) => sum + i.amount * 12, 0);

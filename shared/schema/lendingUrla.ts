@@ -549,7 +549,9 @@ export type {
 } from "../preApprovalForm";
 import {
   CREDIT_SCORE_UNKNOWN_DEFAULT,
+  complexIncomeDetailsPresent,
   downPaymentWithinPurchasePrice,
+  incomeBreakdownWithinHouseholdTotal,
   preApprovalFormBaseSchema,
   preApprovalFormSchema,
   type PreApprovalFormData,
@@ -562,14 +564,14 @@ import {
 function stringifyIntakeScalars(input: unknown): unknown {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return input;
   const out: Record<string, unknown> = { ...(input as Record<string, unknown>) };
-  for (const key of ["annualIncome", "monthlyDebts", "purchasePrice", "downPayment", "employmentYears", "creditScore", "householdFamilySize", "homeSquareFootage"]) {
+  for (const key of ["annualIncome", "monthlyDebts", "purchasePrice", "downPayment", "employmentYears", "creditScore", "householdFamilySize", "homeSquareFootage", "numberOfUnits", "subjectMonthlyRentalIncome"]) {
     if (typeof out[key] === "number") out[key] = String(out[key]);
   }
   if (Array.isArray(out.incomeSources)) {
     out.incomeSources = out.incomeSources.map((source) => {
       if (source === null || typeof source !== "object") return source;
       const s: Record<string, unknown> = { ...(source as Record<string, unknown>) };
-      for (const key of ["annualAmount", "yearsInRole"]) {
+      for (const key of ["annualAmount", "yearsInRole", "ownershipPercent"]) {
         if (typeof s[key] === "number") s[key] = String(s[key]);
       }
       if (Array.isArray(s.rentalProperties)) {
@@ -599,12 +601,16 @@ function stringifyIntakeScalars(input: unknown): unknown {
  * over it would throw or produce `NaN`.
  */
 function normalizeIntakeValues<T extends Record<string, any>>(d: T) {
-  return {
+  const normalized = {
     ...d,
     ...(d.annualIncome != null && { annualIncome: stripCurrency(d.annualIncome) }),
     ...(d.monthlyDebts != null && { monthlyDebts: stripCurrency(d.monthlyDebts) }),
     ...(d.purchasePrice != null && { purchasePrice: stripCurrency(d.purchasePrice) }),
     ...(d.downPayment != null && { downPayment: stripCurrency(d.downPayment) }),
+    ...(d.subjectMonthlyRentalIncome != null && {
+      subjectMonthlyRentalIncome: stripCurrency(d.subjectMonthlyRentalIncome),
+    }),
+    ...(d.numberOfUnits != null && { numberOfUnits: parseInt(d.numberOfUnits) }),
     ...(d.employmentYears != null && { employmentYears: parseInt(d.employmentYears) }),
     ...(d.creditScore != null && {
       creditScore: d.creditScore === "not_sure" ? CREDIT_SCORE_UNKNOWN_DEFAULT : parseInt(d.creditScore),
@@ -621,6 +627,27 @@ function normalizeIntakeValues<T extends Record<string, any>>(d: T) {
       })),
     }),
   };
+  // Conditional funnel fields stay as empty strings until their step is
+  // routed in. Empty means "not applicable/unanswered", not numeric zero and
+  // certainly not NaN (which Postgres rejects for integer columns).
+  if (d.numberOfUnits === "") delete normalized.numberOfUnits;
+  if (d.subjectMonthlyRentalIncome === "") delete normalized.subjectMonthlyRentalIncome;
+  // The funnel can route a conditional answer out after the borrower goes
+  // back and changes the property. Do not let a prior three-unit/rent answer
+  // survive on a primary one-unit home simply because the hidden form value
+  // is still present in an autosave or final submission.
+  if (d.propertyType && d.propertyType !== "multi_family") {
+    normalized.numberOfUnits = 1;
+  }
+  if (
+    d.propertyType &&
+    d.occupancyType &&
+    d.propertyType !== "multi_family" &&
+    d.occupancyType !== "investment"
+  ) {
+    (normalized as Record<string, unknown>).subjectMonthlyRentalIncome = null;
+  }
+  return normalized;
 }
 
 export const loanApplicationIntakeSchema = z.preprocess(
@@ -639,7 +666,11 @@ export const loanApplicationIntakeSchema = z.preprocess(
       // explicit "no" — defaulting would fabricate an answer.
       avoidsInterestFinancing: z.boolean().optional(),
     })
-    .superRefine(downPaymentWithinPurchasePrice)
+    .superRefine((data, ctx) => {
+      downPaymentWithinPurchasePrice(data, ctx);
+      incomeBreakdownWithinHouseholdTotal(data, ctx);
+      complexIncomeDetailsPresent(data, ctx);
+    })
     .transform(normalizeIntakeValues),
 );
 export type LoanApplicationIntake = z.infer<typeof loanApplicationIntakeSchema>;
@@ -684,7 +715,11 @@ export const loanApplicationIntakeUpdateSchema = z.preprocess(
       propertyCity: propertyCityField.nullable().optional(),
       propertyZip: propertyZipField.nullable().optional(),
     })
-    .superRefine((data, ctx) => downPaymentWithinPurchasePrice(data, ctx))
+    .superRefine((data, ctx) => {
+      downPaymentWithinPurchasePrice(data, ctx);
+      incomeBreakdownWithinHouseholdTotal(data, ctx);
+      complexIncomeDetailsPresent(data, ctx);
+    })
     .transform(normalizeIntakeValues),
 );
 export type LoanApplicationIntakeUpdate = z.infer<typeof loanApplicationIntakeUpdateSchema>;
@@ -692,4 +727,3 @@ export type LoanApplicationIntakeUpdate = z.infer<typeof loanApplicationIntakeUp
 // =============================================================================
 // MORTGAGE RATES
 // =============================================================================
-

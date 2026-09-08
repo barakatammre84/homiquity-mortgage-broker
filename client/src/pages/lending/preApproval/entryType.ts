@@ -20,6 +20,7 @@
 import type { PreApprovalFormData } from "@shared/schema";
 
 type LoanPurpose = PreApprovalFormData["loanPurpose"];
+type OccupancyType = NonNullable<PreApprovalFormData["occupancyType"]>;
 
 /**
  * `?type=` → `loanPurpose`. Anything absent means "the entry point said
@@ -29,11 +30,8 @@ type LoanPurpose = PreApprovalFormData["loanPurpose"];
  *   `va`, `first-time`  — these preselect `isVeteran` / `isFirstTimeBuyer`
  *                         in PreApproval.tsx, not the purpose.
  *   `self-employed`     — preselects `employmentType`.
- *   `investment`        — the funnel captures no OCCUPANCY field at all, so
- *                         there is nothing to map it onto. `/`'s investment
- *                         CTA (pages/public/Landing.tsx:81) therefore drops
- *                         that intent; mapping it to a purpose would be worse,
- *                         since an investment purchase is still a purchase.
+ *   `investment`        — remains a purchase purpose and separately maps to
+ *                         investment occupancy below.
  */
 // A Map, not an object literal: the key comes straight off the URL, and
 // `({} as Record<string, T>)["constructor"]` returns a truthy function that
@@ -54,4 +52,10 @@ const ENTRY_TYPE_LOAN_PURPOSE = new Map<string, LoanPurpose>([
 export function loanPurposeForEntryType(urlType: string | null | undefined): LoanPurpose {
   if (!urlType) return "purchase";
   return ENTRY_TYPE_LOAN_PURPOSE.get(urlType) ?? "purchase";
+}
+
+export function occupancyForEntryType(
+  urlType: string | null | undefined,
+): OccupancyType | undefined {
+  return urlType === "investment" ? "investment" : undefined;
 }

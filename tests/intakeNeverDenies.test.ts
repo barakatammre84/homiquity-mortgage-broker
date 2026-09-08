@@ -55,6 +55,7 @@ let application: Record<string, unknown>;
 let decisionResult: unknown;
 let decisionThrows: Error | null = null;
 const updates: Array<Record<string, unknown>> = [];
+const lifecycleEvents: string[] = [];
 
 vi.mock("../server/storage", () => ({
   storage: {
@@ -62,7 +63,9 @@ vi.mock("../server/storage", () => ({
     getUser: async () => ({ id: "user_1", firstName: "Dana", email: "d@test.local" }),
     updateLoanApplication: async (_id: string, patch: Record<string, unknown>) => {
       updates.push(patch);
-      return { ...application, ...patch };
+      if (patch.status) lifecycleEvents.push(`status:${patch.status}`);
+      application = { ...application, ...patch };
+      return application;
     },
     createNotification: async () => ({}),
     createDealActivity: async () => ({}),
@@ -71,6 +74,18 @@ vi.mock("../server/storage", () => ({
     createActivity: async () => ({}),
     getPropertyById: async () => null,
     getPropertiesByUser: async () => [],
+    getLoanMilestones: async () => null,
+    createLoanMilestone: async () => ({}),
+    getLoanConditionsByApplication: async () => [],
+    createLoanCondition: async (condition: Record<string, unknown>) => {
+      lifecycleEvents.push(`condition:${String(condition.requiredDocumentTypes)}`);
+      return { id: `condition_${lifecycleEvents.length}`, ...condition };
+    },
+    getTasksByApplication: async () => [],
+    createTask: async (task: Record<string, unknown>) => {
+      lifecycleEvents.push(`task:${String(task.documentCategory)}`);
+      return { id: `task_${lifecycleEvents.length}`, ...task };
+    },
   },
 }));
 
@@ -144,6 +159,7 @@ beforeEach(() => {
   decisionResult = ENGINE_OUTCOMES[0].decision;
   decisionThrows = null;
   updates.length = 0;
+  lifecycleEvents.length = 0;
 });
 
 describe("ECOA §1002.9: automated intake never denies", () => {
@@ -280,6 +296,19 @@ describe("finalizeIntake guards (F-015: this function had no executing test)", (
     decisionResult = ENGINE_OUTCOMES[0].decision;
     await finalizeIntake(APP_ID);
     expect(updates[0]?.status).toBe("analyzing");
+  });
+
+  it("does not publish a settled status until the borrower checklist exists", async () => {
+    decisionResult = ENGINE_OUTCOMES[0].decision;
+    await finalizeIntake(APP_ID);
+
+    const settledIndex = lifecycleEvents.indexOf("status:pre_approved");
+    const lastTaskIndex = lifecycleEvents.reduce(
+      (latest, event, index) => event.startsWith("task:") ? index : latest,
+      -1,
+    );
+    expect(lastTaskIndex).toBeGreaterThan(-1);
+    expect(settledIndex).toBeGreaterThan(lastTaskIndex);
   });
 });
 

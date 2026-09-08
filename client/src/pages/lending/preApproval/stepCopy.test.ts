@@ -105,9 +105,9 @@ describe("resolveStepCopy — self-employed income detail", () => {
     expect(copy.subtext).toMatch(/business|1099/i);
   });
 
-  it("keeps the other-income wording for everyone else", () => {
+  it("asks everyone else to break down income already included in their total", () => {
     for (const employmentType of ["employed", "retired", "other"] as const) {
-      expect(copyFor("incomeSources", { employmentType }).title).toBe("What other income do you receive?");
+      expect(copyFor("incomeSources", { employmentType }).title).toBe("What other income is included in your total?");
     }
   });
 

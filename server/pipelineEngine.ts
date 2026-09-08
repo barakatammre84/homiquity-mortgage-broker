@@ -49,6 +49,7 @@ interface BorrowerProfile {
   isFirstTimeBuyer: boolean;
   isSelfEmployed: boolean;
   hasRentalIncome: boolean;
+  businessNames: string[];
 }
 
 const currentYear = new Date().getFullYear();
@@ -241,7 +242,49 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
     requirements.push(...EMPLOYMENT_RULES["employed"]);
   }
 
+  // A W-2 borrower may also own a business. Preserve the W-2 requests and add
+  // the business evidence; the primary-employment dropdown cannot represent
+  // both on its own. Replace the generic one-year return request with the
+  // self-employed two-year request so the document-category de-duplication
+  // below does not keep the weaker first entry.
+  if (profile.isSelfEmployed && employmentType !== "self_employed") {
+    for (const requirement of EMPLOYMENT_RULES.self_employed) {
+      if (requirement.documentType === "tax_return") {
+        const taxReturnIndex = requirements.findIndex((item) => item.documentType === "tax_return");
+        if (taxReturnIndex >= 0) requirements[taxReturnIndex] = requirement;
+        else requirements.push(requirement);
+      } else {
+        requirements.push(requirement);
+      }
+    }
+  }
+
   requirements.push(...ASSET_REQUIREMENTS);
+
+  const namedBusinesses = profile.businessNames.filter(Boolean);
+  const businessList = namedBusinesses.join(", ");
+
+  if (profile.isSelfEmployed && namedBusinesses.length > 0) {
+    // Fannie Mae Selling Guide B3-3.5-01: analyze each business separately and
+    // retain the personal/business return and cash-flow evidence used. One
+    // upload category stays easier for the borrower, while its wording names
+    // every entity so a second business cannot silently disappear.
+    for (let index = 0; index < requirements.length; index += 1) {
+      const requirement = requirements[index];
+      if (requirement.documentType === "tax_return") {
+        requirements[index] = {
+          ...requirement,
+          description: `Signed personal federal tax returns with all schedules, plus applicable business returns and K-1s for ${businessList}`,
+        };
+      } else if (requirement.documentType === "profit_loss") {
+        requirements[index] = { ...requirement, description: `Year-to-date profit and loss statement for each business: ${businessList}` };
+      } else if (requirement.documentType === "business_license") {
+        requirements[index] = { ...requirement, description: `Business license or formation documents for each business: ${businessList}` };
+      } else if (requirement.documentType === "bank_statement_business") {
+        requirements[index] = { ...requirement, description: `3 months of business bank statements for each business: ${businessList}` };
+      }
+    }
+  }
 
   if (profile.hasRentalIncome) {
     // Fannie Mae Selling Guide B3-3.8-01: rental history is generally
@@ -253,11 +296,15 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
     );
     const rentalTaxReturn: DocumentRequirement = {
       documentType: "tax_return",
-      yearsRequired: [currentYear - 1],
-      description: "Most recent signed federal tax return, including Schedule 1 and Schedule E, documenting rental income",
+      yearsRequired: profile.isSelfEmployed ? [currentYear - 1, currentYear - 2] : [currentYear - 1],
+      description: profile.isSelfEmployed
+        ? `Signed personal federal tax returns with all schedules including Schedule E, plus applicable business returns and K-1s${businessList ? ` for ${businessList}` : ""}`
+        : "Most recent signed personal federal tax return, including Schedule 1 and Schedule E, documenting rental income",
       priority: "prior_to_approval",
       conditionCategory: "income",
-      conditionTitle: "Rental Property Tax Return & Schedule E Required",
+      conditionTitle: profile.isSelfEmployed
+        ? "Personal, Business & Rental Tax Returns Required"
+        : "Rental Property Tax Return & Schedule E Required",
     };
     if (genericTaxReturnIndex >= 0) requirements[genericTaxReturnIndex] = rentalTaxReturn;
     else requirements.push(rentalTaxReturn);
@@ -486,6 +533,24 @@ export function getBorrowerProfileFromApplication(app: LoanApplication): Borrowe
       "type" in source &&
       source.type === "rental",
   );
+  const selfEmployedSources = incomeSources.filter((source) =>
+    typeof source === "object" &&
+    source !== null &&
+    "type" in source &&
+    source.type === "self_employed",
+  );
+  const businessNames = Array.from(new Set(selfEmployedSources.flatMap((source) => {
+    if (
+      typeof source !== "object" ||
+      source === null ||
+      !("type" in source) ||
+      source.type !== "self_employed" ||
+      !("employerName" in source) ||
+      typeof source.employerName !== "string" ||
+      !source.employerName.trim()
+    ) return [];
+    return [source.employerName.trim()];
+  })));
 
   return {
     employmentType: app.employmentType,
@@ -498,8 +563,9 @@ export function getBorrowerProfileFromApplication(app: LoanApplication): Borrowe
     propertyAddress: app.propertyAddress,
     isVeteran: app.isVeteran || false,
     isFirstTimeBuyer: app.isFirstTimeBuyer || false,
-    isSelfEmployed: app.employmentType === "self_employed",
+    isSelfEmployed: app.employmentType === "self_employed" || selfEmployedSources.length > 0,
     hasRentalIncome,
+    businessNames,
   };
 }
 

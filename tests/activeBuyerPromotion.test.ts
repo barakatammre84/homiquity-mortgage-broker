@@ -41,7 +41,7 @@ describe("A3 auto-promotion wiring", () => {
     const client = read("client/src/pages/lending/PreApproval.tsx");
     const success = client.indexOf("onSuccess: async (result)");
     const refresh = client.indexOf('queryKey: ["/api/auth/user"]', success);
-    const navigation = client.indexOf("navigate(`/loan-options/${result.id}`)", success);
+    const navigation = client.indexOf("navigate(`/loan-options/${result.id}?app=", success);
 
     expect(success).toBeGreaterThanOrEqual(0);
     expect(refresh).toBeGreaterThan(success);

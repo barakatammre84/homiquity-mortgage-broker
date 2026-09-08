@@ -6,7 +6,7 @@ import {
   AFFORDABILITY_ESTIMATE_DEFAULTS,
   type AffordabilityEstimateInputs,
 } from "@/lib/affordabilityEstimate";
-import { sumIncomeSourcesAnnual, sumRentalMonthlyDebts } from "@/lib/preApprovalAnalysis";
+import { sumRentalMonthlyDebts } from "@/lib/preApprovalAnalysis";
 
 // The funnel's creditScore step collects a bucket floor ("760", "720", ...)
 // rather than an exact score, plus a "not_sure" option. The estimate math
@@ -32,12 +32,10 @@ export function buildTeaserInputs(values: PreApprovalFormData): AffordabilityEst
   const baseAnnualIncome = parseAmount(values.annualIncome);
   if (baseAnnualIncome <= 0) return null;
 
-  // Same income and debt composition as the Live Analysis panel
-  // (preApprovalAnalysis.ts): additional sources count toward income, and
-  // rental debt service counts toward monthly debts. The teaser is the
-  // funnel's payoff — it must not contradict the numbers the borrower just
-  // watched react to their step-11 entries.
-  const annualIncome = baseAnnualIncome + sumIncomeSourcesAnnual(values.incomeSources);
+  // Same composition as the Live Analysis panel: annualIncome is already the
+  // borrower's household total, while source rows explain that total and
+  // rental debt service still belongs in monthly obligations.
+  const annualIncome = baseAnnualIncome;
 
   const downPaymentSaved = parseAmount(values.downPayment);
   // Mirrors preApprovalMachine's vaZeroDown flag: a veteran purchase can

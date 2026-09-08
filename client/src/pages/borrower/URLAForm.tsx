@@ -44,6 +44,7 @@ import {
   emptySlice,
   hmdaToState,
   prefillPrimaryEmployment,
+  prefillOtherIncomeSources,
   orderEmploymentRecords,
   prefillPrimaryPersonalInfo,
   prefillRealEstateOwned,
@@ -320,7 +321,10 @@ export default function URLAForm() {
     };
 
     setBorrowerData({ 1: buildSlice(1), 2: buildSlice(2) });
-    setOtherIncomes(urlaData.otherIncomeSources?.length ? urlaData.otherIncomeSources : []);
+    setOtherIncomes(prefillOtherIncomeSources(
+      urlaData.otherIncomeSources || [],
+      urlaData.application,
+    ));
     setPropertyInfo(urlaData.propertyInfo || {});
     const carriedRealEstate = prefillRealEstateOwned(
       urlaData.realEstateOwned || [],

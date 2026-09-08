@@ -12,10 +12,12 @@ import type { RentalPropertyEntry, IncomeSourceEntry, PreApprovalFormData } from
 
 function Harness({
   employmentType = "employed",
+  householdAnnualIncome = "100,000",
   initialEntries = [],
   onEntries,
 }: {
   employmentType?: PreApprovalFormData["employmentType"];
+  householdAnnualIncome?: string;
   initialEntries?: IncomeSourceEntry[];
   onEntries: (entries: IncomeSourceEntry[]) => void;
 }) {
@@ -23,6 +25,7 @@ function Harness({
   return (
     <IncomeSourcesStep
       employmentType={employmentType}
+      householdAnnualIncome={householdAnnualIncome}
       value={entries}
       onChange={(next) => {
         setEntries(next);
@@ -102,15 +105,52 @@ describe("IncomeSourcesStep", () => {
     await user.click(screen.getByTestId("toggle-income-self_employed"));
     await user.type(screen.getByTestId("input-income-amount-self_employed-0"), "140000");
     await user.type(screen.getByTestId("input-income-employer-self_employed-0"), "Northstar Consulting LLC");
+    await user.type(screen.getByTestId("input-income-years-self_employed-0"), "6");
+    await user.selectOptions(screen.getByTestId("select-business-structure-self_employed-0"), "s_corporation");
+    await user.type(screen.getByTestId("input-ownership-self_employed-0"), "100");
     await user.click(screen.getByTestId("button-add-self-employed-source"));
     await user.type(screen.getByTestId("input-income-amount-self_employed-1"), "70000");
     await user.type(screen.getByTestId("input-income-employer-self_employed-1"), "Lakeview Design LLC");
+    await user.type(screen.getByTestId("input-income-years-self_employed-1"), "3");
+    await user.selectOptions(screen.getByTestId("select-business-structure-self_employed-1"), "single_member_llc");
+    await user.type(screen.getByTestId("input-ownership-self_employed-1"), "100");
 
     const reported = onEntries.mock.calls.at(-1)![0] as IncomeSourceEntry[];
     expect(reported.filter((entry) => entry.type === "self_employed")).toEqual([
       expect.objectContaining({ annualAmount: "140,000", employerName: "Northstar Consulting LLC" }),
       expect.objectContaining({ annualAmount: "70,000", employerName: "Lakeview Design LLC" }),
     ]);
+  });
+
+  it("reconciles source details to the household total and flags an overage", async () => {
+    const user = userEvent.setup();
+    render(<Harness householdAnnualIncome="50,000" onEntries={vi.fn()} />);
+
+    await user.click(screen.getByTestId("toggle-income-investment"));
+    await user.type(screen.getByTestId("input-income-amount-investment"), "60000");
+
+    expect(screen.getByTestId("income-breakdown-check").textContent).toContain("Above your household total");
+    expect(screen.getByTestId("income-breakdown-remainder").textContent).toBe("$10,000/yr");
+    expect(screen.getByText(/do not count income twice/i)).toBeTruthy();
+  });
+
+  it("collects the ownership and structure needed to route business-income review", async () => {
+    const user = userEvent.setup();
+    const onEntries = vi.fn();
+    render(<Harness onEntries={onEntries} />);
+
+    await user.click(screen.getByTestId("toggle-income-self_employed"));
+    await user.selectOptions(screen.getByTestId("select-business-structure-self_employed-0"), "sole_proprietorship");
+    await user.type(screen.getByTestId("input-ownership-self_employed-0"), "100");
+
+    expect(onEntries.mock.calls.at(-1)![0]).toEqual([
+      expect.objectContaining({
+        type: "self_employed",
+        businessStructure: "sole_proprietorship",
+        ownershipPercent: "100",
+      }),
+    ]);
+    expect(screen.getByTestId("complex-income-verification-note").textContent).toMatch(/tax-return cash flow/i);
   });
 });
 

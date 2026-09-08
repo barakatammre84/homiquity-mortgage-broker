@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { determineDocumentRequirements } from "../server/pipelineEngine";
+import { determineDocumentRequirements, getBorrowerProfileFromApplication } from "../server/pipelineEngine";
+import type { LoanApplication } from "../shared/schema";
 
 const baseProfile = {
   employmentYears: 3,
@@ -13,6 +14,7 @@ const baseProfile = {
   isFirstTimeBuyer: false,
   isSelfEmployed: false,
   hasRentalIncome: false,
+  businessNames: [],
 };
 
 describe("determineDocumentRequirements - employmentType 'other'", () => {
@@ -107,5 +109,46 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
     expect(taxReturn?.description).toContain("Schedule E");
     expect(taxReturn?.priority).toBe("prior_to_approval");
     expect(requirements.some((requirement) => requirement.documentType === "lease_agreement")).toBe(true);
+  });
+
+  it("names every self-employed business and preserves both business and rental return needs", () => {
+    const requirements = determineDocumentRequirements({
+      ...baseProfile,
+      employmentType: "self_employed",
+      isSelfEmployed: true,
+      hasRentalIncome: true,
+      businessNames: ["Northstar Design LLC", "Lakeshore Consulting Inc"],
+    });
+
+    const combined = requirements.map((requirement) => `${requirement.conditionTitle} ${requirement.description}`).join("\n");
+    expect(combined).toContain("Northstar Design LLC");
+    expect(combined).toContain("Lakeshore Consulting Inc");
+    expect(combined).toMatch(/personal.*returns/i);
+    expect(combined).toMatch(/business returns/i);
+    expect(combined).toContain("Schedule E");
+    expect(combined).toMatch(/K-1/i);
+  });
+
+  it("keeps W-2 documents and adds full business documents for a side business", () => {
+    const profile = getBorrowerProfileFromApplication({
+      employmentType: "employed",
+      incomeSources: [
+        { type: "w2", annualAmount: "125000" },
+        { type: "self_employed", annualAmount: "45000", employerName: "Harbor Studio LLC" },
+      ],
+      purchasePrice: "600000",
+      downPayment: "120000",
+    } as unknown as LoanApplication);
+    const requirements = determineDocumentRequirements(profile);
+    const types = requirements.map((requirement) => requirement.documentType);
+    const taxReturn = requirements.find((requirement) => requirement.documentType === "tax_return");
+
+    expect(profile.isSelfEmployed).toBe(true);
+    expect(types).toContain("w2");
+    expect(types).toContain("profit_loss");
+    expect(types).toContain("business_license");
+    expect(types).toContain("bank_statement_business");
+    expect(taxReturn?.yearsRequired).toHaveLength(2);
+    expect(taxReturn?.description).toContain("Harbor Studio LLC");
   });
 });

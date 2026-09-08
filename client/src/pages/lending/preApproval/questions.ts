@@ -68,6 +68,19 @@ export const QUESTIONS: Question[] = [
     ]
   },
   {
+    id: "occupancyType",
+    field: "occupancyType",
+    type: "choice",
+    question: "How will you use this home?",
+    why: "Occupancy changes which loan programs, down payments, and rates are available.",
+    icon: Home,
+    options: [
+      { value: "primary_residence", label: "Primary Residence", icon: Home },
+      { value: "second_home", label: "Second Home", icon: Home },
+      { value: "investment", label: "Investment Property", icon: Building2 },
+    ],
+  },
+  {
     id: "propertyType",
     field: "propertyType",
     type: "choice",
@@ -80,6 +93,26 @@ export const QUESTIONS: Question[] = [
       { value: "townhouse", label: "Townhouse", icon: Building2 },
       { value: "multi_family", label: "Multi-Family (2-4 Units)", icon: Users }
     ]
+  },
+  {
+    id: "numberOfUnits",
+    field: "numberOfUnits",
+    type: "number",
+    question: "How many units are in the property?",
+    placeholder: "2",
+    subtext: "Enter 2, 3, or 4 units.",
+    why: "The exact unit count affects loan limits, reserve rules, and how rental income is evaluated.",
+    icon: Building2,
+  },
+  {
+    id: "subjectMonthlyRentalIncome",
+    field: "subjectMonthlyRentalIncome",
+    type: "currency",
+    question: "What monthly rent do you expect from this property?",
+    placeholder: "3,000",
+    subtext: "Use the current total rent, expected market rent, or 0 if none is expected.",
+    why: "Projected rent can affect qualification, but it must be documented and reviewed before it counts.",
+    icon: DollarSign,
   },
   {
     // Asked BEFORE price/down payment so VA eligibility can unlock the
@@ -156,9 +189,9 @@ export const QUESTIONS: Question[] = [
     id: "annualIncome",
     field: "annualIncome",
     type: "currency",
-    question: "What is your total annual household income?",
+    question: "What is your estimated total annual household income?",
     placeholder: "120,000",
-    subtext: "Gross income before taxes. Include salary, bonuses, etc.",
+    subtext: "Before taxes. Include jobs, businesses, rentals, retirement, and other income; we'll break it down next.",
     why: "Income and debts together set your buying power — lenders compare them, not income alone.",
     icon: Briefcase
   },
@@ -190,24 +223,24 @@ export const QUESTIONS: Question[] = [
     id: "hasAdditionalIncome",
     field: "hasAdditionalIncome",
     type: "choice",
-    question: "Do you have additional sources of income?",
-    why: "Every income source can raise your buying power once documented.",
+    question: "Does that total include income outside your main job or source?",
+    why: "Breaking down the total helps us request the right documents without counting income twice.",
     icon: TrendingUp,
     options: [
-      { value: "yes", label: "Yes, I have other income", icon: TrendingUp },
+      { value: "yes", label: "Yes, break it down", icon: TrendingUp },
       // NOT a checkmark. A tick beside "No, this is my only income" reads as
       // "already answered" — which, next to a tile that used to arrive
       // pre-highlighted, is a large part of why borrowers reported answering
       // No and being taken to the other-income step anyway. The radio dot on
       // the right of the tile is the only selection signal.
-      { value: "no", label: "No, this is my only income", icon: Minus }
+      { value: "no", label: "No, that is my only income", icon: Minus }
     ]
   },
   {
     id: "incomeSources",
     type: "income_sources",
-    question: "What other income do you receive?",
-    subtext: "Select all that apply, then provide details for each."
+    question: "What other income is included in your total?",
+    subtext: "Select all that apply, then break down the amount from each source."
   },
   {
     id: "monthlyDebts",

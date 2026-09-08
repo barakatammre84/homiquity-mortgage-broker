@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Clock, Lock, Percent } from "lucide-react";
+import { AlertCircle, Clock, Lock, Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +39,41 @@ const fmtRatePts = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(3)}%`;
 export function MarketPricingSection({ market }: { market: MarketOffersResponse }) {
   const [openOffer, setOpenOffer] = useState<string | null>(null);
 
-  if (market.status !== "PRICED") return null;
+  if (market.status !== "PRICED") {
+    const needsProfile = market.status === "INSUFFICIENT_PROFILE";
+    const title = needsProfile
+      ? "More details are needed for live pricing"
+      : "Live lender pricing needs review";
+    const description = needsProfile
+      ? "Complete the items below so we can compare current wholesale lender pricing. The scenarios below remain planning estimates until then."
+      : market.status === "NO_ACTIVE_RATE_SHEETS"
+        ? "No current wholesale rate sheet matched this profile. The scenarios below are planning estimates; your loan team will compare current lender pricing for this property."
+        : "This profile needs a loan team review before current wholesale lender pricing can be compared. The scenarios below are planning estimates.";
+
+    return (
+      <Card className="mb-12 border-warning/40 bg-warning-subtle/40" data-testid="section-market-pricing-status">
+        <CardHeader className="pb-3">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-subtle-foreground" />
+            <div>
+              <CardTitle className="text-lg">{title}</CardTitle>
+              <CardDescription className="mt-1 text-sm leading-relaxed text-foreground/75">
+                {description}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        {market.missingItems.length > 0 && (
+          <CardContent className="pt-0">
+            <p className="mb-2 text-sm font-medium">Needed for live pricing:</p>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+              {market.missingItems.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </CardContent>
+        )}
+      </Card>
+    );
+  }
 
   const pricedTime = new Date(market.pricedAt).toLocaleString(undefined, {
     month: "short",
