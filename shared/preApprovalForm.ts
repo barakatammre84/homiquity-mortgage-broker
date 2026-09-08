@@ -107,6 +107,24 @@ export const incomeSourceEntrySchema = z.object({
       { message: "Years in role must be between 0 and 80" }
     )
     .optional(),
+  businessStructure: z.enum([
+    "sole_proprietorship",
+    "single_member_llc",
+    "partnership",
+    "s_corporation",
+    "c_corporation",
+    "other",
+  ]).optional(),
+  ownershipPercent: z.string()
+    .refine(
+      (v) => {
+        if (!v) return true;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 && n <= 100;
+      },
+      { message: "Ownership must be between 0% and 100%" },
+    )
+    .optional(),
   rentalProperties: z.array(rentalPropertyEntrySchema).optional(),
 });
 
@@ -154,6 +172,22 @@ export const preApprovalFormBaseSchema = z.object({
     ["single_family", "condo", "townhouse", "multi_family"],
     { error: () => "Please select a property type" }
   ),
+  // Optional in the base so older API clients can still create a file without
+  // fabricating a primary residence. The borrower funnel requires it below.
+  occupancyType: z.enum(["primary_residence", "second_home", "investment"]).optional(),
+  numberOfUnits: z.string()
+    .refine((v) => !v || /^[1-4]$/.test(v), { message: "Number of units must be between 1 and 4" })
+    .optional(),
+  subjectMonthlyRentalIncome: z.string()
+    .refine(
+      (v) => {
+        if (!v) return true;
+        const amount = parseFloat(v.replace(/[,$]/g, ""));
+        return !isNaN(amount) && amount >= 0 && amount <= 1_000_000;
+      },
+      { message: "Expected monthly rent must be a valid dollar amount" },
+    )
+    .optional(),
   purchasePrice: positiveCurrencyString("Purchase price"),
   downPayment: currencyString("Down payment"),
 
@@ -211,6 +245,79 @@ export const downPaymentWithinPurchasePrice = (
   }
 };
 
+/**
+ * `annualIncome` is the borrower's one household total. `incomeSources` is a
+ * breakdown of amounts already inside that total, not extra income to add to
+ * it. Rejecting a breakdown above the total prevents an internally
+ * contradictory file and keeps downstream estimates aligned.
+ */
+export const incomeBreakdownWithinHouseholdTotal = (
+  data: { annualIncome?: string | null; incomeSources?: Array<{ annualAmount?: string | null }> | null },
+  ctx: z.RefinementCtx,
+) => {
+  if (!data.annualIncome || !data.incomeSources?.length) return;
+  if (incomeBreakdownExceedsHouseholdTotal(data.annualIncome, data.incomeSources)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Your income breakdown is higher than your household total. Update one of the amounts so income is not counted twice.",
+      path: ["incomeSources"],
+    });
+  }
+};
+
+/** Pure companion used when a draft PATCH carries only one side of the
+ * household-total/breakdown relationship. The route can compare that update
+ * with the value already stored without manufacturing a full application. */
+export function incomeBreakdownExceedsHouseholdTotal(
+  annualIncome: string | number | null | undefined,
+  incomeSources: Array<{ annualAmount?: string | number | null }> | null | undefined,
+): boolean {
+  if (annualIncome === null || annualIncome === undefined || !incomeSources?.length) return false;
+  const total = parseFloat(String(annualIncome).replace(/[,$]/g, ""));
+  const detailed = incomeSources.reduce((sum, source) => {
+    const amount = parseFloat(String(source.annualAmount ?? "").replace(/[,$]/g, ""));
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+  return Number.isFinite(total) && total > 0 && detailed > total;
+}
+
+export const complexIncomeDetailsPresent = (
+  data: { incomeSources?: Array<{ type?: string; employerName?: string; yearsInRole?: string; businessStructure?: string; ownershipPercent?: string }> | null },
+  ctx: z.RefinementCtx,
+) => {
+  for (const [index, source] of (data.incomeSources ?? []).entries()) {
+    if (source.type !== "self_employed") continue;
+    if (!source.employerName?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the business or payer name",
+        path: ["incomeSources", index, "employerName"],
+      });
+    }
+    if (!source.yearsInRole?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter how many years you have received income from this business or payer",
+        path: ["incomeSources", index, "yearsInRole"],
+      });
+    }
+    if (!source.businessStructure) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select the business or income type",
+        path: ["incomeSources", index, "businessStructure"],
+      });
+    }
+    if (!source.ownershipPercent?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter your ownership percentage, or 0 for a 1099 payer you do not own",
+        path: ["incomeSources", index, "ownershipPercent"],
+      });
+    }
+  }
+};
+
 // The VA residual-income evaluation (underwritingEngine) cannot run without
 // household size and square footage — require both for veterans.
 const vaResidualInputsPresent = (
@@ -237,7 +344,36 @@ const vaResidualInputsPresent = (
 export const preApprovalFormSchema = preApprovalFormBaseSchema.superRefine(
   (data, ctx) => {
     downPaymentWithinPurchasePrice(data, ctx);
+    incomeBreakdownWithinHouseholdTotal(data, ctx);
+    complexIncomeDetailsPresent(data, ctx);
     vaResidualInputsPresent(data, ctx);
+    if (!data.occupancyType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Please tell us how you will use this home",
+        path: ["occupancyType"],
+      });
+    }
+    if (data.propertyType === "multi_family") {
+      const units = parseInt(data.numberOfUnits ?? "", 10);
+      if (!Number.isFinite(units) || units < 2 || units > 4) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Please enter the number of units (2 to 4)",
+          path: ["numberOfUnits"],
+        });
+      }
+    }
+    if (
+      (data.propertyType === "multi_family" || data.occupancyType === "investment") &&
+      !data.subjectMonthlyRentalIncome
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Please enter the expected monthly rent, or 0 if none is expected",
+        path: ["subjectMonthlyRentalIncome"],
+      });
+    }
   },
 );
 

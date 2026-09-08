@@ -30,6 +30,7 @@ import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { computeOffers, type BorrowerPricingProfile } from "../../services/pricingAdapter";
 import { toBorrowerOfferViews } from "@shared/borrowerOfferView";
 import { routeParam } from "../../http/routeParams";
+import { occupancyLabel, parseOccupancyType } from "@shared/occupancy";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -472,10 +473,12 @@ export function registerPricingRoutes(
       const purchasePrice = parseFloat(String(application.purchasePrice ?? "0"));
       const downPayment = parseFloat(String(application.downPayment ?? "0"));
       const loanAmount = purchasePrice - downPayment;
+      const occupancyType = parseOccupancyType(application.occupancyType);
       const missingItems: string[] = [];
       if (!purchasePrice || purchasePrice <= 0) missingItems.push("Purchase price");
       if (isNaN(downPayment) || loanAmount <= 0) missingItems.push("Down payment below purchase price");
       if (!application.creditScore) missingItems.push("Credit score");
+      if (!occupancyType) missingItems.push("How the property will be used");
 
       const base = { qualifier, indicative: qualifier === "PRELIMINARY", pricedAt, lockTermDays };
       if (missingItems.length > 0) {
@@ -490,7 +493,7 @@ export function registerPricingRoutes(
         loanAmount,
         propertyValue: purchasePrice,
         propertyType: (application.propertyType as BorrowerPricingProfile["propertyType"]) || "single_family",
-        occupancyType: "primary_residence",
+        occupancyType: occupancyType!,
         loanPurpose: (application.loanPurpose as BorrowerPricingProfile["loanPurpose"]) || "purchase",
         isFirstTimeHomeBuyer: application.isFirstTimeBuyer ?? false,
         borrowerIncome: parseFloat(String(application.annualIncome ?? "0")),
@@ -538,7 +541,7 @@ export function registerPricingRoutes(
         },
         assumptions: [
           `${lockTermDays}-day rate lock`,
-          "Primary residence occupancy",
+          `${occupancyLabel(profile.occupancyType)} occupancy`,
           qualifier === "PRELIMINARY"
             ? "Pricing is indicative — based on your self-reported profile, not a rate quote or a commitment to lend"
             : "Pricing reflects your verified profile; final terms set at rate lock",
@@ -568,6 +571,12 @@ export function registerPricingRoutes(
       }
 
       const { calculateLLPA } = await import("../../pricing");
+      const occupancyType = parseOccupancyType(application.occupancyType);
+      if (!occupancyType) {
+        return res.status(422).json({
+          error: "Property occupancy is required before a pricing breakdown can be calculated.",
+        });
+      }
       const loanAmount = parseFloat(String(option.loanAmount));
       const creditScore = application.creditScore ?? 680;
       const ltv = parseFloat(String(application.ltvRatio ?? "80"));
@@ -576,7 +585,7 @@ export function registerPricingRoutes(
         creditScore,
         ltv,
         (application.propertyType as "single_family" | "condo" | "townhouse" | "multi_family") || "single_family",
-        "primary_residence",
+        occupancyType,
         application.isFirstTimeBuyer ?? false,
         parseFloat(String(application.annualIncome ?? "0")),
         0,
@@ -598,7 +607,7 @@ export function registerPricingRoutes(
         totalLlpaPoints: llpa.totalLLPA,
         rateEquivalent: Number(rateEquivalent.toFixed(3)),
         llpaFeeAmount: llpa.pricing.lLPAFeeAmount,
-        inputs: { creditScore, ltv: Number(ltv.toFixed(1)), loanAmount },
+        inputs: { creditScore, ltv: Number(ltv.toFixed(1)), loanAmount, occupancyType },
       });
     } catch (error) {
       console.error("Pricing breakdown error:", error);

@@ -72,7 +72,7 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
     expect(vaPurchase.estMortgage).toBeCloseTo(conventional.estMortgage - conventional.pmiMonthly, 2);
   });
 
-  it("sums additional income sources into qualifying income (annualAmount, incl. derived rental)", () => {
+  it("does not count the income-source breakdown twice", () => {
     const stats = computePreApprovalAnalysis(
       withOverrides({
         incomeSources: [
@@ -84,14 +84,14 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
       }),
       6.375,
     );
-    expect(stats.qualifyingAnnualIncome).toBe(180_000);
-    // More income, same housing cost → lower DTI than the base case.
+    expect(stats.reportedAnnualIncome).toBe(100_000);
+    // The broad household total is the estimate; source rows document what is
+    // inside it and must not manufacture extra buying power.
     const baseStats = computePreApprovalAnalysis(base, 6.375);
-    expect(stats.dti).toBeLessThan(baseStats.dti);
-    expect(stats.dti).toBeCloseTo((baseStats.estMortgage / (180_000 / 12)) * 100, 5);
+    expect(stats.dti).toBe(baseStats.dti);
   });
 
-  it("replaces a self-employed borrower's rough total with detailed entity income", () => {
+  it("keeps the household total when a self-employed borrower details each entity", () => {
     const stats = computePreApprovalAnalysis(
       withOverrides({
         annualIncome: "240,000",
@@ -109,7 +109,7 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
       6.375,
     );
 
-    expect(stats.qualifyingAnnualIncome).toBe(246_000);
+    expect(stats.reportedAnnualIncome).toBe(240_000);
   });
 
   it("includes typed monthly debts in DTI and reports when they are present", () => {
@@ -160,7 +160,7 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
     expect(withRentalDebt.monthlyDebts).toBe(1_200);
     expect(withRentalDebt.dti).toBeGreaterThan(noRentalDebt.dti);
     expect(withRentalDebt.dti).toBeCloseTo(
-      ((1_200 + withRentalDebt.estMortgage) / (130_000 / 12)) * 100,
+      ((1_200 + withRentalDebt.estMortgage) / (100_000 / 12)) * 100,
       5,
     );
   });
@@ -173,7 +173,7 @@ describe("computePreApprovalAnalysis — characterization of the panel's math", 
     expect(empty.dti).toBe(0);
     expect(empty.estMortgage).toBe(0);
     expect(empty.ltv).toBe(0);
-    expect(empty.qualifyingAnnualIncome).toBe(0);
+    expect(empty.reportedAnnualIncome).toBe(0);
   });
 });
 

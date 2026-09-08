@@ -36,7 +36,7 @@ describe("buildTeaserInputs", () => {
     expect(buildTeaserInputs({ ...BASE, creditScore: "" })?.creditScore).toBe(680);
   });
 
-  it("counts step-11 income sources toward income and rental debt service toward debts — the teaser must agree with the Live Analysis panel", () => {
+  it("does not double-count the source breakdown and still counts rental debt", () => {
     const inputs = buildTeaserInputs({
       ...BASE,
       hasAdditionalIncome: true,
@@ -52,7 +52,7 @@ describe("buildTeaserInputs", () => {
       ],
     } as PreApprovalFormData);
     expect(inputs).toMatchObject({
-      annualIncome: 200000, // 120k base + 50k other + 30k rental
+      annualIncome: 120000, // the household total already includes the source breakdown
       monthlyDebts: 1700, // 500 typed + 1,200 rental debt service
     });
   });

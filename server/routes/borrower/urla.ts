@@ -18,6 +18,7 @@ import { evaluateTridTrigger } from "../../services/trid";
 // Exported: the LO-2 scenario route reuses this gate (one access model, no forks).
 import { maskUrlaPersonalInfo } from "./access";
 import { routeParams } from "../../http/routeParams";
+import { parseOccupancyType } from "@shared/occupancy";
 
 const optionalMoney = z.union([z.string(), z.number()])
   .transform((value) => String(value).replace(/[,$]/g, "").trim())
@@ -481,6 +482,12 @@ export function registerUrlaRoutes(
       }
       const data = { ...pickTableFields(URLA_TABLES.propertyInfo, req.body), applicationId };
       const result = await storage.upsertUrlaPropertyInfo(data as any);
+      const canonicalOccupancy = parseOccupancyType(result.occupancyType);
+      await storage.updateLoanApplication(applicationId, {
+        occupancyType: canonicalOccupancy,
+        numberOfUnits: result.numberOfUnits ?? null,
+        subjectMonthlyRentalIncome: result.estimatedMarketRent ?? null,
+      });
       res.json(result);
     } catch (error) {
       console.error("Save property info error:", error);
@@ -691,6 +698,13 @@ export function registerUrlaRoutes(
           ...pickTableFields(URLA_TABLES.propertyInfo, propertyInfo),
           applicationId,
         } as any);
+        const savedProperty = results.propertyInfo;
+        const canonicalOccupancy = parseOccupancyType(savedProperty.occupancyType);
+        await storage.updateLoanApplication(applicationId, {
+          occupancyType: canonicalOccupancy,
+          numberOfUnits: savedProperty.numberOfUnits ?? null,
+          subjectMonthlyRentalIncome: savedProperty.estimatedMarketRent ?? null,
+        });
         decisionInputsChanged = true;
       }
 

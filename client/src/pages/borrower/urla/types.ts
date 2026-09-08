@@ -1,7 +1,7 @@
 import { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES } from "@shared/statusVocabularies";
 import { URLA_LIABILITY_TYPES } from "@shared/liabilityTypes";
-import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, RealEstateOwned, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
-import { OTHER_INCOME_LABELS } from "@shared/incomeTypes";
+import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, RealEstateOwned, SelfEmploymentWorksheet, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
+import { OTHER_INCOME_LABELS, otherIncomeTypeLabel } from "@shared/incomeTypes";
 // SSN and account numbers are WRITE-ONLY virtual fields: the server encrypts
 // them at rest and never returns the value — responses carry only ssnLast4 /
 // accountNumberLast4, which the inputs surface via their placeholders.
@@ -137,6 +137,97 @@ function monthlyFromAnnual(value: unknown): string {
   return (annual / 12).toFixed(2).replace(/\.00$/, "");
 }
 
+function numberFromMoney(value: unknown): number {
+  const amount = parseFloat(String(value ?? "").replace(/[,$]/g, ""));
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+/** Carry the classification facts from fast intake into the detailed workpaper
+ * without pretending tax-return figures have already been provided. */
+function intakeWorksheet(source: IncomeSourceEntry): SelfEmploymentWorksheet | undefined {
+  if (!source.businessStructure || source.businessStructure === "other") return undefined;
+  const base: SelfEmploymentWorksheet = {
+    version: 1,
+    businessStructure: source.businessStructure,
+    ownershipPercent: source.ownershipPercent === "" || source.ownershipPercent === undefined
+      ? undefined
+      : Number(source.ownershipPercent),
+    yearsSelfEmployed: source.yearsInRole === "" || source.yearsInRole === undefined
+      ? undefined
+      : Number(source.yearsInRole),
+  };
+  if (
+    source.businessStructure === "sole_proprietorship"
+    || source.businessStructure === "single_member_llc"
+  ) {
+    base.scheduleC = {
+      currentYear: {
+        netProfitOrLoss: 0,
+        depreciation: 0,
+        depletion: 0,
+        amortizationOrCasualtyLoss: 0,
+        businessUseOfHome: 0,
+        mealsExclusion: 0,
+        nonRecurringIncome: 0,
+      },
+    };
+  } else if (
+    source.businessStructure === "partnership"
+    || source.businessStructure === "s_corporation"
+  ) {
+    base.k1 = {
+      currentYear: {
+        ordinaryBusinessIncome: 0,
+        netRentalRealEstateIncome: 0,
+        otherNetRentalIncome: 0,
+        guaranteedPayments: 0,
+        distributionsReceived: 0,
+      },
+      hasTwoYearGuaranteedPayments: false,
+      w2FromBusiness: 0,
+    };
+  }
+  return base;
+}
+
+function intakeSelfEmploymentRecord(
+  source: IncomeSourceEntry,
+  employmentType: "current" | "additional",
+): Partial<EmploymentHistory> {
+  return {
+    employmentType,
+    employerName: source.employerName ?? "",
+    yearsInLineOfWork: source.yearsInRole ? parseInt(source.yearsInRole, 10) || 0 : null,
+    isSelfEmployed: true,
+    baseIncome: monthlyFromAnnual(source.annualAmount),
+    borrowerSequenceNumber: 1,
+    selfEmploymentIncome: intakeWorksheet(source),
+  };
+}
+
+function intakeW2Record(
+  source: IncomeSourceEntry,
+  employmentType: "current" | "additional",
+): Partial<EmploymentHistory> {
+  return {
+    employmentType,
+    employerName: source.employerName ?? "",
+    yearsInLineOfWork: source.yearsInRole ? parseInt(source.yearsInRole, 10) || 0 : null,
+    isSelfEmployed: false,
+    baseIncome: monthlyFromAnnual(source.annualAmount),
+    borrowerSequenceNumber: 1,
+  };
+}
+
+function intakeEmploymentRecord(
+  source: IncomeSourceEntry,
+  employmentType: "current" | "additional",
+): Partial<EmploymentHistory> {
+  return source.type === "self_employed"
+    ? intakeSelfEmploymentRecord(source, employmentType)
+    : intakeW2Record(source, employmentType);
+}
+
 /** Keep the borrower's intended job order stable across database refetches. */
 export function orderEmploymentRecords(
   records: EmploymentHistory[],
@@ -161,31 +252,75 @@ export function prefillPrimaryEmployment(
 ): Partial<EmploymentHistory>[] {
   if (existing.length > 0) return orderEmploymentRecords(existing);
 
-  const selfEmployedSources = (Array.isArray(app.incomeSources) ? app.incomeSources : [])
+  const employmentSources = (Array.isArray(app.incomeSources) ? app.incomeSources : [])
     .filter((source): source is IncomeSourceEntry => {
       const candidate = source as Partial<IncomeSourceEntry> | null;
-      return !!candidate && candidate.type === "self_employed";
+      return !!candidate && (candidate.type === "self_employed" || candidate.type === "w2");
     });
+  const selfEmployedSources = employmentSources.filter((source) => source.type === "self_employed");
 
   if (app.employmentType === "self_employed" && selfEmployedSources.length > 0) {
-    return selfEmployedSources.map((source, index) => ({
-      employmentType: index === 0 ? "current" : "additional",
-      employerName: source.employerName ?? "",
-      yearsInLineOfWork: source.yearsInRole ? parseInt(source.yearsInRole, 10) || 0 : null,
-      isSelfEmployed: true,
-      baseIncome: monthlyFromAnnual(source.annualAmount),
-      borrowerSequenceNumber: 1,
-    }));
+    const primaryBusiness = selfEmployedSources[0];
+    const orderedSources = [primaryBusiness, ...employmentSources.filter((source) => source !== primaryBusiness)];
+    return orderedSources.map((source, index) =>
+      intakeEmploymentRecord(source, index === 0 ? "current" : "additional"),
+    );
   }
 
-  return [{
+  const detailedAnnualIncome = (Array.isArray(app.incomeSources) ? app.incomeSources : [])
+    .reduce((sum, source) => {
+      const candidate = source as Partial<IncomeSourceEntry> | null;
+      return sum + numberFromMoney(candidate?.annualAmount);
+    }, 0);
+  const primaryAnnualIncome = Math.max(0, numberFromMoney(app.annualIncome) - detailedAnnualIncome);
+  const primary: Partial<EmploymentHistory> = {
     employmentType: "current",
     employerName: app.employerName ?? "",
     yearsInLineOfWork: app.employmentYears ?? null,
     isSelfEmployed: app.employmentType === "self_employed",
-    baseIncome: monthlyFromAnnual(app.annualIncome),
+    baseIncome: monthlyFromAnnual(detailedAnnualIncome > 0 ? primaryAnnualIncome : app.annualIncome),
     borrowerSequenceNumber: 1,
-  }];
+  };
+
+  // A W-2 borrower with a side business is a mixed-income borrower. Keep the
+  // main job as the current record and carry each business into its own
+  // additional record so the detailed review does not erase the side income or
+  // count it inside the main salary and again as a business.
+  return [
+    primary,
+    ...employmentSources.map((source) => intakeEmploymentRecord(source, "additional")),
+  ];
+}
+
+/** Carry non-employment income into URLA section 1e. Rental income has its own
+ * property workpaper and is intentionally excluded here so it is not counted
+ * twice. Existing saved URLA rows always win. */
+export function prefillOtherIncomeSources(
+  existing: OtherIncomeSource[],
+  app: LoanApplication,
+): Partial<OtherIncomeSource>[] {
+  if (existing.length > 0) return existing;
+
+  return (Array.isArray(app.incomeSources) ? app.incomeSources : [])
+    .filter((source): source is IncomeSourceEntry => {
+      const candidate = source as Partial<IncomeSourceEntry> | null;
+      return !!candidate && ["social_security", "pension", "investment", "other"].includes(candidate.type ?? "");
+    })
+    .map((source) => ({
+      applicationId: app.id,
+      incomeSource:
+        source.type === "social_security"
+          ? otherIncomeTypeLabel("social_security")
+          : source.type === "pension"
+            ? otherIncomeTypeLabel("retirement")
+            : source.type === "investment"
+              // “Investment income” can mean dividends, interest, or gains.
+              // Preserve the amount without inventing a tax classification;
+              // the detailed URLA asks the borrower/loan team to classify it.
+              ? otherIncomeTypeLabel("other")
+              : otherIncomeTypeLabel("other"),
+      monthlyAmount: monthlyFromAnnual(source.annualAmount),
+    }));
 }
 
 /** Carry every rental the borrower already described into editable URLA 2c state. */

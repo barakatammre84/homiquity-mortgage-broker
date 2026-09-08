@@ -66,9 +66,13 @@ describe("AdvisoryPanel", () => {
     expect(expected.dti.toFixed(0)).not.toBe(preFix.dti.toFixed(0));
   });
 
-  it("shows qualifying income including additional sources, formatted annually", () => {
+  it("shows the household total once without re-adding its source breakdown", () => {
     renderPanel(rentalWithDebt);
-    expect(screen.getByTestId("text-qualifying-income").textContent).toBe("$130,000/yr");
+    expect(screen.getByTestId("text-qualifying-income").textContent).toBe("$100,000/yr");
+    expect(screen.getByText("Reported household income")).toBeTruthy();
+    expect(screen.getByTestId("text-complex-income-scope").textContent).toMatch(/may differ/i);
+    expect(screen.getByText(/recalculate business, investment, and rental income/i)).toBeTruthy();
+    expect(screen.queryByText(/manageable/i)).toBeNull();
   });
 
   it("says the DTI excludes monthly debts until they have been asked", () => {
@@ -89,6 +93,8 @@ describe("AdvisoryPanel", () => {
     expect(screen.getByTestId("advisory-panel")).toBeTruthy();
     expect(screen.queryByTestId("text-qualifying-income")).toBeNull();
     expect(screen.queryByTestId("text-dti-value")).toBeNull();
+    expect(screen.getByText("Live Estimate")).toBeTruthy();
+    expect(screen.getByText("Self-reported")).toBeTruthy();
   });
 
   // Regression pin for a defect no guard can see. The panel shipped as
@@ -112,5 +118,12 @@ describe("AdvisoryPanel", () => {
     expect(screen.getByTestId("text-payment-disclaimer").textContent).toContain(
       "Not an offer of credit",
     );
+  });
+
+  it("describes borrower estimates as preliminary and never claims a review or approval", () => {
+    renderPanel({ ...base, monthlyDebts: "500" } as unknown as PreApprovalFormData, "final");
+    expect(screen.getByText(/ready to submit/i).textContent).toMatch(/estimate/i);
+    expect(screen.queryByText(/review complete/i)).toBeNull();
+    expect(screen.queryByText(/approval zone/i)).toBeNull();
   });
 });

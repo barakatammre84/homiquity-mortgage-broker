@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftToFormValues } from "./useDraftRestore";
+import { draftHasAnswers, draftToFormValues } from "./useDraftRestore";
 import { defaultPreApprovalFormValues, type PreApprovalFormData } from "@shared/preApprovalForm";
 import type { LoanApplication } from "@shared/schema";
 
@@ -13,7 +13,26 @@ const draft = (overrides: Partial<LoanApplication>): LoanApplication =>
 
 const current: PreApprovalFormData = { ...defaultPreApprovalFormValues };
 
-describe("draftToFormValues — the three answers the server draft used to lose", () => {
+describe("draftToFormValues — server-backed funnel answers", () => {
+  it("recognizes an early draft after occupancy is answered", () => {
+    expect(draftHasAnswers(draft({ annualIncome: null, occupancyType: "investment" }))).toBe(true);
+  });
+
+  it("restores subject-property occupancy, units, and rent", () => {
+    const values = draftToFormValues(
+      draft({
+        propertyType: "multi_family",
+        occupancyType: "investment",
+        numberOfUnits: 3,
+        subjectMonthlyRentalIncome: "4200",
+      }),
+      current,
+    );
+    expect(values.occupancyType).toBe("investment");
+    expect(values.numberOfUnits).toBe("3");
+    expect(values.subjectMonthlyRentalIncome).toBe("4200");
+  });
+
   it("restores the VA residual-income inputs as the form's digit strings", () => {
     const values = draftToFormValues(
       draft({ isVeteran: true, householdFamilySize: 4, homeSquareFootage: 1800 }),

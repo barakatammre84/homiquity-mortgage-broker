@@ -70,6 +70,9 @@ export function registerApplicationRoutes(
         employmentType: formData.employmentType,
         employmentYears: formData.employmentYears,
         propertyType: formData.propertyType,
+        occupancyType: formData.occupancyType ?? null,
+        numberOfUnits: formData.numberOfUnits ?? null,
+        subjectMonthlyRentalIncome: formData.subjectMonthlyRentalIncome ?? null,
         purchasePrice: formData.purchasePrice,
         downPayment: formData.downPayment,
         loanPurpose: formData.loanPurpose,
@@ -116,6 +119,18 @@ export function registerApplicationRoutes(
       // income-only note. The intake source remains self-reported and still
       // requires normal document review.
       try {
+        if (formData.occupancyType) {
+          await storage.upsertUrlaPropertyInfo({
+            applicationId: application.id,
+            occupancyType: formData.occupancyType,
+            numberOfUnits: formData.numberOfUnits ?? (formData.propertyType === "multi_family" ? null : 1),
+            estimatedMarketRent: formData.subjectMonthlyRentalIncome ?? null,
+          });
+          logAudit(req, "urla.property_info.intake_synced", "loan_application", application.id, {
+            occupancyType: formData.occupancyType,
+            numberOfUnits: formData.numberOfUnits ?? null,
+          });
+        }
         const syncedRentalProperties = await storage.syncIntakeRentalProperties(
           application.id,
           userId,

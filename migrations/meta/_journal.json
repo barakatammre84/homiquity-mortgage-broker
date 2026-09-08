@@ -470,6 +470,13 @@
       "when": 1788825600000,
       "tag": "0066_capture_application_real_estate",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1788840614000,
+      "tag": "0067_capture_subject_property_intent",
+      "breakpoints": true
     }
   ]
 }

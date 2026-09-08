@@ -73,6 +73,11 @@ export const loanApplications = pgTable("loan_applications", {
   propertyState: varchar("property_state", { length: 50 }),
   propertyZip: varchar("property_zip", { length: 20 }),
   propertyType: varchar("property_type", { length: 50 }),
+  // Subject-property intent captured during fast intake. NULL means unanswered;
+  // pricing and letters fail closed rather than inventing a primary residence.
+  occupancyType: varchar("occupancy_type", { length: 50 }),
+  numberOfUnits: integer("number_of_units"),
+  subjectMonthlyRentalIncome: decimal("subject_monthly_rental_income", { precision: 12, scale: 2 }),
   propertyValue: decimal("property_value", { precision: 12, scale: 2 }),
   purchasePrice: decimal("purchase_price", { precision: 12, scale: 2 }),
   downPayment: decimal("down_payment", { precision: 12, scale: 2 }),

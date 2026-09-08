@@ -16,6 +16,7 @@ import { assertVerifiedForDecisioning, type DataProvenance } from "@shared/dataP
 import { unlicensedStateRejection } from "@shared/companyIdentity";
 import { routeParams } from "../../http/routeParams";
 import { monthlyPrincipalAndInterestFromFraction } from "@shared/lib/amortization";
+import { occupancyLetterLabel, parseOccupancyType } from "@shared/occupancy";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -57,6 +58,17 @@ export function registerLetterRoutes(
 
       if (application.status !== "pre_approved") {
         return res.status(400).json({ error: "Only pre-approved applications can generate letters" });
+      }
+
+      const savedPropertyInfo = await storage.getUrlaPropertyInfo(id);
+      const occupancyType =
+        parseOccupancyType(application.occupancyType) ??
+        parseOccupancyType(savedPropertyInfo?.occupancyType);
+      const occupancy = occupancyLetterLabel(occupancyType);
+      if (!occupancy) {
+        return res.status(422).json({
+          error: "Property occupancy is required before a pre-approval letter can be issued.",
+        });
       }
 
       // Licensed-state gate (roadmap A5): a letter is an outward creditworthiness
@@ -172,7 +184,7 @@ export function registerLetterRoutes(
         borrowerName,
         loanAmount,
         productType: application.isVeteran ? "VA" : "CONV",
-        occupancy: "Primary",
+        occupancy,
         loanPurpose: application.loanPurpose || "Purchase",
         companyLegalName: COMPANY_CONFIG.legalName,
         companyNmlsId: COMPANY_CONFIG.nmlsId,
@@ -259,7 +271,7 @@ export function registerLetterRoutes(
           applicationId: id,
           loanAmount,
           productType: application.isVeteran ? "VA" : "CONV",
-          occupancy: "Primary",
+          occupancy,
           loanPurpose: application.loanPurpose || "Purchase",
           expirationDate,
           companyLegalName: COMPANY_CONFIG.legalName,
@@ -607,6 +619,16 @@ export function registerLetterRoutes(
       if (!(PREQUAL_ELIGIBLE_STATUSES as readonly string[]).includes(application.status)) {
         return res.status(400).json({ error: "Application must be submitted before generating a pre-qualification letter" });
       }
+      const savedPropertyInfo = await storage.getUrlaPropertyInfo(id);
+      const occupancyType =
+        parseOccupancyType(application.occupancyType) ??
+        parseOccupancyType(savedPropertyInfo?.occupancyType);
+      const occupancy = occupancyLetterLabel(occupancyType);
+      if (!occupancy) {
+        return res.status(422).json({
+          error: "Property occupancy is required before a pre-qualification letter can be issued.",
+        });
+      }
 
       // Licensed-state gate — same boundary as generate-letter above (prequal is
       // wider: submitted-status only, no provenance guard, so the gate matters more).
@@ -651,7 +673,7 @@ export function registerLetterRoutes(
         borrowerName,
         estimatedAmount,
         productType: application.preferredLoanType || "conventional",
-        occupancy: "Primary",
+        occupancy,
         loanPurpose: application.loanPurpose || "Purchase",
         annualIncome: application.annualIncome?.toString(),
         creditScoreRange,
@@ -692,7 +714,7 @@ export function registerLetterRoutes(
         applicationId: id,
         estimatedAmount,
         productType: application.preferredLoanType || "conventional",
-        occupancy: "Primary",
+        occupancy,
         loanPurpose: application.loanPurpose || "Purchase",
         annualIncome: application.annualIncome?.toString(),
         creditScoreRange,

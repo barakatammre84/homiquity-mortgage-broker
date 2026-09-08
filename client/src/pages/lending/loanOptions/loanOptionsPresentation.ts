@@ -13,6 +13,13 @@ export interface LoanOptionsPresentation {
   description: string;
 }
 
+/** Intake writes rate scenarios before it finishes the document plan. Keep the
+ * results page in its short refresh loop until the application status confirms
+ * that both halves are ready. */
+export function isIntakeStillFinalizing(status: string): boolean {
+  return status === "submitted" || status === "analyzing";
+}
+
 /**
  * Submission alone does not mean a lender has received or reviewed the file.
  * Until the inputs are verified, every scenario is described as an estimate

@@ -36,7 +36,7 @@ import {
 
 import { FunnelProvider, useFunnel } from "@/funnel/FunnelContext";
 import { PRE_APPROVAL_DEFAULTS, routingSignature } from "@/funnel/preApprovalMachine";
-import { loanPurposeForEntryType } from "./preApproval/entryType";
+import { loanPurposeForEntryType, occupancyForEntryType } from "./preApproval/entryType";
 import { useFunnelAutosave } from "@/funnel/useFunnelAutosave";
 import { VerificationPulse } from "@/funnel/VerificationPulse";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -128,7 +128,10 @@ function PreApprovalFunnel() {
       monthlyDebts: "",
       creditScore: "",
       loanPurpose: defaultLoanPurpose,
+      occupancyType: occupancyForEntryType(urlType),
       propertyType: (urlPropertyType as any) || "single_family",
+      numberOfUnits: "",
+      subjectMonthlyRentalIncome: "",
       purchasePrice: urlPrice || "",
       downPayment: "",
       // /va-loans and /first-time-buyer pre-screen these; honor them so
@@ -185,6 +188,7 @@ function PreApprovalFunnel() {
         purchasePrice: data.purchasePrice.replace(/,/g, ""),
         downPayment: data.downPayment.replace(/,/g, ""),
         monthlyDebts: data.monthlyDebts.replace(/,/g, ""),
+        subjectMonthlyRentalIncome: data.subjectMonthlyRentalIncome?.replace(/,/g, ""),
         // FCRA soft-pull authorization from the final step — persisted
         // server-side as a credit_consents evidence row (IP, UA, disclosure).
         softPullConsentAccepted: funnelState.consent.softPullAcknowledged,
@@ -230,7 +234,10 @@ function PreApprovalFunnel() {
         title: "Application submitted",
         description: "Your numbers were run against underwriting guidelines — no AI, just math.",
       });
-      navigate(`/loan-options/${result.id}`);
+      // A borrower may have an older workable file selected in this tab. Name
+      // the new file in the URL so the shell, dashboard, tasks, and documents
+      // all resolve the application that was just submitted on first paint.
+      navigate(`/loan-options/${result.id}?app=${encodeURIComponent(result.id)}`);
     },
     onError: (error: Error) => {
       toast({
@@ -611,6 +618,7 @@ function PreApprovalFunnel() {
         return (
           <IncomeSourcesStep
             employmentType={form.getValues("employmentType")}
+            householdAnnualIncome={form.getValues("annualIncome")}
             value={watchedValues.incomeSources}
             onChange={(entries) => form.setValue("incomeSources", entries as never)}
           />

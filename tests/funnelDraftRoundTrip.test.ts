@@ -109,6 +109,23 @@ describe("PATCH /api/loan-applications/:id — the funnel draft round trip keeps
     expect(h.updates[0].data).toEqual({ householdFamilySize: 3, homeSquareFootage: 2200 });
   });
 
+  it("clears stale multi-unit rent when a borrower changes to a primary single-family home", async () => {
+    const res = await patch({
+      propertyType: "single_family",
+      occupancyType: "primary_residence",
+      numberOfUnits: "3",
+      subjectMonthlyRentalIncome: "4200",
+    });
+
+    expect(res.status).toBe(200);
+    expect(h.updates[0].data).toEqual({
+      propertyType: "single_family",
+      occupancyType: "primary_residence",
+      numberOfUnits: 1,
+      subjectMonthlyRentalIncome: null,
+    });
+  });
+
   it("an explicit opt-OUT is written as false, not dropped as falsy", async () => {
     const res = await patch({ avoidsInterestFinancing: false });
     expect(res.status).toBe(200);
@@ -135,5 +152,27 @@ describe("PATCH /api/loan-applications/:id — the funnel draft round trip keeps
     const res = await patch({ homeSquareFootage: "900" });
     expect(res.status).toBe(200);
     expect(Object.keys(h.updates[0].data)).toEqual(["homeSquareFootage"]);
+  });
+
+  it("rejects a partial income update that conflicts with the stored breakdown", async () => {
+    h.applications[0].incomeSources = [{ type: "self_employed", annualAmount: "45000" }];
+    const res = await patch({ annualIncome: "40000" });
+    expect(res.status).toBe(400);
+    expect(h.updates).toHaveLength(0);
+  });
+
+  it("rejects a partial breakdown update that exceeds the stored household total", async () => {
+    const res = await patch({
+      incomeSources: [{
+        type: "self_employed",
+        annualAmount: "90000",
+        employerName: "Side Studio LLC",
+        yearsInRole: "3",
+        businessStructure: "single_member_llc",
+        ownershipPercent: "100",
+      }],
+    });
+    expect(res.status).toBe(400);
+    expect(h.updates).toHaveLength(0);
   });
 });

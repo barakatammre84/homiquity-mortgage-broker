@@ -32,6 +32,7 @@ function completeAnswers(overrides: Partial<PreApprovalFormData> = {}): PreAppro
     monthlyDebts: "1,500",
     creditScore: "760",
     loanPurpose: "purchase",
+    occupancyType: "primary_residence",
     propertyType: "single_family",
     purchasePrice: "500,000",
     downPayment: "100,000",
@@ -46,6 +47,7 @@ describe("computeRoute — deterministic dynamic routing", () => {
     expect(route).toEqual([
       "intro",
       "loanPurpose",
+      "occupancyType",
       "propertyType",
       "veteranAndFirstTime",
       "purchasePrice",
@@ -64,6 +66,22 @@ describe("computeRoute — deterministic dynamic routing", () => {
   it("asks about military service before the down payment (VA zero-down ordering)", () => {
     const route = computeRoute(answers());
     expect(route.indexOf("veteranAndFirstTime")).toBeLessThan(route.indexOf("downPayment"));
+  });
+
+  it("asks occupancy before property type and only asks rental details when they apply", () => {
+    const primary = computeRoute(answers({ occupancyType: "primary_residence", propertyType: "single_family" }));
+    expect(primary.indexOf("occupancyType")).toBe(primary.indexOf("loanPurpose") + 1);
+    expect(primary.indexOf("propertyType")).toBe(primary.indexOf("occupancyType") + 1);
+    expect(primary).not.toContain("numberOfUnits");
+    expect(primary).not.toContain("subjectMonthlyRentalIncome");
+
+    const multiFamily = computeRoute(answers({ occupancyType: "primary_residence", propertyType: "multi_family" }));
+    expect(multiFamily.indexOf("numberOfUnits")).toBe(multiFamily.indexOf("propertyType") + 1);
+    expect(multiFamily.indexOf("subjectMonthlyRentalIncome")).toBe(multiFamily.indexOf("numberOfUnits") + 1);
+
+    const investment = computeRoute(answers({ occupancyType: "investment", propertyType: "single_family" }));
+    expect(investment).not.toContain("numberOfUnits");
+    expect(investment.indexOf("subjectMonthlyRentalIncome")).toBe(investment.indexOf("propertyType") + 1);
   });
 
   it("injects the complex-income block when the user reports additional income", () => {
@@ -221,6 +239,39 @@ describe("stepGate — validation gates", () => {
     expect(gate.errors[0]).toMatch(/self-employment/i);
   });
 
+  it("requires the business facts needed for the correct income review path", () => {
+    const gate = stepGate(
+      "incomeSources",
+      answers({
+        annualIncome: "170,000",
+        hasAdditionalIncome: true,
+        incomeSources: [{
+          type: "self_employed",
+          annualAmount: "45,000",
+          employerName: "Harbor Studio LLC",
+          yearsInRole: "4",
+        }],
+      }),
+      NO_CONSENT,
+    );
+    expect(gate.ok).toBe(false);
+    expect(gate.errors[0]).toMatch(/business type.*ownership/i);
+  });
+
+  it("blocks a source breakdown above the reported household total", () => {
+    const gate = stepGate(
+      "incomeSources",
+      answers({
+        annualIncome: "40,000",
+        hasAdditionalIncome: true,
+        incomeSources: [{ type: "investment", annualAmount: "50,000" }],
+      }),
+      NO_CONSENT,
+    );
+    expect(gate.ok).toBe(false);
+    expect(gate.errors[0]).toMatch(/higher than your household total/i);
+  });
+
   it("requires rental sources to have complete property details", () => {
     const gate = stepGate(
       "incomeSources",
@@ -284,10 +335,11 @@ describe("funnelReducer — transitions", () => {
     const a = completeAnswers();
     let state = createFunnelState(a);
     state = advance(state, a); // intro -> loanPurpose
-    state = advance(state, a); // loanPurpose -> propertyType
+    state = advance(state, a); // loanPurpose -> occupancyType
+    state = advance(state, a); // occupancyType -> propertyType
     expect(state.stepId).toBe("propertyType");
     state = funnelReducer(state, { type: "BACK" });
-    expect(state.stepId).toBe("loanPurpose");
+    expect(state.stepId).toBe("occupancyType");
     expect(state.direction).toBe(-1);
   });
 
@@ -465,6 +517,9 @@ describe("ROUTING_ANSWER_FIELDS completeness", () => {
     monthlyDebts: "7,777",
     creditScore: "excellent",
     propertyType: "condo",
+    occupancyType: "second_home",
+    numberOfUnits: "4",
+    subjectMonthlyRentalIncome: "3200",
     propertyState: "IL",
     isFirstTimeBuyer: true,
     householdFamilySize: "9",

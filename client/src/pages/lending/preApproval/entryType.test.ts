@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loanPurposeForEntryType } from "./entryType";
+import { loanPurposeForEntryType, occupancyForEntryType } from "./entryType";
 
 // Pins every `?type=` value emitted anywhere in client/src today. The list was
 // taken from the source, not invented:
@@ -34,9 +34,14 @@ describe("loanPurposeForEntryType", () => {
   });
 
   it("leaves investment on purchase — an investment purchase is still a purchase", () => {
-    // The occupancy intent it carries has no funnel field to land in; that gap
-    // is a product ticket, not something to fake with a wrong purpose.
     expect(loanPurposeForEntryType("investment")).toBe("purchase");
+    expect(occupancyForEntryType("investment")).toBe("investment");
+  });
+
+  it("does not invent occupancy for entry links that did not provide it", () => {
+    for (const type of [null, undefined, "", "va", "refinance", "constructor"]) {
+      expect(occupancyForEntryType(type)).toBeUndefined();
+    }
   });
 
   it("is total: absent, empty and unknown types are a purchase", () => {

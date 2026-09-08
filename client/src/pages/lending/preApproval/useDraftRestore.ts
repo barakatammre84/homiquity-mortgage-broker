@@ -35,9 +35,15 @@ interface UseDraftRestoreArgs {
 }
 
 /** The draft carries borrower answers worth asking about (vs an empty container row). */
-function draftHasAnswers(draft: LoanApplication): boolean {
+export function draftHasAnswers(draft: LoanApplication): boolean {
   return Boolean(
-    draft.annualIncome || draft.purchasePrice || draft.creditScore || draft.monthlyDebts,
+    draft.annualIncome ||
+    draft.purchasePrice ||
+    draft.creditScore ||
+    draft.monthlyDebts ||
+    draft.occupancyType ||
+    draft.numberOfUnits ||
+    draft.subjectMonthlyRentalIncome,
   );
 }
 
@@ -65,6 +71,9 @@ export function draftToFormValues(
     loanPurpose: (draft.loanPurpose as PreApprovalFormData["loanPurpose"]) || "purchase",
     propertyType:
       (draft.propertyType as PreApprovalFormData["propertyType"]) || "single_family",
+    occupancyType: (draft.occupancyType as PreApprovalFormData["occupancyType"]) || undefined,
+    numberOfUnits: draft.numberOfUnits ? String(draft.numberOfUnits) : "",
+    subjectMonthlyRentalIncome: draft.subjectMonthlyRentalIncome || "",
     purchasePrice: draft.purchasePrice || "",
     downPayment: draft.downPayment || "",
     isVeteran: !!draft.isVeteran,

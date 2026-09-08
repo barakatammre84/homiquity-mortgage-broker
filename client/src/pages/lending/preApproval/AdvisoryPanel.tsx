@@ -48,6 +48,10 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
   }
 
   const isRefinance = formValues.loanPurpose === "refinance" || formValues.loanPurpose === "cash_out";
+  const hasComplexIncome = formValues.employmentType === "self_employed"
+    || (formValues.incomeSources ?? []).some((source) =>
+      ["self_employed", "rental", "investment"].includes(source.type),
+    );
 
   const getContextualAdvice = () => {
     switch (currentStepId) {
@@ -97,10 +101,7 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
       case "homeSquareFootage":
         return "The VA estimates monthly utilities at $0.14 per square foot when verifying your loan leaves enough residual income.";
       case "annualIncome":
-        if (formValues.employmentType === "self_employed") {
-          return "Use your best rough yearly total here. On the next steps, each business, 1099, and rental source is captured separately and verified against tax documents.";
-        }
-        return "We use gross income to calculate your debt-to-income ratio. We'll verify with W-2s or tax returns later.";
+        return "Use one rough household total here. We'll break down each source for the document checklist without counting it twice.";
       case "employmentType":
         if (formValues.employmentType === "self_employed") {
           return (
@@ -113,12 +114,12 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
       case "employmentYears":
         return "Most lenders prefer 2+ years of stable employment history.";
       case "hasAdditionalIncome":
-        return "Including all income sources gives a more complete picture for underwriting.";
+        return "Breaking down the total tells us which income documents to request and helps prevent delays.";
       case "incomeSources":
         if (formValues.employmentType === "self_employed") {
-          return "Add a Self-Employment / 1099 entry with your annual figure — that one is required. Anything else you receive is optional, and every source you add can raise your buying power.";
+          return "Add each business or 1099 source included in your total. This builds the right checklist without adding the same income twice.";
         }
-        return "Each income source may require different documentation. We'll let you know what's needed.";
+        return "Break down the income already included in your total so we can request the right documents.";
       case "monthlyDebts":
         return "Include car payments, student loans, credit cards, and other monthly obligations.";
       case "creditScore":
@@ -126,7 +127,7 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
       case "veteranAndFirstTime":
         return "Veterans may qualify for VA loans with no down payment. First-time buyers may access special programs.";
       case "final":
-        return "Review complete! Click submit to see your personalized loan options.";
+        return "Your estimate is ready to submit. We'll verify your documents and credit before making any final decision.";
       default:
         return "Keep going! We're building your financial profile.";
     }
@@ -134,10 +135,16 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
 
   const getDtiStatus = () => {
     if (stats.dti <= 0) return { color: "bg-muted", text: "Enter your info to see DTI" };
-    if (stats.dti < 36) return { color: "bg-success", text: "Looking great! Lenders love a DTI under 36%." };
-    if (stats.dti < 43) return { color: "bg-warning", text: "You're in the approval zone, but consider the budget." };
-    if (stats.dti < 50) return { color: "bg-warning", text: "This is getting tight. You may need to reduce the loan amount." };
-    return { color: "bg-destructive", text: "This loan amount might be a stretch for standard approval." };
+    if (hasComplexIncome) {
+      return {
+        color: "bg-warning",
+        text: "Planning estimate only. Your loan team will recalculate business, investment, and rental income from documents before relying on this ratio.",
+      };
+    }
+    if (stats.dti < 36) return { color: "bg-success", text: "Based on these estimates, the monthly debt load looks manageable." };
+    if (stats.dti < 43) return { color: "bg-warning", text: "This estimate is higher; your loan team will review the complete file." };
+    if (stats.dti < 50) return { color: "bg-warning", text: "This estimate is tight and may call for a smaller loan or lower monthly debts." };
+    return { color: "bg-destructive", text: "This estimate is high and needs a full review by your loan team." };
   };
 
   const dtiStatus = getDtiStatus();
@@ -162,23 +169,33 @@ export function AdvisoryPanel({ formValues, currentStepId }: AdvisoryPanelProps)
         <div className="bg-primary/10 p-1.5 rounded-lg">
           <TrendingUp className="w-4 h-4 text-primary" />
         </div>
-        <span className="font-bold text-foreground text-sm uppercase tracking-wider">Live Analysis</span>
+        <span className="font-bold text-foreground text-sm uppercase tracking-wider">Live Estimate</span>
+        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          Self-reported
+        </span>
       </div>
 
       <div className="space-y-5">
-        {stats.qualifyingAnnualIncome > 0 && (
-          <div className="flex justify-between text-xs">
-            <span className="text-muted-foreground">Qualifying income</span>
-            <span className="font-medium text-foreground" data-testid="text-qualifying-income">
-              ${stats.qualifyingAnnualIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}/yr
-            </span>
+        {stats.reportedAnnualIncome > 0 && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs gap-3">
+              <span className="text-muted-foreground">Reported household income</span>
+              <span className="font-medium text-foreground shrink-0" data-testid="text-qualifying-income">
+                ${stats.reportedAnnualIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}/yr
+              </span>
+            </div>
+            {hasComplexIncome && (
+              <p className="text-xs leading-snug text-muted-foreground" data-testid="text-complex-income-scope">
+                The amount lenders can use may differ after tax returns, business cash flow, ownership, history, and rental expenses are reviewed.
+              </p>
+            )}
           </div>
         )}
 
         {(stats.dti > 0 || stats.estMortgage > 0) && (
           <div>
             <div className="flex justify-between text-xs mb-1.5">
-              <span className="text-muted-foreground">Debt-to-Income Ratio</span>
+              <span className="text-muted-foreground">Estimated debt-to-income</span>
               <span className={`font-bold ${stats.dti > 43 ? "text-destructive" : stats.dti > 36 ? "text-warning-subtle-foreground" : "text-success-subtle-foreground"}`} data-testid="text-dti-value">
                 {stats.dti > 0 ? `${stats.dti.toFixed(0)}%` : "—"}
               </span>
@@ -320,10 +337,10 @@ export function resolveStepCopy(currentQ: Question, formValues: PreApprovalFormD
         return {
           ...fallback,
           title: "About how much does your household earn in a year?",
-          subtext: "A rough total is fine — next we'll separate each business, 1099, rental, and other source.",
+          subtext: "A rough total is fine — next we'll break down each business, 1099, rental, and other source without adding it again.",
         };
       }
-      return { ...fallback, title: "What's your total household income?" };
+      return { ...fallback, title: "What's your estimated total household income?" };
 
     case "employmentYears":
       if (employmentType === "self_employed") {
@@ -338,13 +355,13 @@ export function resolveStepCopy(currentQ: Question, formValues: PreApprovalFormD
       // The step is MANDATORY for a self-employed borrower — the machine skips
       // the "any additional income?" question for them precisely because the
       // answer could not change the route. Which means the default heading,
-      // "What other income do you receive?", would be the first thing they see
+      // "What other income is included in your total?", would be the first thing they see
       // after saying nothing of the sort. Ask for what is actually needed.
       if (employmentType === "self_employed") {
         return {
           title: "Let's detail your self-employment income",
           subtext:
-            "Underwriting reviews 1099 and business income line by line, so it needs its own entry. Add any other sources you receive while you're here.",
+            "Underwriting reviews 1099 and business income line by line. Break down each source already included in your household total.",
           why: "Self-employed income is averaged from your returns — detailing it up front is what keeps your approval from stalling later.",
         };
       }

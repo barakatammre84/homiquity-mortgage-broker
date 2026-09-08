@@ -15,8 +15,15 @@ import {
 } from "lucide-react";
 import type { RentalPropertyEntry, IncomeSourceEntry, PreApprovalFormData } from "@shared/schema";
 import { maskCurrencyDigits } from "@/lib/formatters";
+import { parseMaskedAmount, sumIncomeSourcesAnnual } from "@/lib/preApprovalAnalysis";
 
-const EMPTY_DETAILS = { annualAmount: "", employerName: "", yearsInRole: "" };
+const EMPTY_DETAILS = {
+  annualAmount: "",
+  employerName: "",
+  yearsInRole: "",
+  businessStructure: undefined,
+  ownershipPercent: "",
+};
 const EMPTY_RENTAL: RentalPropertyEntry = {
   address: "",
   monthlyRentalIncome: "",
@@ -64,10 +71,12 @@ function withDerivedRentalAmount(entry: RentalAwareEntry): RentalAwareEntry {
  */
 export function IncomeSourcesStep({
   employmentType,
+  householdAnnualIncome,
   value,
   onChange,
 }: {
   employmentType: PreApprovalFormData["employmentType"] | undefined;
+  householdAnnualIncome?: string;
   /** THE state — `form.incomeSources`. */
   value: IncomeSourceEntry[] | undefined;
   onChange: (entries: IncomeSourceEntry[]) => void;
@@ -159,6 +168,10 @@ export function IncomeSourcesStep({
   const needsEmployerDetails = (typeValue: string) => typeValue === "w2" || typeValue === "self_employed";
 
   const rentalAnnualTotal = monthlyRentTotal(rentalProperties) * 12;
+  const householdTotal = parseMaskedAmount(householdAnnualIncome);
+  const detailedTotal = sumIncomeSourcesAnnual(entries);
+  const remainingInHouseholdTotal = householdTotal - detailedTotal;
+  const breakdownIsHigh = householdTotal > 0 && remainingInHouseholdTotal < 0;
 
   return (
     <div className="w-full max-w-lg mx-auto space-y-6">
@@ -196,6 +209,38 @@ export function IncomeSourcesStep({
           );
         })}
       </div>
+
+      {householdTotal > 0 && entries.length > 0 && (
+        <div
+          className={`rounded-xl border p-4 text-left ${breakdownIsHigh ? "border-destructive bg-destructive/5" : "bg-muted/30"}`}
+          data-testid="income-breakdown-check"
+        >
+          <p className="text-sm font-semibold text-foreground">Income check</p>
+          <dl className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Household total you reported</dt>
+              <dd className="font-medium">${householdTotal.toLocaleString()}/yr</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Detailed on this screen</dt>
+              <dd className="font-medium">${detailedTotal.toLocaleString()}/yr</dd>
+            </div>
+            <div className="flex justify-between gap-3 border-t pt-1">
+              <dt className={breakdownIsHigh ? "text-destructive" : "text-muted-foreground"}>
+                {breakdownIsHigh ? "Above your household total" : "Main source or household income not itemized here"}
+              </dt>
+              <dd className={breakdownIsHigh ? "font-semibold text-destructive" : "font-medium"} data-testid="income-breakdown-remainder">
+                ${Math.abs(remainingInHouseholdTotal).toLocaleString()}/yr
+              </dd>
+            </div>
+          </dl>
+          <p className={`mt-2 text-xs leading-relaxed ${breakdownIsHigh ? "text-destructive" : "text-muted-foreground"}`}>
+            {breakdownIsHigh
+              ? "Update your household total or one of the source amounts so we do not count income twice."
+              : "These source amounts are already included in your household total. We use the breakdown to request the right records."}
+          </p>
+        </div>
+      )}
 
       {selectedIncomeTypes.length > 0 && (
         <div className="space-y-4">
@@ -343,16 +388,56 @@ export function IncomeSourcesStep({
                   />
                 </div>
                 {needsEmployerDetails(typeValue) && (
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Years in Role</label>
-                    <Input
-                      data-testid={typeValue === "self_employed" ? `input-income-years-self_employed-${sameTypeOrdinal - 1}` : `input-income-years-${typeValue}`}
-                      value={details.yearsInRole ?? ""}
-                      onChange={(e) => updateDetail(entryIndex, "yearsInRole", e.target.value.replace(/\D/g, ""))}
-                      placeholder="3"
-                      inputMode="numeric"
-                    />
-                  </div>
+                  <>
+                    <div>
+                      <label className="text-sm text-muted-foreground mb-1 block">
+                        {typeValue === "self_employed" ? "Years receiving this income" : "Years in Role"}
+                      </label>
+                      <Input
+                        data-testid={typeValue === "self_employed" ? `input-income-years-self_employed-${sameTypeOrdinal - 1}` : `input-income-years-${typeValue}`}
+                        value={details.yearsInRole ?? ""}
+                        onChange={(e) => updateDetail(entryIndex, "yearsInRole", e.target.value.replace(/\D/g, ""))}
+                        placeholder="3"
+                        inputMode="numeric"
+                      />
+                    </div>
+                    {typeValue === "self_employed" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-sm text-muted-foreground mb-1 block">Business or income type</label>
+                          <select
+                            data-testid={`select-business-structure-self_employed-${sameTypeOrdinal - 1}`}
+                            value={details.businessStructure ?? ""}
+                            onChange={(event) => updateDetail(entryIndex, "businessStructure", event.target.value)}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <option value="">Select one</option>
+                            <option value="sole_proprietorship">1099 / sole proprietor</option>
+                            <option value="single_member_llc">Single-member LLC</option>
+                            <option value="partnership">Partnership</option>
+                            <option value="s_corporation">S corporation</option>
+                            <option value="c_corporation">C corporation</option>
+                            <option value="other">Other / not sure</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-sm text-muted-foreground mb-1 block">Your ownership</label>
+                          <div className="relative">
+                            <Input
+                              data-testid={`input-ownership-self_employed-${sameTypeOrdinal - 1}`}
+                              value={details.ownershipPercent ?? ""}
+                              onChange={(event) => updateDetail(entryIndex, "ownershipPercent", event.target.value.replace(/\D/g, "").slice(0, 3))}
+                              placeholder="100"
+                              inputMode="numeric"
+                              className="pr-9"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">Use 0% for a 1099 payer you do not own.</p>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -368,6 +453,11 @@ export function IncomeSourcesStep({
               <Plus className="h-4 w-4 mr-2" />
               Add Another Business or 1099 Source
             </Button>
+          )}
+          {(selectedIncomeTypes.includes("self_employed") || selectedIncomeTypes.includes("rental")) && (
+            <p className="rounded-xl bg-warning-subtle p-4 text-left text-xs leading-relaxed text-warning-subtle-foreground" data-testid="complex-income-verification-note">
+              These are reported amounts for planning. Mortgage income can differ after tax-return cash flow, business expenses, ownership, history, and rental expenses are reviewed. Your loan team will show the verified calculation before relying on it.
+            </p>
           )}
         </div>
       )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getLoanOptionsPresentation } from "./loanOptionsPresentation";
+import { getLoanOptionsPresentation, isIntakeStillFinalizing } from "./loanOptionsPresentation";
 
 describe("getLoanOptionsPresentation", () => {
   it("describes unverified scenarios as estimates and never claims lender review", () => {
@@ -24,5 +24,14 @@ describe("getLoanOptionsPresentation", () => {
     });
 
     expect(presentation.title).toBe("We're building your estimated options");
+  });
+});
+
+describe("isIntakeStillFinalizing", () => {
+  it("keeps refreshing while the document plan is still being built", () => {
+    expect(isIntakeStillFinalizing("submitted")).toBe(true);
+    expect(isIntakeStillFinalizing("analyzing")).toBe(true);
+    expect(isIntakeStillFinalizing("under_review")).toBe(false);
+    expect(isIntakeStillFinalizing("pre_approved")).toBe(false);
   });
 });

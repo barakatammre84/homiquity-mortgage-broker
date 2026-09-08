@@ -58,8 +58,8 @@ export function sumRentalMonthlyDebts(sources: IncomeSourceEntry[] | undefined):
 }
 
 export interface PreApprovalAnalysis {
-  /** Base annual income + every additional source's annual amount. */
-  qualifyingAnnualIncome: number;
+  /** Borrower's estimated total annual household income. */
+  reportedAnnualIncome: number;
   /** Monthly obligations used in the DTI numerator (excl. est. mortgage). */
   monthlyDebts: number;
   /** Whether the borrower has answered the monthlyDebts question yet — while
@@ -79,20 +79,11 @@ export function computePreApprovalAnalysis(
   formValues: PreApprovalFormData,
   advertised30YrRate: number | null,
 ): PreApprovalAnalysis {
-  const detailedSelfEmployment =
-    formValues.employmentType === "self_employed" &&
-    (formValues.incomeSources ?? []).some(
-      (source) => source.type === "self_employed" && parseMaskedAmount(source.annualAmount) > 0,
-    );
-  // `annualIncome` is the borrower's initial estimate. Self-employed borrowers
-  // then break that estimate into business/1099 entries so the file can retain
-  // every entity. Once that detail exists it replaces the rough estimate;
-  // adding both is the optimistic double-count the detailed step is meant to
-  // prevent. W-2/retired borrowers use annualIncome as their primary source
-  // and the line items remain genuinely additional income.
-  const income =
-    (detailedSelfEmployment ? 0 : parseMaskedAmount(formValues.annualIncome)) +
-    sumIncomeSourcesAnnual(formValues.incomeSources);
+  // `annualIncome` is explicitly the borrower's estimated HOUSEHOLD TOTAL.
+  // The later source rows break that same total down so the right documents
+  // can be requested. Adding them again overstated buying power for mixed W-2,
+  // business, and rental households.
+  const income = parseMaskedAmount(formValues.annualIncome);
   // Rental debt service typed on the income-sources step is a recurring
   // obligation the borrower just told us about — it belongs in DTI the moment
   // it is entered, same as monthlyDebts.
@@ -130,7 +121,7 @@ export function computePreApprovalAnalysis(
   const downPaymentPercent = price > 0 ? (down / price) * 100 : 0;
 
   return {
-    qualifyingAnnualIncome: income,
+    reportedAnnualIncome: income,
     monthlyDebts: debts,
     includesMonthlyDebts,
     dti,
