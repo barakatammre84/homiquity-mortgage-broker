@@ -34,7 +34,7 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: false }) 
 vi.mock("@/hooks/useActivityTracker", () => ({ usePageView: () => {} }));
 
 // Chrome the page renders but this test is not about.
-vi.mock("@/components/Navigation", () => ({ Navigation: () => null }));
+vi.mock("@/components/EditorialNavigation", () => ({ EditorialNavigation: () => null }));
 vi.mock("@/components/Footer", () => ({ Footer: () => null }));
 vi.mock("@/components/SEOHead", () => ({ SEOHead: () => null }));
 vi.mock("@/components/SkipLink", () => ({ SkipLink: () => null }));
@@ -66,7 +66,7 @@ describe("Landing", () => {
     expect(screen.getByTestId("goal-buy").getAttribute("href")).toBe("/apply");
     expect(screen.getByTestId("goal-refinance").getAttribute("href")).toBe("/apply?type=refinance");
     expect(screen.getByTestId("goal-equity").getAttribute("href")).toBe("/apply?type=cashout");
-    expect(screen.getByTestId("goal-plan").getAttribute("href")).toBe("#homebuyer-plan");
+    expect(screen.getByTestId("goal-plan").getAttribute("href")).toBe("#pathways");
   });
 
   it("shows the financial story in the hero and gives future homeowners value before signup", () => {
@@ -83,6 +83,15 @@ describe("Landing", () => {
     expect(plan.compareDocumentPosition(estimator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(estimator.compareDocumentPosition(journeys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(plan.contains(screen.getByTestId("homebuyer-plan-preview"))).toBe(true);
+  });
+
+  it("gives Homi and renters distinct pathways without breaking the connected journey", () => {
+    render(<Landing />);
+
+    expect(screen.getByTestId("pathway-homi").textContent).toMatch(/Homi Pathway/i);
+    expect(screen.getByTestId("pathway-renter").textContent).toMatch(/Renter Pathway/i);
+    expect(screen.getByTestId("pathway-homi-action").getAttribute("href")).toBe("/ai-coach");
+    expect(screen.getByTestId("pathway-renter-action").getAttribute("href")).toBe("#homebuyer-plan");
   });
 
   it("uses a typography-led proof band without generic trust icons", () => {

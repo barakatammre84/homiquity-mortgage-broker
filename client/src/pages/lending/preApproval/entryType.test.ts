@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { loanPurposeForEntryType, occupancyForEntryType } from "./entryType";
+import { entryTypeFromSearchParams, loanPurposeForEntryType, occupancyForEntryType } from "./entryType";
+
+describe("entryTypeFromSearchParams", () => {
+  it("accepts the legacy goal parameter and gives the current type parameter precedence", () => {
+    expect(entryTypeFromSearchParams(new URLSearchParams("goal=purchase"))).toBe("purchase");
+    expect(entryTypeFromSearchParams(new URLSearchParams("goal=refinance"))).toBe("refinance");
+    expect(entryTypeFromSearchParams(new URLSearchParams("goal=purchase&type=cashout"))).toBe("cashout");
+  });
+});
 
 // Pins every `?type=` value emitted anywhere in client/src today. The list was
 // taken from the source, not invented:

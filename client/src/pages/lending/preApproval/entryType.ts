@@ -23,6 +23,16 @@ type LoanPurpose = PreApprovalFormData["loanPurpose"];
 type OccupancyType = NonNullable<PreApprovalFormData["occupancyType"]>;
 
 /**
+ * Read the current entry vocabulary while preserving links emitted by the
+ * legacy site. Core uses `?type=`; older public pages used `?goal=`. Giving the
+ * current key precedence makes the compatibility rule deterministic if a URL
+ * contains both.
+ */
+export function entryTypeFromSearchParams(params: Pick<URLSearchParams, "get">): string | null {
+  return params.get("type") ?? params.get("goal");
+}
+
+/**
  * `?type=` → `loanPurpose`. Anything absent means "the entry point said
  * nothing about purpose", which is a purchase.
  *
