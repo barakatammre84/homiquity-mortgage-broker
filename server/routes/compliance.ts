@@ -682,11 +682,14 @@ export function registerComplianceRoutes(
         requestedBy: user.id,
       });
 
-      // Credit is now verified by the pull: mark the dimension (auto-promotes the
-      // application to VERIFIED once income + assets are also verified) and recalc.
-      import("../services/verification")
-        .then((m) => m.markDimensionVerified(routeParam(req, "id"), "credit", user.id))
-        .catch(() => {});
+      // Only a real completed bureau pull is decision-grade evidence. The
+      // deterministic simulator is useful for workflow testing, but promoting
+      // it to verified would let invented scores ground a letter or approval.
+      if (!completedPull.isSimulated) {
+        import("../services/verification")
+          .then((m) => m.markDimensionVerified(routeParam(req, "id"), "credit", user.id))
+          .catch(() => {});
+      }
 
       res.status(201).json({ pull: completedPull });
     } catch (error) {

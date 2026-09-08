@@ -20,6 +20,7 @@ const DOCUMENT_TYPE_CANONICAL: Record<string, string> = {
   passport: "government_id",
   id: "government_id",
   tax_return_1040: "tax_return",
+  profit_loss_statement: "profit_loss",
   bank_statement_checking: "bank_statement",
   bank_statement_savings: "bank_statement",
   homeowners_insurance_binder: "homeowners_insurance",

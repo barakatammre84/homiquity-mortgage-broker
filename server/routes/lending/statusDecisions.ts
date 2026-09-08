@@ -20,6 +20,36 @@ const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().
   applicationId: z.string().optional(),
 });
 
+export type FinancialVerificationEvidence = {
+  approvedMemoId: string | null;
+  approvedIncomeWorkpaperId: string | null;
+  approvedAssetWorkpaperId: string | null;
+  creditPullId: string | null;
+  creditPullIsSimulated: boolean;
+};
+
+/** The proof required before a staff attestation may become decision-grade. */
+export function financialVerificationEvidenceError(
+  dimension: "income" | "assets" | "credit",
+  evidence: FinancialVerificationEvidence,
+): string | null {
+  if (dimension === "credit") {
+    return !evidence.creditPullId || evidence.creditPullIsSimulated
+      ? "A completed real bureau credit report is required; simulated credit cannot be marked verified."
+      : null;
+  }
+  if (!evidence.approvedMemoId) {
+    return "Approve the current financial workpapers and credit memo before verifying income or assets.";
+  }
+  if (dimension === "income" && !evidence.approvedIncomeWorkpaperId) {
+    return "The approved memo does not contain a current approved household income workpaper.";
+  }
+  if (dimension === "assets" && !evidence.approvedAssetWorkpaperId) {
+    return "The approved memo does not contain a current approved asset reconciliation workpaper.";
+  }
+  return null;
+}
+
 // Intake validation lives in shared/schema/lending.ts (loanApplicationIntakeSchema),
 // derived from the same base schema the funnel validates with client-side — the
 // server rejects exactly what the client rejects, and "not_sure" credit maps to
@@ -376,9 +406,9 @@ export function registerStatusDecisionRoutes(
     }
   });
 
-  // Mark the borrower's financial figures as verified against documentation /
-  // credit. This is the gate that lets an application proceed to approval and
-  // pre-approval-letter generation. Restricted to staff who review documents.
+  // Compatibility endpoint for the former all-or-nothing control. It may only
+  // promote a file after the same evidence gates as the granular workflow:
+  // a current approved financial memo and a completed real bureau pull.
   app.post(
     "/api/loan-applications/:id/verify-financials",
     requireRole(...FINANCIAL_VERIFICATION_ROLES),
@@ -400,24 +430,43 @@ export function registerStatusDecisionRoutes(
           }
         }
 
-        // "Verify all" override — sets every dimension and promotes provenance.
-        const updated = await storage.updateLoanApplication(id, {
-          financialDataProvenance: "verified",
-          financialDataVerifiedAt: new Date(),
-          financialDataVerifiedBy: user.id,
-          incomeVerified: true,
-          assetsVerified: true,
-          creditVerified: true,
-        });
+        const [{ getCurrentApprovedFinancialVerificationEvidence }, { getLatestCreditPull }, { markDimensionVerified }] = await Promise.all([
+          import("../../services/financialReview"),
+          import("../../services/creditService"),
+          import("../../services/verification"),
+        ]);
+        const [financialEvidence, creditPull] = await Promise.all([
+          getCurrentApprovedFinancialVerificationEvidence(id),
+          getLatestCreditPull(id),
+        ]);
+        const evidence: FinancialVerificationEvidence = {
+          approvedMemoId: financialEvidence.memo?.id ?? null,
+          approvedIncomeWorkpaperId: financialEvidence.incomeWorkpaperId,
+          approvedAssetWorkpaperId: financialEvidence.assetWorkpaperId,
+          creditPullId: creditPull?.id ?? null,
+          creditPullIsSimulated: creditPull?.isSimulated ?? false,
+        };
+        const blockers = [
+          financialVerificationEvidenceError("income", evidence),
+          financialVerificationEvidenceError("assets", evidence),
+          financialVerificationEvidenceError("credit", evidence),
+        ].filter((message): message is string => !!message);
+        if (blockers.length > 0) {
+          return res.status(422).json({ error: "Financial verification is incomplete", blockers });
+        }
+
+        await markDimensionVerified(id, "income", user.id);
+        await markDimensionVerified(id, "assets", user.id);
+        await markDimensionVerified(id, "credit", user.id);
+        const updated = await storage.getLoanApplication(id);
 
         logAudit(req, "loan_application.financials_verified", "loan_application", id, {
           verifiedBy: user.id,
+          financialMemoId: financialEvidence.memo!.id,
+          incomeWorkpaperId: financialEvidence.incomeWorkpaperId,
+          assetWorkpaperId: financialEvidence.assetWorkpaperId,
+          creditPullId: creditPull!.id,
         });
-
-        // Real-time recalc: verified data upgrades the decision (PRELIMINARY -> VERIFIED).
-        import("../../services/decisionEngine")
-          .then((m) => m.recalculateDecision(id, "financials_verified"))
-          .catch(() => {});
 
         res.json(updated);
       } catch (error) {
@@ -440,6 +489,7 @@ export function registerStatusDecisionRoutes(
         if (!["income", "assets", "credit"].includes(dimension)) {
           return res.status(400).json({ error: "dimension must be income, assets, or credit" });
         }
+        const verifiedDimension = dimension as "income" | "assets" | "credit";
 
         const application = await storage.getLoanApplication(id);
         if (!application) {
@@ -452,12 +502,46 @@ export function registerStatusDecisionRoutes(
           }
         }
 
+        let evidenceId: string;
+        if (dimension === "credit") {
+          const { getLatestCreditPull } = await import("../../services/creditService");
+          const creditPull = await getLatestCreditPull(id);
+          const evidenceError = financialVerificationEvidenceError("credit", {
+            approvedMemoId: null,
+            approvedIncomeWorkpaperId: null,
+            approvedAssetWorkpaperId: null,
+            creditPullId: creditPull?.id ?? null,
+            creditPullIsSimulated: creditPull?.isSimulated ?? false,
+          });
+          if (evidenceError) {
+            return res.status(422).json({ error: evidenceError });
+          }
+          evidenceId = creditPull!.id;
+        } else {
+          const { getCurrentApprovedFinancialVerificationEvidence } = await import("../../services/financialReview");
+          const financialEvidence = await getCurrentApprovedFinancialVerificationEvidence(id);
+          const evidenceError = financialVerificationEvidenceError(verifiedDimension, {
+            approvedMemoId: financialEvidence.memo?.id ?? null,
+            approvedIncomeWorkpaperId: financialEvidence.incomeWorkpaperId,
+            approvedAssetWorkpaperId: financialEvidence.assetWorkpaperId,
+            creditPullId: null,
+            creditPullIsSimulated: false,
+          });
+          if (evidenceError) {
+            return res.status(422).json({ error: evidenceError });
+          }
+          evidenceId = dimension === "income"
+            ? financialEvidence.incomeWorkpaperId!
+            : financialEvidence.assetWorkpaperId!;
+        }
+
         const { markDimensionVerified } = await import("../../services/verification");
-        await markDimensionVerified(id, dimension as "income" | "assets" | "credit", user.id);
+        await markDimensionVerified(id, verifiedDimension, user.id);
 
         logAudit(req, "loan_application.dimension_verified", "loan_application", id, {
           dimension,
           verifiedBy: user.id,
+          evidenceId,
         });
 
         const updated = await storage.getLoanApplication(id);

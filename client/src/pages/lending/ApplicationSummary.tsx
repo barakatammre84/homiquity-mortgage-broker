@@ -8,6 +8,7 @@ import { QueryBoundary } from "@/components/ui/query-boundary";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency } from "@/lib/formatters";
 import type { LoanApplication } from "@shared/schema";
+import type { BorrowerGraphData } from "@/pages/borrower/borrowerDashboard/model";
 import { useActiveApplication } from "@/hooks/useActiveApplication";
 import { DATA_PROVENANCE } from "@shared/dataProvenance";
 import { EmptyState } from "@/components/patterns/EmptyState";
@@ -45,6 +46,12 @@ export default function ApplicationSummary() {
   const query = useQuery<DashboardData>({
     queryKey: dashboardKeys.root(),
     enabled: !authLoading,
+  });
+
+  const graphQuery = useQuery<BorrowerGraphData>({
+    queryKey: ["/api/borrower-graph"],
+    enabled: !authLoading,
+    staleTime: 60_000,
   });
 
   // Resolved here rather than inside the QueryBoundary render-prop below: that
@@ -91,9 +98,9 @@ export default function ApplicationSummary() {
               );
             }
 
-            const annualIncome = activeApplication.annualIncome
-              ? parseFloat(activeApplication.annualIncome)
-              : null;
+            const annualIncome = graphQuery.data?.bestAnnualIncome ?? (
+              activeApplication.annualIncome ? parseFloat(activeApplication.annualIncome) : null
+            );
             const monthlyDebts = activeApplication.monthlyDebts
               ? parseFloat(activeApplication.monthlyDebts)
               : null;
@@ -104,6 +111,11 @@ export default function ApplicationSummary() {
               activeApplication.propertyCity && activeApplication.propertyState
                 ? `${activeApplication.propertyCity}, ${activeApplication.propertyState}`
                 : activeApplication.propertyState || "Not specified";
+            const verificationExamples = activeApplication.employmentType === "self_employed"
+              ? "tax returns, profit-and-loss statements, and business bank statements"
+              : activeApplication.employmentType === "retired"
+                ? "benefit letters, retirement statements, and bank statements"
+                : "pay stubs, W-2s, and bank statements";
 
             return (
               <>
@@ -143,7 +155,7 @@ export default function ApplicationSummary() {
             <SummarySection
               title="Financial information"
               source={{ provenance: DATA_PROVENANCE.SELF_REPORTED }}
-              whyWeAsk="These figures set your buying power and your debt-to-income ratio — how much of what you earn already goes to debts. Next we verify them with documents like paystubs, W-2s, and bank statements."
+              whyWeAsk={`These figures set your buying power and your debt-to-income ratio — how much of what you earn already goes to debts. Next we verify them with ${verificationExamples}.`}
               data-testid="summary-financial"
             >
               <DualUnitTable

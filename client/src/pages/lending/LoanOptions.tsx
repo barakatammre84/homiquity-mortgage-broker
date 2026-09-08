@@ -18,6 +18,7 @@ import { MarketPricingSection, type MarketOffersResponse } from "./loanOptions/M
 import { LoanOptionCard } from "./loanOptions/LoanOptionCard";
 import { LoanLetterButton } from "./loanOptions/LoanLetterButton";
 import { WhatIfPanel } from "./loanOptions/WhatIfPanel";
+import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 
 interface LoanOptionsData {
   application: LoanApplication;
@@ -121,14 +122,13 @@ export default function LoanOptions() {
   }
 
   const { application, options } = data;
+  const financialsVerified = isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined);
   const preApprovalAmount = application.preApprovalAmount
     ? formatCurrency(application.preApprovalAmount)
     : formatCurrency(application.purchasePrice || "0");
   // Only a pre-approved (or further-along) file gets the congratulations
   // header. Anything still in front of an underwriter gets the honest state.
-  const awaitingDecision = ["draft", "submitted", "analyzing", "under_review", "denied"].includes(
-    application.status,
-  );
+  const awaitingDecision = !financialsVerified || ["draft", "submitted", "analyzing", "under_review", "denied"].includes(application.status);
 
   return (
     <div className="min-h-screen">
@@ -181,11 +181,13 @@ export default function LoanOptions() {
                 applicationId={application.id}
                 status={application.status}
                 kind="preapproval"
+                financialsVerified={financialsVerified}
               />
               <LoanLetterButton
                 applicationId={application.id}
                 status={application.status}
                 kind="prequal"
+                financialsVerified={financialsVerified}
               />
             </div>
           </div>

@@ -298,6 +298,8 @@ export function SubmissionReadinessDialog({
   // degraded every submission row to the raw slug.
   const lenderName = (id: string) =>
     lenders?.find(l => l.lenderId === id)?.lenderName ?? id;
+  const intakeStage = readiness?.stages.find(stage => stage.key === "intake");
+  const canRunAus = !intakeStage || intakeStage.blockers.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -316,8 +318,8 @@ export function SubmissionReadinessDialog({
         <DialogHeader>
           <DialogTitle>Lender submission — {borrowerName}</DialogTitle>
           <DialogDescription>
-            Broker workflow: intake → DU → lender package. The delivery pre-flight is the
-            lender's-eye view and never blocks a submission.
+            Broker workflow: intake → DU → lender package. Stages 1–3 gate submission; the
+            final delivery pre-flight is the lender's-eye view and remains informational.
           </DialogDescription>
         </DialogHeader>
 
@@ -356,11 +358,16 @@ export function SubmissionReadinessDialog({
                           size="sm" className="touch-target"
                           variant="outline"
                           onClick={() => runAusMutation.mutate()}
-                          disabled={runAusMutation.isPending}
+                          disabled={runAusMutation.isPending || !canRunAus}
                           data-testid="run-aus"
                         >
                           {runAusMutation.isPending ? "Running DU / LPA…" : "Run DU / LPA"}
                         </Button>
+                        {!canRunAus && (
+                          <p className="text-xs text-muted-foreground" data-testid="run-aus-blocked-reason">
+                            Complete the intake blockers above before sending this file to automated underwriting.
+                          </p>
+                        )}
                         {(() => {
                           const application = appDetail?.application;
                           const findings = application?.ausFindings ?? null;

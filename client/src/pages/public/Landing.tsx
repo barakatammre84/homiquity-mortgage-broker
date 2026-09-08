@@ -214,6 +214,10 @@ export default function Landing() {
               {lenderAdvocacyClause()}.
             </p>
 
+            <Button asChild size="lg" className="mt-8" data-testid="button-hero-apply">
+              <Link href="/apply">Start your mortgage application</Link>
+            </Button>
+
             <div className="mx-auto mt-10 max-w-3xl text-left">
               {/* A personality line for the mechanism directly below it, not a
                   second headline. The H1 above stays outcome-first ("see what
@@ -231,7 +235,7 @@ export default function Landing() {
                 className="mb-3 text-sm font-semibold text-foreground"
                 data-testid="text-hero-coach-intro"
               >
-                Buying a home is simpler with a Homi in your corner.
+                Have a question first? Buying a home is simpler with a Homi in your corner.
               </p>
               <CoachPromptBar />
             </div>

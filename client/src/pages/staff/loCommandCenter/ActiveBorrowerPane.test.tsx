@@ -16,6 +16,7 @@ const cockpit = (paths: CockpitData["income"] extends null ? never : NonNullable
     id: "app-1", borrowerUserId: "u-1", borrowerName: "Test Borrower", status: "approved",
     loanPurpose: "purchase", purchasePrice: "500000", downPayment: "100000",
     propertyState: "IL", propertyType: "multi_family", isVeteran: false,
+    financialDataProvenance: "verified",
     closingDate: null, createdAt: null,
   },
   income: {
@@ -82,5 +83,25 @@ describe("ActiveBorrowerPane — the qualifying-income list reconciles", () => {
       expect(screen.getByTestId("cockpit-active-borrower")).toBeTruthy();
     });
     expect(screen.getByTestId("cockpit-active-borrower").textContent).toContain("$6,000/mo");
+  });
+
+  it("labels a self-reported calculation as an initial review rather than a pre-approval", async () => {
+    const data = cockpit([
+      {
+        pathId: "self_employment", role: "component", status: "applicable", kind: "dti_income",
+        monthlyQualifyingIncome: 15000, appliedToDti: true, requiresManualReview: false,
+      },
+    ]);
+    data.application.status = "pre_approved";
+    data.application.financialDataProvenance = "self_reported";
+    renderPane(data);
+
+    await waitFor(() => expect(screen.getByTestId("cockpit-active-borrower")).toBeTruthy());
+    const pane = screen.getByTestId("cockpit-active-borrower");
+    expect(pane.textContent).toContain("Initial review");
+    expect(pane.textContent).toContain("Income calculation");
+    expect(pane.textContent).toContain("self-reported");
+    expect(pane.textContent).toMatch(/Verify income, assets, credit, and property evidence/i);
+    expect(pane.textContent).not.toContain("Pre-Approved");
   });
 });

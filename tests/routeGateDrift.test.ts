@@ -58,16 +58,17 @@ describe("FINANCIAL_VERIFICATION_ROLES is the single source of truth", () => {
     );
   });
 
-  it("gates the BorrowerFile verify button on the same constant", () => {
-    const source = read("client/src/pages/staff/BorrowerFile.tsx");
-    expect(source).toContain(
+  it("routes reviewed financial evidence through the granular verifier", () => {
+    const file = read("client/src/pages/staff/BorrowerFile.tsx");
+    const review = read("client/src/pages/staff/borrowerFile/FinancialReviewTab.tsx");
+    expect(file).toContain(
       'FINANCIAL_VERIFICATION_ROLES.includes(user?.role || "")',
     );
-    // The bug: the button was rendered behind isStaff2 (isStaffRole -> all 8 roles).
-    expect(source).toMatch(/\{canVerifyFinancials && \(/);
-    expect(source).not.toMatch(
-      /\{isStaff2 && \([\s\S]{0,400}button-verify-financials/,
-    );
+    expect(file).not.toContain("button-verify-financials");
+    expect(file).not.toContain("/verify-financials");
+    expect(review).toContain("/verify/income");
+    expect(review).toContain("/verify/assets");
+    expect(file).toContain("canVerify={canVerifyFinancials}");
   });
 });
 

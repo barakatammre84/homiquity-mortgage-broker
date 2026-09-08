@@ -203,8 +203,16 @@ function PreApprovalFunnel() {
     },
     onSuccess: async (result) => {
       clearAutosave();
-      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.all() });
-      queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      // Application creation promotes an aspiring owner to active buyer on the
+      // server. Refresh that session fact before changing pages; otherwise the
+      // persistent shell keeps the old role and hides the new file's To-Do and
+      // Documents links until a full reload. Waiting also keeps every borrower
+      // surface aligned with the newly submitted application on first render.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] }),
+        queryClient.invalidateQueries({ queryKey: loanApplicationKeys.all() }),
+        queryClient.invalidateQueries({ queryKey: dashboardKeys.root() }),
+      ]);
 
       // Consume only now, on a SUCCESSFUL submit — a borrower who abandons the
       // funnel keeps their attribution for the next attempt. Clears both tiers

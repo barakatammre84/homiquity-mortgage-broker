@@ -1,6 +1,8 @@
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Loader2 } from "lucide-react";
+import { Inbox, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { QueueData } from "./types";
@@ -10,9 +12,12 @@ import type { QueueData } from "./types";
 // rail; claiming a file puts it on their desk (server-side assignLoanOfficer
 // grants file access + queue visibility in one step) so no applicant sits
 // stranded waiting on an admin assignment.
-export function IntakeInboxCard() {
+const DEFAULT_VISIBLE_FILES = 8;
+
+export function IntakeInboxCard({ onClaim }: { onClaim?: (applicationId: string) => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
   const { data, isLoading } = useQuery<QueueData>({
     queryKey: ["/api/pipeline/unassigned"],
   });
@@ -22,9 +27,10 @@ export function IntakeInboxCard() {
       const res = await apiRequest("POST", `/api/loan-applications/${applicationId}/claim`, {});
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, applicationId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/pipeline/unassigned"] });
       queryClient.invalidateQueries({ queryKey: ["/api/pipeline/queue"] });
+      onClaim?.(applicationId);
       toast({ title: "File claimed", description: "It's on your desk and in your pipeline now." });
     },
     onError: (error) => {
@@ -37,6 +43,14 @@ export function IntakeInboxCard() {
   });
 
   const pool = data?.queue ?? [];
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visiblePool = useMemo(
+    () =>
+      normalizedSearch
+        ? pool.filter((file) => file.borrowerName.toLocaleLowerCase().includes(normalizedSearch))
+        : pool.slice(0, DEFAULT_VISIBLE_FILES),
+    [normalizedSearch, pool],
+  );
   if (isLoading || pool.length === 0) return null;
 
   return (
@@ -50,8 +64,19 @@ export function IntakeInboxCard() {
           Intake inbox — {pool.length} waiting
         </h2>
       </div>
+      <div className="relative mb-2">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-70" aria-hidden="true" />
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Find borrower"
+          aria-label="Find an unassigned borrower"
+          className="h-9 bg-background pl-8 text-sm text-foreground"
+          data-testid="input-intake-search"
+        />
+      </div>
       <ul className="space-y-1.5">
-        {pool.map((file) => (
+        {visiblePool.map((file) => (
           <li
             key={file.applicationId}
             className="flex items-center justify-between gap-2"
@@ -78,6 +103,16 @@ export function IntakeInboxCard() {
           </li>
         ))}
       </ul>
+      {visiblePool.length === 0 && (
+        <p className="py-2 text-sm opacity-80" data-testid="text-no-intake-match">
+          No waiting borrower matches that name.
+        </p>
+      )}
+      {!normalizedSearch && pool.length > DEFAULT_VISIBLE_FILES && (
+        <p className="mt-2 text-xs opacity-80" data-testid="text-intake-limited">
+          Showing the {DEFAULT_VISIBLE_FILES} most urgent. Search to find another borrower.
+        </p>
+      )}
     </div>
   );
 }

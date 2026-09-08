@@ -36,6 +36,18 @@ describe("A3 auto-promotion wiring", () => {
     expect(surrounding).toContain("try {");
     expect(surrounding).toContain("catch (promoteErr)");
   });
+
+  it("refreshes the promoted session before entering the submitted-loan journey", () => {
+    const client = read("client/src/pages/lending/PreApproval.tsx");
+    const success = client.indexOf("onSuccess: async (result)");
+    const refresh = client.indexOf('queryKey: ["/api/auth/user"]', success);
+    const navigation = client.indexOf("navigate(`/loan-options/${result.id}`)", success);
+
+    expect(success).toBeGreaterThanOrEqual(0);
+    expect(refresh).toBeGreaterThan(success);
+    expect(navigation).toBeGreaterThan(refresh);
+    expect(client.slice(success, navigation)).toContain("await Promise.all");
+  });
 });
 
 describe("client roles carry identical server-side authorization", () => {

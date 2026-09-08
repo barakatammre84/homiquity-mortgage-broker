@@ -358,6 +358,19 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   const purchasePrice = toNumber(app.purchasePrice);
   const downPayment = toNumber(app.downPayment);
   const missing: string[] = [];
+  const selfEmploymentPath = fin.income.paths.find((path) => path.pathId === "self_employment");
+  const selfEmploymentMissingItems = selfEmploymentPath?.missingItems ?? [];
+  // The intake's annual-income figure is only a rough planning estimate for a
+  // self-employed borrower. The cited income path requires a URLA employment
+  // record and Form 1084 worksheet for each business before that income can
+  // produce an automated decision. Without the record, the wage fallback
+  // would otherwise auto-approve the exact income the self-employment path is
+  // designed to refuse at face value.
+  if (selfEmploymentMissingItems.length > 0) {
+    missing.push(...selfEmploymentMissingItems);
+  } else if (app.employmentType === "self_employed" && selfEmploymentPath?.status !== "applicable") {
+    missing.push("Self-employment details and a completed income worksheet for each business or 1099 source");
+  }
   if (fin.totalMonthlyIncome <= 0) {
     missing.push(
       fin.incomeBasis === "urla_line_items"
@@ -506,12 +519,18 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     throw err;
   }
 
+  const selfEmploymentRequiresReview =
+    selfEmploymentPath?.status === "applicable" && selfEmploymentPath.requiresManualReview;
+  const incomeReviewReasons = selfEmploymentRequiresReview
+    ? selfEmploymentPath.notes.filter((note) => note.trim().length > 0)
+    : [];
+
   return {
     status: "DECISION_READY",
-    decision: result.decision,
+    decision: selfEmploymentRequiresReview ? "MANUAL_REVIEW" : result.decision,
     // Rejections and review reasons both explain the outcome to the borrower/LO;
     // the decision field distinguishes a decline from a "needs a human" review.
-    reasons: [...result.rejectionReasons, ...result.reviewReasons],
+    reasons: [...result.rejectionReasons, ...result.reviewReasons, ...incomeReviewReasons],
     missingItems: [],
     resolvedPolicy: result.resolvedPolicy,
     metrics: {

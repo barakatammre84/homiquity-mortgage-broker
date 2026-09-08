@@ -57,7 +57,7 @@ Status ledger (updated by the orchestrator after each run):
 |---|---|---|---|---|
 | 1 | Aspiring owner — renter, sandbox, never applies | OPEN locally · survives PRELAUNCH (no `<Gated>` surface on the route; the sandbox's own "Get Pre-Approved" link points *into* the gate) | **2026-08-20** (`b799b91d`, pre-#595 Landing) | **WARN** — sandbox has a real floor; 2 data-correctness defects (`F-0820-01` rent-as-liability, `F-0820-02` PMI), 1 surface unreachable at 320px, `ux-43..49`. [report](../routines/reports/2026-08-20-journey-walk.md) |
 | 2 | Active buyer — W-2 salaried | OPEN locally · **route dies under PRELAUNCH** (`/apply` is `<Gated>`, `App.tsx:267`) | — | not yet run |
-| 3 | Active buyer — self-employed / business owner | OPEN locally · **route dies under PRELAUNCH** (`/self-employed` `App.tsx:257` + `/apply` both `<Gated>`) | — | not yet run |
+| 3 | Active buyer — self-employed / business owner | OPEN locally and on the public production route | **2026-09-07** (`codex/end-to-end-journey`, dedicated local server on :5021) | **PASS with external gate** — two businesses + one rental carried from fast intake into editable URLA and the loan-officer file; evidence, letter, AUS, export and lender submission gates stayed honest. Real lender acceptance remains unproven. [report](journey-walks/2026-09-07-complex-borrower-lo-loop.md) |
 | 4 | Active buyer — affluent / move-up (jumbo) | OPEN locally · **route dies under PRELAUNCH at the first click** (the door links straight to `<Gated>` `/apply`) | — | not yet run |
 | 5 | Active buyer — condo / project-eligibility | OPEN locally · **route dies under PRELAUNCH** (`/apply` is `<Gated>`) · ⚠️ **charter cites the Selling Guide, which is not on `main`** — see the entry | — | not yet run |
 

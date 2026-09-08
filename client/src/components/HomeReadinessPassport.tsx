@@ -23,6 +23,12 @@ import {
 } from "lucide-react";
 
 interface BorrowerGraphData {
+  financialVerification: {
+    income: boolean;
+    assets: boolean;
+    credit: boolean;
+    decisionGrade: boolean;
+  };
   bestAnnualIncome: number | null;
   bestIncomeSource: string | null;
   totalVerifiedAssets: number | null;
@@ -118,14 +124,14 @@ export function HomeReadinessPassport({ compact = false }: { compact?: boolean }
     {
       icon: Shield,
       label: "Credit Score",
-      verified: !!eligibility.creditScore,
+      verified: graph.financialVerification.credit,
       value: eligibility.creditScore ? `${eligibility.creditScore}` : null,
       testId: "passport-credit",
     },
     {
       icon: Briefcase,
       label: "Income",
-      verified: !!graph.bestAnnualIncome,
+      verified: graph.financialVerification.income,
       value: graph.bestAnnualIncome ? formatCurrency(Math.round(graph.bestAnnualIncome)) : null,
       source: graph.bestIncomeSource,
       testId: "passport-income",
@@ -171,7 +177,7 @@ export function HomeReadinessPassport({ compact = false }: { compact?: boolean }
               <p className="text-xs text-muted-foreground mt-0.5">
                 {verifiedCount} of {verificationItems.length} verified
               </p>
-              {eligibility.estimatedMaxPurchase && (
+              {graph.financialVerification.decisionGrade && eligibility.estimatedMaxPurchase && (
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Estimated max: {formatCurrency(eligibility.estimatedMaxPurchase)}
                 </p>
@@ -222,7 +228,7 @@ export function HomeReadinessPassport({ compact = false }: { compact?: boolean }
                   <span className="font-medium">{formatCurrency(eligibility.estimatedMaxPurchase)}</span>
                 </div>
               )}
-              {eligibility.estimatedDTI !== null && (
+              {graph.financialVerification.decisionGrade && eligibility.estimatedDTI !== null && (
                 <div className="flex items-center gap-1.5 text-xs">
                   <Percent className="h-3 w-3 text-muted-foreground" />
                   <span className="text-muted-foreground">Current DTI:</span>
@@ -259,7 +265,7 @@ export function HomeReadinessPassport({ compact = false }: { compact?: boolean }
                 })}
               </div>
 
-              {eligibility.eligibleLoanTypes.length > 0 && (
+              {graph.financialVerification.decisionGrade && eligibility.eligibleLoanTypes.length > 0 && (
                 <div className="pt-2 border-t">
                   <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Eligible Programs</p>
                   <div className="flex flex-wrap gap-1.5">

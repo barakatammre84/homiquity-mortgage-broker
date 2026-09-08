@@ -75,6 +75,7 @@ describe("computeRoute — deterministic dynamic routing", () => {
   it("forces the complex-income block for self-employed borrowers", () => {
     const route = computeRoute(answers({ employmentType: "self_employed", hasAdditionalIncome: false }));
     expect(route).toContain("incomeSources");
+    expect(route).not.toContain("employmentType");
   });
 
   // The reported bug: a self-employed borrower answered "No, this is my only

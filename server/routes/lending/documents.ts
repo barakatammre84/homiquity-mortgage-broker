@@ -301,6 +301,14 @@ export function registerDocumentRoutes(
             if (documentProcessingBlockReason(currentDocument, isCurrentVersion)) return;
 
             const { taskEventEmitter } = await import("../../services/taskEventEmitter");
+            if (parsed.data.replacesDocumentId) {
+              const { expireSupersededDocumentReviewTasks } = await import("../../pipelineEngine");
+              await expireSupersededDocumentReviewTasks({
+                applicationId,
+                replacedDocumentId: parsed.data.replacesDocumentId,
+                replacedByUserId: userId,
+              });
+            }
             await taskEventEmitter.emitDocumentEvent("DOCUMENT_UPLOADED", {
               applicationId,
               documentId: document.id,
@@ -308,10 +316,20 @@ export function registerDocumentRoutes(
               triggeredBy: userId,
             });
 
-            // Zero-touch: move matching outstanding conditions to "submitted"
-            // and notify the deal team (clearing stays a human decision).
+            // Zero-touch: one upload advances both borrower-facing records.
+            // Conditions wait for staff clearance; the matching upload task
+            // moves to in-progress and points at this exact document.
             try {
-              const { matchUploadedDocumentToConditions } = await import("../../pipelineEngine");
+              const {
+                advanceMatchingDocumentTasks,
+                matchUploadedDocumentToConditions,
+              } = await import("../../pipelineEngine");
+              await advanceMatchingDocumentTasks({
+                applicationId,
+                documentId: document.id,
+                documentType,
+                replacesDocumentId: parsed.data.replacesDocumentId,
+              });
               await matchUploadedDocumentToConditions({
                 applicationId,
                 documentType,
@@ -319,7 +337,7 @@ export function registerDocumentRoutes(
                 uploadedBy: userId,
               });
             } catch (matchErr) {
-              console.error("[Documents] Condition matching failed (non-fatal):", matchErr);
+              console.error("[Documents] Workflow matching failed (non-fatal):", matchErr);
             }
           },
         );

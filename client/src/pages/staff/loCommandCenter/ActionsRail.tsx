@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Download, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -9,6 +10,9 @@ import { ScenarioSimulatorDialog } from "@/components/ScenarioSimulatorDialog";
 import { SubmissionReadinessDialog } from "@/components/SubmissionReadinessDialog";
 import { CallPrepDialog } from "./CallPrepDialog";
 import type { StaffSignal } from "./types";
+import type { CockpitData } from "./types";
+import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
+import { friendlyApiError } from "@/lib/errorMessage";
 
 // -----------------------------------------------------------------------------
 // Right pane — actions
@@ -28,6 +32,14 @@ export function ActionsRail({
 }) {
   const { toast } = useToast();
   const [generatingLetter, setGeneratingLetter] = useState(false);
+  const { data: cockpit } = useQuery<CockpitData>({
+    queryKey: ["/api/staff/applications", applicationId, "cockpit"],
+  });
+  const letterStatusReady = cockpit?.application.status === "pre_approved";
+  const letterFinancialsReady = isDecisionGrade(
+    cockpit?.application.financialDataProvenance as DataProvenance | null | undefined,
+  );
+  const canGenerateLetter = letterStatusReady && letterFinancialsReady;
 
   const handleGenerateLetter = async () => {
     setGeneratingLetter(true);
@@ -44,7 +56,7 @@ export function ActionsRail({
       toast({
         title: "Couldn't generate the letter",
         description:
-          error instanceof Error ? error.message : "Only pre-approved files with verified data can produce a letter.",
+          friendlyApiError(error, "Only pre-approved files with verified data can produce a letter."),
         variant: "destructive",
       });
     } finally {
@@ -72,7 +84,7 @@ export function ActionsRail({
         size="sm"
         className="touch-target w-full justify-start"
         onClick={handleGenerateLetter}
-        disabled={generatingLetter}
+        disabled={generatingLetter || !canGenerateLetter}
         data-testid="action-preapproval-letter"
       >
         {generatingLetter ? (
@@ -82,6 +94,13 @@ export function ActionsRail({
         )}
         Pre-approval letter
       </Button>
+      {!canGenerateLetter && cockpit && (
+        <p className="px-1 text-xs text-muted-foreground" data-testid="preapproval-letter-blocked-reason">
+          {letterStatusReady
+            ? "Verify income, assets, and credit before issuing a pre-approval letter."
+            : "A letter becomes available after the file reaches pre-approval with verified financials."}
+        </p>
+      )}
 
       <Button
         variant="outline"

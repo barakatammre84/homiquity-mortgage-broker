@@ -27,6 +27,7 @@ import { computeNextAction } from "./nextAction";
 import { pickActiveLoanApplication } from "@shared/schema";
 import { annuityFactor, monthlyPrincipalAndInterest } from "@shared/lib/amortization";
 import { currentDocumentEvidencePredicate } from "./currentDocumentEvidence";
+import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 
 export interface IncomeSource {
   source: "document" | "application" | "coach" | "goal";
@@ -189,6 +190,13 @@ export interface BorrowerGraph {
 
   activeApplicationId: string | null;
 
+  financialVerification: {
+    income: boolean;
+    assets: boolean;
+    credit: boolean;
+    decisionGrade: boolean;
+  };
+
   income: IncomeSource[];
   bestAnnualIncome: number | null;
   bestIncomeSource: string | null;
@@ -235,6 +243,14 @@ function parseNum(val: string | number | null | undefined): number | null {
   if (val === null || val === undefined) return null;
   const n = typeof val === "number" ? val : parseFloat(val);
   return isNaN(n) ? null : n;
+}
+
+/** A zero on the application row is the schema default, not a calculated DTI. */
+export function usableApplicationDti(
+  value: string | number | null | undefined,
+): number | null {
+  const parsed = parseNum(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 export async function buildBorrowerGraph(
@@ -762,8 +778,12 @@ export async function buildBorrowerGraph(
   }
 
   let estimatedDTI: number | null = null;
-  if (activeApp?.dtiRatio) {
-    estimatedDTI = parseNum(activeApp.dtiRatio);
+  if (activeApp) {
+    // Intake rows default to 0.00 before the decision engine has enough facts
+    // to calculate proposed-housing DTI. Treating that sentinel as a real 0%
+    // made the borrower dashboard and prediction model call an incomplete
+    // self-employed file "low DTI." Only publish a positive engine result.
+    estimatedDTI = usableApplicationDti(activeApp.dtiRatio);
   } else if (bestAnnualIncome && totalMonthlyDebts) {
     const monthlyIncome = bestAnnualIncome / 12;
     estimatedDTI = monthlyIncome > 0 ? Math.round((totalMonthlyDebts / monthlyIncome) * 10000) / 100 : null;
@@ -1160,6 +1180,13 @@ export async function buildBorrowerGraph(
     })),
 
     activeApplicationId: activeApp?.id || null,
+
+    financialVerification: {
+      income: activeApp?.incomeVerified === true,
+      assets: activeApp?.assetsVerified === true,
+      credit: activeApp?.creditVerified === true,
+      decisionGrade: isDecisionGrade(activeApp?.financialDataProvenance as DataProvenance | undefined),
+    },
 
     income: incomeSources,
     bestAnnualIncome,

@@ -54,6 +54,8 @@ describe("AuthGateOverlay", () => {
     render(<AuthGateOverlay onDismiss={onDismiss} />);
     expect(screen.getByTestId("button-auth-gate-signup").closest("a")?.getAttribute("href")).toBe("/signup");
     expect(screen.getByTestId("button-auth-gate-login").closest("a")?.getAttribute("href")).toBe("/login");
+    expect(screen.getByTestId("auth-gate-overlay").textContent).toContain("personalized result and next steps");
+    expect(screen.getByTestId("auth-gate-overlay").textContent).not.toContain("pre-approval results");
     await user.click(screen.getByTestId("button-auth-gate-dismiss"));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
@@ -76,6 +78,7 @@ describe("AffordabilityTeaserOverlay", () => {
     expect(rangeText).toContain("$408,000");
     expect(rangeText).toContain("$480,000");
     expect(screen.getByTestId("text-teaser-target-comparison").textContent).toContain("within this range");
+    expect(screen.getByTestId("button-teaser-continue").textContent).toContain("Continue to my application");
     await user.click(screen.getByTestId("button-teaser-continue"));
     expect(onContinue).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTestId("button-teaser-dismiss"));

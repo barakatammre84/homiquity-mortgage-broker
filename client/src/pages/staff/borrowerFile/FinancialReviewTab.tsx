@@ -237,7 +237,19 @@ function MemoCard({
   );
 }
 
-export function FinancialReviewTab({ applicationId, onNavigate }: { applicationId: string; onNavigate: (tab: string) => void }) {
+export function FinancialReviewTab({
+  applicationId,
+  onNavigate,
+  incomeVerified = false,
+  assetsVerified = false,
+  canVerify = true,
+}: {
+  applicationId: string;
+  onNavigate: (tab: string) => void;
+  incomeVerified?: boolean;
+  assetsVerified?: boolean;
+  canVerify?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const queryKey = ["/api/loan-applications", applicationId, "financial-review"] as const;
@@ -254,11 +266,46 @@ export function FinancialReviewTab({ applicationId, onNavigate }: { applicationI
     onSuccess: () => { refresh(); toast({ title: "Credit memo built from approved workpapers" }); },
     onError: (mutationError: unknown) => toast({ title: "Could not build memo", description: friendlyApiError(mutationError, "Refresh and try again."), variant: "destructive" }),
   });
+  const applyVerification = useMutation({
+    mutationFn: async () => {
+      if (!incomeVerified && approvedIncomeReview) {
+        await apiRequest("POST", `/api/loan-applications/${applicationId}/verify/income`, {});
+      }
+      if (!assetsVerified && approvedAssetReview) {
+        await apiRequest("POST", `/api/loan-applications/${applicationId}/verify/assets`, {});
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/loan-applications", applicationId] });
+      toast({ title: "Reviewed income and assets verified", description: "The application now cites the approved financial memo as evidence." });
+    },
+    onError: (mutationError: unknown) => toast({ title: "Could not apply verification", description: friendlyApiError(mutationError, "Refresh the current memo and try again."), variant: "destructive" }),
+  });
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-28" /><Skeleton className="h-72" /></div>;
   if (error || !data) return <Alert variant="destructive" data-testid="financial-review-error"><Icons.warning className="h-4 w-4" /><AlertTitle>Financial review could not load</AlertTitle><AlertDescription>{friendlyApiError(error, "Refresh the borrower file and try again.")}</AlertDescription></Alert>;
   const currentCount = data.workpapers.filter(item => item.isCurrent && item.id).length;
   const needsRefresh = data.workpapers.some(item => !item.id || !item.isCurrent);
+  const approvedCurrentMemo = !!data.memo?.isCurrent
+    && data.memo.blockers.length === 0
+    && data.memo.review?.action === "approve";
+  const approvedIncomeReview = data.workpapers.some(workpaper =>
+    workpaper.kind === "income_summary"
+    && !!workpaper.id
+    && workpaper.isCurrent
+    && workpaper.blockers.length === 0
+    && workpaper.review?.action === "approve",
+  );
+  const approvedAssetReview = data.workpapers.some(workpaper =>
+    workpaper.kind === "asset_reconciliation"
+    && !!workpaper.id
+    && workpaper.isCurrent
+    && workpaper.blockers.length === 0
+    && workpaper.review?.action === "approve",
+  );
+  const reviewedFinancialsVerified = incomeVerified && assetsVerified;
+  const hasVerificationToApply = (!incomeVerified && approvedIncomeReview)
+    || (!assetsVerified && approvedAssetReview);
   return (
     <div className="space-y-5">
       <Card>
@@ -317,6 +364,42 @@ export function FinancialReviewTab({ applicationId, onNavigate }: { applicationI
           setReason={reason => setReasons(current => ({ ...current, memo: reason }))}
           onSaved={refresh}
         />
+      )}
+
+      {approvedCurrentMemo && (
+        <Card data-testid="reviewed-financial-verification">
+          <CardHeader>
+            <CardTitle>Apply the approved review</CardTitle>
+            <CardDescription>
+              The current memo and every required workpaper are approved. Record only the dimensions supported by a current approved workpaper.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {reviewedFinancialsVerified ? (
+              <Badge className="bg-success-subtle text-success-subtle-foreground">Income and assets verified</Badge>
+            ) : canVerify && hasVerificationToApply ? (
+              <Button
+                onClick={() => applyVerification.mutate()}
+                disabled={applyVerification.isPending}
+                data-testid="apply-reviewed-financial-verification"
+              >
+                <Icons.done className="mr-2 h-4 w-4" />
+                {applyVerification.isPending ? "Applying…" : "Verify supported financial dimensions"}
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {canVerify
+                  ? "Add and approve the missing income or asset workpaper before that dimension can be verified."
+                  : "A financial reviewer must apply this approved evidence."}
+              </p>
+            )}
+            {!reviewedFinancialsVerified && (
+              <p className="mt-2 text-xs text-muted-foreground" data-testid="reviewed-dimension-support">
+                Income: {approvedIncomeReview ? "supported" : "missing approved workpaper"} · Assets: {approvedAssetReview ? "supported" : "missing approved workpaper"}
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

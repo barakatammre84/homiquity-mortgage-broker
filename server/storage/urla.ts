@@ -1,7 +1,7 @@
 // Storage domain: URLA sections, GSE delivery data, wholesale lender submissions, complete-URLA/MISMO export aggregation, data-quality scoring.
 // One link in the DatabaseStorage inheritance chain — see ./index.ts.
 import { db } from "../db";
-import { eq, desc, and, asc, inArray } from "drizzle-orm";
+import { eq, desc, and, asc, inArray, notInArray } from "drizzle-orm";
 // SSN uses ssnVault (canonical, from main); account numbers use piiVault (this
 // branch — main leaves account numbers plaintext).
 import { encryptPiiField, decryptPiiField } from "../services/piiVault";
@@ -38,6 +38,8 @@ import {
   type InsertLenderSubmission,
   realEstateOwned,
   type RealEstateOwned,
+  type InsertRealEstateOwned,
+  type IncomeSourceEntry,
   borrowerProfiles,
   type BorrowerProfile,
   hmdaDemographics,
@@ -633,6 +635,149 @@ export class UrlaStorage extends TasksStorage {
       .from(realEstateOwned)
       .where(eq(realEstateOwned.applicationId, applicationId))
       .orderBy(desc(realEstateOwned.createdAt));
+  }
+
+  /**
+   * Replace the application-scoped URLA 2c rows in one transaction. The route
+   * passes the application's borrower id (never the editing staffer's id), and
+   * existing ids must already belong to the same file. Returning undefined is
+   * the ownership failure signal used by the route.
+   */
+  async replaceRealEstateOwnedForApplication(
+    applicationId: string,
+    borrowerUserId: string,
+    rows: Array<Partial<RealEstateOwned> & Pick<RealEstateOwned, "propertyAddress">>,
+    ownsOtherRealEstate: boolean,
+  ): Promise<RealEstateOwned[] | undefined> {
+    return db.transaction(async (tx) => {
+      const existing = await tx.select().from(realEstateOwned)
+        .where(eq(realEstateOwned.applicationId, applicationId));
+      const existingIds = new Set(existing.map((row) => row.id));
+      if (rows.some((row) => row.id && !existingIds.has(row.id))) return undefined;
+
+      const saved: RealEstateOwned[] = [];
+      for (const row of rows) {
+        const {
+          id,
+          userId: _userId,
+          applicationId: _applicationId,
+          createdAt: _createdAt,
+          updatedAt: _updatedAt,
+          verificationSource: _verificationSource,
+          verifiedAt: _verifiedAt,
+          netEquity: _netEquity,
+          netRentalIncome: _netRentalIncome,
+          ...editable
+        } = row;
+        const values: InsertRealEstateOwned = {
+          ...editable,
+          userId: borrowerUserId,
+          applicationId,
+          verificationSource: "borrower_stated",
+          verifiedAt: null,
+        };
+        if (id) {
+          const [updated] = await tx.update(realEstateOwned)
+            .set({ ...values, updatedAt: new Date() })
+            .where(and(eq(realEstateOwned.id, id), eq(realEstateOwned.applicationId, applicationId)))
+            .returning();
+          if (updated) saved.push(updated);
+        } else {
+          const [created] = await tx.insert(realEstateOwned).values(values).returning();
+          saved.push(created);
+        }
+      }
+
+      const keepIds = saved.map((row) => row.id);
+      if (keepIds.length > 0) {
+        await tx.delete(realEstateOwned).where(and(
+          eq(realEstateOwned.applicationId, applicationId),
+          notInArray(realEstateOwned.id, keepIds),
+        ));
+      } else {
+        await tx.delete(realEstateOwned).where(eq(realEstateOwned.applicationId, applicationId));
+      }
+      await tx.update(loanApplications)
+        .set({ ownsOtherRealEstate, updatedAt: new Date() })
+        .where(eq(loanApplications.id, applicationId));
+      return saved;
+    });
+  }
+
+  /**
+   * Carry rental-property details from the three-minute intake into URLA 2c.
+   * This is idempotent and only owns rows it previously created. If a borrower
+   * or loan officer already enriched a matching row, that record wins and is
+   * never overwritten by another intake submission.
+   */
+  async syncIntakeRentalProperties(
+    applicationId: string,
+    borrowerUserId: string,
+    incomeSources: IncomeSourceEntry[] | null | undefined,
+  ): Promise<RealEstateOwned[]> {
+    const rentals = (incomeSources ?? [])
+      .filter((source) => source.type === "rental")
+      .flatMap((source) => source.rentalProperties ?? []);
+    if (rentals.length === 0) return [];
+
+    const normalizeAddress = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+    return db.transaction(async (tx) => {
+      const existing = await tx.select().from(realEstateOwned)
+        .where(eq(realEstateOwned.applicationId, applicationId));
+      const existingByAddress = new Map(
+        existing.map((row) => [normalizeAddress(row.propertyAddress), row]),
+      );
+      const keptIntakeIds = new Set<string>();
+      const synced: RealEstateOwned[] = [];
+
+      for (const rental of rentals) {
+        const addressKey = normalizeAddress(rental.address);
+        const match = existingByAddress.get(addressKey);
+        if (match && match.verificationSource !== "borrower_intake") {
+          synced.push(match);
+          continue;
+        }
+        const values: InsertRealEstateOwned = {
+          userId: borrowerUserId,
+          applicationId,
+          propertyAddress: rental.address,
+          propertyCity: rental.city ?? null,
+          propertyState: rental.state ?? null,
+          // The fast intake does not ask for the physical property type. Use
+          // the same neutral default as URLA 2c; investment belongs in the
+          // occupancy field below.
+          propertyType: "single_family",
+          mortgagePayment: rental.monthlyDebtPayment || null,
+          monthlyRentalIncome: rental.monthlyRentalIncome,
+          occupancyType: "investment",
+          status: "retained",
+          willBeRented: true,
+          verificationSource: "borrower_intake",
+        };
+        if (match) {
+          const [updated] = await tx.update(realEstateOwned)
+            .set({ ...values, updatedAt: new Date() })
+            .where(eq(realEstateOwned.id, match.id))
+            .returning();
+          keptIntakeIds.add(match.id);
+          synced.push(updated);
+        } else {
+          const [created] = await tx.insert(realEstateOwned).values(values).returning();
+          keptIntakeIds.add(created.id);
+          synced.push(created);
+        }
+      }
+
+      for (const row of existing) {
+        if (row.verificationSource === "borrower_intake" && !keptIntakeIds.has(row.id)) {
+          await tx.delete(realEstateOwned).where(eq(realEstateOwned.id, row.id));
+        }
+      }
+      await tx.update(loanApplications)
+        .set({ ownsOtherRealEstate: true, updatedAt: new Date() })
+        .where(eq(loanApplications.id, applicationId));
+      return synced;
+    });
   }
 
   async getHmdaDemographicsByApplication(applicationId: string): Promise<HmdaDemographics[]> {

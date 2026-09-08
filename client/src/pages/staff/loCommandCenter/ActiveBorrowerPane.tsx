@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getLoanAppStatusMeta } from "@shared/loanApplicationStatus";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { isDecisionGrade } from "@shared/dataProvenance";
 import { DocRequestDraftDialog } from "./DocRequestDraftDialog";
 import { prettyPathId, type CockpitData } from "./types";
 
@@ -42,6 +43,8 @@ export function ActiveBorrowerPane({ applicationId, onBack }: { applicationId: s
 
   const { application: app, income, conditions, documents, messages } = data;
   const statusMeta = getLoanAppStatusMeta(app.status);
+  const financialsVerified = isDecisionGrade(app.financialDataProvenance as Parameters<typeof isDecisionGrade>[0]);
+  const isPreliminaryReview = app.status === "pre_approved" && !financialsVerified;
 
   return (
     <div className="space-y-4 p-4 md:p-6" data-testid="cockpit-active-borrower">
@@ -64,7 +67,9 @@ export function ActiveBorrowerPane({ applicationId, onBack }: { applicationId: s
             {app.isVeteran && <Badge variant="info">Veteran</Badge>}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-            <Badge variant={statusMeta.badgeVariant}>{statusMeta.label}</Badge>
+            <Badge variant={isPreliminaryReview ? "info" : statusMeta.badgeVariant}>
+              {isPreliminaryReview ? "Initial review" : statusMeta.label}
+            </Badge>
             {app.loanPurpose && <span className="capitalize">{app.loanPurpose.replace(/_/g, " ")}</span>}
             {app.purchasePrice && <span>{formatCurrency(app.purchasePrice)}</span>}
             {app.propertyState && <span>{app.propertyState}</span>}
@@ -87,7 +92,7 @@ export function ActiveBorrowerPane({ applicationId, onBack }: { applicationId: s
         <CardContent className="p-4">
           <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
             <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" />
-            Qualifying income
+            {financialsVerified ? "Qualifying income" : "Income calculation"}
           </h3>
           {income ? (
             <div className="space-y-2">
@@ -97,6 +102,7 @@ export function ActiveBorrowerPane({ applicationId, onBack }: { applicationId: s
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {income.incomeBasis === "urla_line_items" ? "URLA line items" : "application summary"}
+                  {!financialsVerified && " · self-reported"}
                 </span>
                 {income.requiresManualReview && <Badge variant="warning">Manual review</Badge>}
               </div>
@@ -130,6 +136,11 @@ export function ActiveBorrowerPane({ applicationId, onBack }: { applicationId: s
                     </li>
                   ))}
               </ul>
+              {!financialsVerified && (
+                <p className="rounded-md bg-warning-subtle p-2 text-xs text-warning-subtle-foreground" data-testid="cockpit-income-unverified">
+                  Preliminary calculation only. Verify income, assets, credit, and property evidence before using it for qualification or a lender package.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

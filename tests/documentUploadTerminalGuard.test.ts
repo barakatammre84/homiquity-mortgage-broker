@@ -67,6 +67,8 @@ vi.mock("../server/services/taskEventEmitter", () => ({
   taskEventEmitter: { emitDocumentEvent: uploadFanout.emitDocumentEvent },
 }));
 vi.mock("../server/pipelineEngine", () => ({
+  expireSupersededDocumentReviewTasks: vi.fn(async () => undefined),
+  advanceMatchingDocumentTasks: vi.fn(async () => undefined),
   matchUploadedDocumentToConditions: uploadFanout.matchUploadedDocumentToConditions,
 }));
 vi.mock("../server/services/autopilot/config", () => ({

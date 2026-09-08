@@ -1,4 +1,84 @@
-# Homiquity — the launch queue
+# Homiquity — product and launch roadmap
+
+## Current direction — 2026-09-07
+
+**Continue building Homiquity; do not pivot away from Core.** The existing Homiquity web app is
+the product shell. Core's review, evidence-lineage, workpaper, memo and correction controls now
+run inside it with the same accounts, applications and uploads. A second Core application would
+add duplicate identity and data flows without removing a borrower or loan-officer bottleneck.
+
+The product benchmark is Better.com's fast, transparent online experience: immediate start,
+personalized requests, 24/7 document/status access, clear pricing and human help through closing.
+Homiquity should match that ease and win where a broker can: complex self-employed, multi-business,
+1099 and rental-income borrowers receive a deeper, evidence-linked review and a choice across
+wholesale lenders. Benchmark sources checked 2026-09-07:
+[mortgage experience](https://better.com/mortgage),
+[document personalization](https://better.com/content/what-documents-will-i-need-for-my-mortgage),
+and [approval stages](https://better.com/content/how-to-get-a-mortgage-approval).
+
+### Product outcome
+
+A borrower can discover Homiquity, estimate options, begin a public application in minutes, carry
+every answer into the full application, upload each document once, understand what is preliminary
+versus verified, correct a returned item without starting over, and always see the next useful
+action or a person who owns it. A loan officer can receive the same file, see its provenance,
+review complex income, request and accept corrections, price, run AUS, lock, assemble the lender
+package, manage conditions and carry the file through closing without a spreadsheet side channel.
+
+### Capability map
+
+| Core capability | Current state | Definition of complete |
+|---|---|---|
+| Public acquisition and application | **Built** — landing primary action enters `/apply`; purchase/refinance and complex-income branches are live | Production conversion and abandonment telemetry show where qualified borrowers stop |
+| Fast, accurate intake | **Built and browser-proven** — multiple businesses, 1099/rental sources and typed addresses persist; rough analysis is labeled preliminary | Real pilot files complete without rekeying or contradictory figures |
+| Full borrower application | **Built and browser-proven** — identity, businesses and URLA 2c properties carry into editable state and refresh from the database | Pilot borrower completes all required sections with no staff repair |
+| Personalized evidence collection | **Built internally** — employment-specific requests, upload/task/condition agreement, immutable replacements and exact correction copy | Production upload survives restart and every required evidence type is accepted on a pilot file |
+| Complex-income review | **Built internally** — Form 1084-aligned worksheets, evidence lineage, reviewed workpapers and cited memo | Licensed reviewer reproduces the calculation from a real client's accepted evidence |
+| Honest decision and letter | **Built internally** — preliminary output is distinct; verified actions require income, asset and real-credit evidence | Real provider reports plus licensed review produce the first usable letter |
+| Loan-officer cockpit | **Built and browser-proven** — bounded/searchable intake, full file, property/income provenance, attention queue and truthful action gates | Invite, pool claim, processing, underwriting, closing and retirement variants pass against pilot users |
+| Pricing, AUS and rate lock | **Workflow built; providers external** — simulations are labeled and cannot satisfy evidence gates; lender confirmation is required for a lock | Contracted production pricing/AUS/credit/property services pass certification and reconciliation |
+| Lender package and conditions | **Internally built; receiver unproven** — readiness-gated export, package snapshot, submission/condition state machine and correction loop exist | One approved lender accepts the package and one full correction exchange under its current instructions |
+| Closing, funding and service | **State machine built; live operations unproven** | Named operating owners complete a real closing/funding, borrower updates and post-close handoff |
+
+### Execution sequence
+
+1. ✅ **Integrated foundation:** one Homiquity identity/application/upload system with Core review
+   checkpoints, document lineage, workpapers, cited memo, correction loop and retired overlap.
+2. ✅ **Complex-borrower friction loop:** multi-business/rental intake, URLA carry-over, correct
+   document requirements, evidence-gated decisions, borrower/task consistency, loan-officer
+   property view and honest letter/AUS/export/lock/submission controls. Browser and database report:
+   [2026-09-07 complex borrower and loan-officer loop](knowledge-base/feature-review/journey-walks/2026-09-07-complex-borrower-lo-loop.md).
+3. **Production foundation:** prove durable object storage through upload → restart → download →
+   replace; certify monitoring, email and each data-backed route against the exact deployed commit.
+4. **Real data providers:** contract and certify credit, VOA/VOIE, AUS, AVM/appraisal and live
+   wholesale pricing; preserve the current rule that simulations cannot become verified facts.
+5. **Licensed operating model:** confirm licensed-MLO/state routing, counsel decisions, borrower
+   support ownership, processor/underwriter/closer handoffs and service-level targets.
+6. **Lender acceptance:** choose one approved wholesale lender, obtain current receiver/sandbox
+   instructions, submit the complex reference package, process every response and correction, and
+   reconcile lender acknowledgement back into Homiquity.
+7. **Controlled pilot:** take a small cohort from public application through letter, accepted
+   offer, underwriting, conditions, close and funding; measure time, repeat questions/uploads,
+   response time, fallout reason and borrower/officer effort at every handoff.
+8. **Scale:** add lender adapters, automated staff assignment, proactive service alerts and
+   portfolio/retention journeys only after the pilot proves the base process.
+
+### Immediate release state
+
+- GitHub repository: public; `main` has a strict required
+  `gate (typecheck · tests · schema guard)` check with administrator enforcement.
+- Production: Railway and `www.homiquity.com` both served exact `main` commit
+  `24ee390aabb67b5a445ee88611d6f6ddc9fc4d68` when checked on 2026-09-07.
+- Post-merge operations: the workflow applies pending production migrations and then verifies that
+  Railway serves the merged commit.
+- External blocker: no approved wholesale lender or current receiver/test instructions are
+  available yet. Internal simulation is not lender acceptance.
+- Configuration to prove: production object-storage credentials are not observable from source;
+  run the real persistence acceptance test before accepting borrower documents.
+
+The older queue below contains still-useful compliance and engineering tickets, but its dated
+August operational status statements are superseded by this measured snapshot. Re-verify an item
+before acting on it; the findings register remains authoritative for unresolved defects.
 
 **What this is:** every piece of work still open, one line each, in the order it should be done.
 It is not a history. On 2026-08-06 this file was **96 KB** and ~71% of its bytes were narratives
@@ -6,10 +86,10 @@ about finished work, which made the 32 open items unfindable. The whole prior fi
 items with their closure reasoning — moved verbatim to
 [archive/roadmap/CTO_ROADMAP_2026-08-06.md](knowledge-base/archive/roadmap/CTO_ROADMAP_2026-08-06.md).
 
-**Where things actually stand:** the commercial machine is **built and verified end to end behind
-the pre-launch gate, against simulated vendors**. What stands between here and live is §0 and §1 —
-almost entirely founder actions, not code. §2 is short because it is honest, not because it is
-incomplete.
+**Where things actually stand:** the internal commercial workflow is broad and the complex
+borrower-to-officer path is proven. Production uploads, contracted provider results, licensed-state
+routing and a real lender receiver still separate that software from an operating mortgage
+business.
 
 **Maintenance rules — binding. They are why this file is small.**
 

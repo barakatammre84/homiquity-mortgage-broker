@@ -7,6 +7,7 @@ import {
   consentKeys,
   consentTemplateKeys,
   applicationResourceKeys,
+  taskKeys,
 } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
@@ -123,6 +124,8 @@ export function TaxReturnInsightCard() {
       // registered as a document, so the checklist root is what needs refreshing.
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.all() });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       setPendingFile(null);
       setStep("idle");
       toast({

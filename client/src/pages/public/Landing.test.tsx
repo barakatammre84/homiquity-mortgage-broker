@@ -60,6 +60,11 @@ function marketingCopy(): string {
 }
 
 describe("Landing", () => {
+  it("lets a ready visitor start the mortgage application from the hero", () => {
+    render(<Landing />);
+    expect(screen.getByTestId("button-hero-apply").getAttribute("href")).toBe("/apply");
+  });
+
   it("leads with Homi, above the journey cards", () => {
     render(<Landing />);
 

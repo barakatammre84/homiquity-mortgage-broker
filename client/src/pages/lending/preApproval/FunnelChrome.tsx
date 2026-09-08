@@ -121,7 +121,7 @@ export function AffordabilityTeaserOverlay({
             onClick={onContinue}
             data-testid="button-teaser-continue"
           >
-            See my full pre-approval
+            Continue to my application
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
           <Button
@@ -158,7 +158,7 @@ export function AuthGateOverlay({ onDismiss }: { onDismiss: () => void }) {
           One last step
         </h3>
         <p className="text-muted-foreground mb-6">
-          Create an account (or sign in) to see your pre-approval results. Your answers are already saved.
+          Create an account (or sign in) to see your personalized result and next steps. Your answers are already saved.
         </p>
         <div className="space-y-3">
           <Button asChild size="lg" className="w-full" data-testid="button-auth-gate-signup">

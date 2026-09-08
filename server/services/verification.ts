@@ -30,11 +30,17 @@ export async function markDimensionVerified(
 
   await storage.updateLoanApplication(applicationId, { [FIELD[dimension]]: true });
 
-  const income = dimension === "income" ? true : app.incomeVerified;
-  const assets = dimension === "assets" ? true : app.assetsVerified;
-  const credit = dimension === "credit" ? true : app.creditVerified;
+  // Re-read after the dimension write. Two reviewers can finish different
+  // dimensions at the same time; calculating from the pre-write row let both
+  // updates commit while neither saw the other's flag, leaving all three true
+  // but the application stuck at self_reported.
+  const current = await storage.getLoanApplication(applicationId);
+  if (!current) return;
+  const income = current.incomeVerified;
+  const assets = current.assetsVerified;
+  const credit = current.creditVerified;
 
-  if (income && assets && credit && app.financialDataProvenance !== "verified") {
+  if (income && assets && credit && current.financialDataProvenance !== "verified") {
     await storage.updateLoanApplication(applicationId, {
       financialDataProvenance: "verified",
       financialDataVerifiedAt: new Date(),

@@ -5,6 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FinancialReviewTab } from "./FinancialReviewTab";
 import type { FinancialReviewWorkspace } from "@shared/financialReview";
 
+const request = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/queryClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/queryClient")>();
+  return { ...actual, apiRequest: request };
+});
+
 const key = ["/api/loan-applications", "a", "financial-review"] as const;
 
 function fixture(): FinancialReviewWorkspace {
@@ -58,6 +64,26 @@ function setup(data = fixture()) {
   return { navigate };
 }
 
+function approvedMemoFixture() {
+  const data = fixture();
+  data.currentApprovedCount = 1;
+  data.workpapers[0].review = { action: "approve", reason: "Reviewed current evidence.", reviewedBy: "lo", reviewedAt: "2026-09-04T00:00:00.000Z" };
+  data.memo = {
+    id: "memo-1",
+    versionNumber: 1,
+    inputFingerprint: "c".repeat(64),
+    packageHash: "d".repeat(64),
+    workpaperVersionIds: ["wp-1"],
+    sections: [{ key: "income", title: "Household income", body: "$12,000 monthly qualifying income.", referenceIds: ["workpaper:wp-1"] }],
+    references: [{ type: "document", id: "doc-1", label: "Accepted W-2.pdf · v2 · p. 1, 2" }],
+    createdAt: "2026-09-04T00:00:00.000Z",
+    isCurrent: true,
+    blockers: [],
+    review: { action: "approve", reason: "Ready for lender presentation.", reviewedBy: "lo", reviewedAt: "2026-09-04T01:00:00.000Z" },
+  };
+  return data;
+}
+
 describe("Financial Review in the existing officer workspace", () => {
   it("shows the calculation, exact evidence version, and links to existing tools", async () => {
     const { navigate } = setup();
@@ -78,27 +104,49 @@ describe("Financial Review in the existing officer workspace", () => {
   });
 
   it("shows a versioned memo and its source index", () => {
-    const data = fixture();
-    data.currentApprovedCount = 1;
+    const data = approvedMemoFixture();
     data.canBuildMemo = true;
     data.memoBlockedReason = null;
-    data.workpapers[0].review = { action: "approve", reason: "Reviewed current evidence.", reviewedBy: "lo", reviewedAt: "2026-09-04T00:00:00.000Z" };
-    data.memo = {
-      id: "memo-1",
-      versionNumber: 1,
-      inputFingerprint: "c".repeat(64),
-      packageHash: "d".repeat(64),
-      workpaperVersionIds: ["wp-1"],
-      sections: [{ key: "income", title: "Household income", body: "$12,000 monthly qualifying income.", referenceIds: ["workpaper:wp-1"] }],
-      references: [{ type: "document", id: "doc-1", label: "Accepted W-2.pdf · v2 · p. 1, 2" }],
-      createdAt: "2026-09-04T00:00:00.000Z",
-      isCurrent: true,
-      blockers: [],
-      review: null,
-    };
+    data.memo!.review = null;
     setup(data);
     expect(screen.getByText("Credit memo · version 1")).toBeTruthy();
     expect(screen.getByText("Accepted W-2.pdf · v2 · p. 1, 2")).toBeTruthy();
     expect(screen.getByTestId("approve-credit-memo").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("turns an approved current memo into evidence-backed income and asset verification", async () => {
+    request.mockResolvedValue(new Response(null, { status: 200 }));
+    const data = approvedMemoFixture();
+    data.requiredCount = 2;
+    data.currentApprovedCount = 2;
+    data.workpapers.push({
+      ...data.workpapers[0],
+      id: "wp-assets",
+      key: "asset_reconciliation:a",
+      kind: "asset_reconciliation",
+      title: "Assets and available funds",
+      inputFingerprint: "e".repeat(64),
+      output: {
+        kind: "asset_reconciliation",
+        result: { totalAssets: 100000, liquidAssets: 100000, retirementAssets: 0, reservesMonths: 6, breakdown: [] },
+        borrowerSequences: [1],
+      },
+    });
+    setup(data);
+
+    await userEvent.click(screen.getByTestId("apply-reviewed-financial-verification"));
+    expect(request).toHaveBeenNthCalledWith(1, "POST", "/api/loan-applications/a/verify/income", {});
+    expect(request).toHaveBeenNthCalledWith(2, "POST", "/api/loan-applications/a/verify/assets", {});
+  });
+
+  it("does not verify assets from an approved income-only memo", async () => {
+    request.mockClear();
+    request.mockResolvedValue(new Response(null, { status: 200 }));
+    setup(approvedMemoFixture());
+
+    expect(screen.getByTestId("reviewed-dimension-support").textContent).toMatch(/Assets: missing approved workpaper/);
+    await userEvent.click(screen.getByTestId("apply-reviewed-financial-verification"));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith("POST", "/api/loan-applications/a/verify/income", {});
   });
 });

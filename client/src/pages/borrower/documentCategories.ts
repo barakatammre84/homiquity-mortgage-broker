@@ -2,6 +2,7 @@
 // Documents page. Kept as a standalone data module so the page component
 // stays focused on state/data-fetching and presentation, not this catalog.
 import { titleCaseFromSnake } from "@/lib/formatters";
+import { documentTypesMatch } from "@shared/documentTypes";
 import {
   User,
   DollarSign,
@@ -40,7 +41,8 @@ export const DOCUMENT_CATEGORIES = [
       { type: "w2", name: "W-2 Forms", required: true, description: "W-2s from the last 2 years" },
       { type: "tax_return_1040", name: "Tax Returns (1040)", required: true, description: "Personal tax returns from last 2 years" },
       { type: "1099_misc", name: "1099 Forms", required: false, description: "1099 forms if you have additional income" },
-      { type: "profit_loss_statement", name: "Profit & Loss Statement", required: false, description: "For self-employed borrowers" },
+      { type: "profit_loss", name: "Profit & Loss Statement", required: false, description: "For self-employed borrowers" },
+      { type: "business_license", name: "Business Records", required: false, description: "Business license or formation records" },
       { type: "social_security_award_letter", name: "Social Security Award Letter", required: false, description: "If receiving Social Security income" },
     ]
   },
@@ -54,6 +56,7 @@ export const DOCUMENT_CATEGORIES = [
     documents: [
       { type: "bank_statement_checking", name: "Checking Account Statements", required: true, description: "Last 2 months of statements" },
       { type: "bank_statement_savings", name: "Savings Account Statements", required: true, description: "Last 2 months of statements" },
+      { type: "bank_statement_business", name: "Business Bank Statements", required: false, description: "Recent business account statements" },
       { type: "retirement_statement_401k", name: "401(k) Statement", required: false, description: "Most recent quarterly statement" },
       { type: "retirement_statement_ira", name: "IRA Statement", required: false, description: "Most recent quarterly statement" },
       { type: "brokerage_statement", name: "Brokerage Statement", required: false, description: "Investment account statements" },
@@ -120,7 +123,7 @@ export function docTypeName(type: string): string {
 
 export function getUploadNextStep(docType: string): string {
   const category = DOCUMENT_CATEGORIES.find(cat =>
-    cat.documents.some(d => d.type === docType)
+    cat.documents.some(d => documentTypesMatch(d.type, docType))
   );
   return (
     (category && UPLOAD_NEXT_STEPS[category.id]) ||

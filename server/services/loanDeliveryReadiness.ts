@@ -33,6 +33,7 @@ import {
 } from "@shared/fannieMae/specialFeatureCodes";
 import { CONFORMING_LOAN_LIMIT_2026 } from "@shared/lendingLimits";
 import { deliveryStackApplicability, type ChannelApplicability } from "@shared/businessChannel";
+import { confirmedMortgagedReoCount } from "@shared/realEstateFinancing";
 import type { LoanApplication, LoanDeliveryData } from "@shared/schema";
 
 export interface DeliveryReadinessReport {
@@ -101,7 +102,6 @@ export interface DeliveryDatasetContext {
   /** URLA occupancy type (urla_property_info.occupancy_type), when loaded. */
   occupancyType?: string | null;
 }
-
 function mapPropertyUsage(occupancy: string | null | undefined): string | undefined {
   const mapping: Record<string, string> = {
     primary_residence: "PrimaryResidence",
@@ -229,7 +229,7 @@ export async function evaluateDeliveryReadiness(applicationId: string): Promise<
     storage.getRealEstateOwnedByApplication(applicationId),
     storage.getUrlaPropertyInfo(applicationId),
   ]);
-  const mortgagedReoCount = reo.filter(p => Number(p.mortgageBalance || 0) > 0).length;
+  const mortgagedReoCount = confirmedMortgagedReoCount(application.ownsOtherRealEstate, reo);
   const dataset = buildDeliveryDataset(application, delivery, combined, {
     mortgagedReoCount,
     occupancyType: propertyInfo?.occupancyType ?? null,

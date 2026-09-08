@@ -29,7 +29,10 @@ const app = {
   propertyState: "IL",
 } as unknown as LoanApplication;
 
-function renderPage(applications: LoanApplication[]) {
+function renderPage(
+  applications: LoanApplication[],
+  graph?: { bestAnnualIncome: number | null },
+) {
   const client = new QueryClient({
     defaultOptions: {
       queries: {
@@ -40,6 +43,7 @@ function renderPage(applications: LoanApplication[]) {
     },
   });
   client.setQueryData(dashboardKeys.root(), { applications });
+  if (graph) client.setQueryData(["/api/borrower-graph"], graph);
   return render(
     <QueryClientProvider client={client}>
       <ApplicationSummary />
@@ -73,6 +77,19 @@ describe("ApplicationSummary", () => {
     expect(debts).toContain("$500");
 
     expect(screen.getByText(/never affects your credit score/)).toBeTruthy();
+  });
+
+  it("uses detailed borrower-graph income and self-employed verification guidance", () => {
+    renderPage([
+      { ...app, employmentType: "self_employed" } as LoanApplication,
+    ], { bestAnnualIncome: 246000 });
+
+    const income = screen.getByTestId("text-income").textContent!;
+    expect(income).toContain("$246,000");
+    expect(income).toContain("$20,500");
+    const explanation = screen.getByTestId("summary-financial-why-we-ask").textContent!;
+    expect(explanation).toContain("profit-and-loss statements");
+    expect(explanation).not.toContain("W-2s");
   });
 
   it("labels the client-computed loan amount Calculated", () => {

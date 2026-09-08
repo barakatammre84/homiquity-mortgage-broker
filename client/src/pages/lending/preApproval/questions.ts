@@ -51,7 +51,7 @@ export const QUESTIONS: Question[] = [
     id: "intro",
     type: "intro",
     title: "Let's get you home.",
-    subtitle: "We'll get you a verified pre-approval letter in about 3 minutes. No hard credit check.",
+    subtitle: "Get a preliminary answer and a clear next step in about 3 minutes. No hard credit check.",
     buttonText: "Start My Pre-Approval"
   },
   {

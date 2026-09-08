@@ -534,6 +534,15 @@ describe("EarlyCheck origination-file edits", () => {
     // Primary residences are not subject to the six-property limit edit.
     expect(fatalIds(cleanDataset({ propertyUsageType: "PrimaryResidence", financedPropertiesCount: 9 }))).not.toContain("6439");
   });
+
+  it("6439: reports an unknown financed-property count instead of silently passing", () => {
+    const result = evaluateLoanDeliveryEdits(cleanDataset({
+      propertyUsageType: "Investment",
+      financedPropertiesCount: undefined,
+    }));
+    expect(result.fatal.some((finding) => finding.editId === "6439")).toBe(false);
+    expect(result.notEvaluated).toContainEqual(expect.objectContaining({ editId: "6439" }));
+  });
 });
 
 describe("SFC set validation surfaces through the edit result", () => {

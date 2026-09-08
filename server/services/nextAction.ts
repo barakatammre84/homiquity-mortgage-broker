@@ -70,6 +70,19 @@ function getPreUwFlags(application: LoanApplication | null): PreUwFlagsPayload |
   return raw as PreUwFlagsPayload;
 }
 
+function needsSelfEmployedWorksheet(application: LoanApplication): boolean {
+  if (application.employmentType !== "self_employed") return false;
+  const analysis = application.aiAnalysis as { concerns?: unknown } | null;
+  return (
+    Array.isArray(analysis?.concerns) &&
+    analysis.concerns.some(
+      (concern) =>
+        typeof concern === "string" &&
+        /self-employment details|income worksheet/i.test(concern),
+    )
+  );
+}
+
 export interface NextActionInput {
   application: LoanApplication | null;
   pendingTasks: { total: number; documents: number };
@@ -142,6 +155,24 @@ export function computeNextAction(input: NextActionInput): NextAction {
       href: "/messages",
       buttonLabel: "View Messages",
       count: unreadMessages,
+    };
+  }
+
+  // A document cannot replace the business-by-business URLA worksheet. Put
+  // the exact blocking form ahead of the generic document flag so a complex
+  // borrower does not upload files and then discover their application itself
+  // was still incomplete.
+  if (needsSelfEmployedWorksheet(application)) {
+    return {
+      kind: "strengthen_file",
+      title: "Complete your self-employed income details",
+      description:
+        "Review each business or 1099 source and complete its income worksheet so we can calculate qualifying income without asking you to repeat the intake.",
+      href: "/urla-form",
+      buttonLabel: "Continue Application",
+      whyNeeded:
+        "Mortgage guidelines calculate qualifying self-employed income from business details and supporting records, not the rough annual estimate alone.",
+      timeEstimate: "about 5 minutes",
     };
   }
 

@@ -37,6 +37,11 @@ describe("getReadinessPercent", () => {
       getReadinessPercent(app({ status: "pre_approved" }), 0, 0, {
         hasCreditConsent: true, hasIdVerification: false, hasBankConnected: false, hasRateLocked: false,
       }),
+    ).toBe(45 + 3);
+    expect(
+      getReadinessPercent(app({ status: "pre_approved", financialDataProvenance: "verified" }), 0, 0, {
+        hasCreditConsent: true, hasIdVerification: false, hasBankConnected: false, hasRateLocked: false,
+      }),
     ).toBe(60 + 3 + 5 + 5);
     // draft (20) is below the >=50 threshold — no zero-pending bonuses.
     expect(getReadinessPercent(app({ status: "draft" }), 0, 0)).toBe(20);
@@ -58,7 +63,8 @@ describe("getPersonalizedGreeting", () => {
   });
 
   it("matches the subtitle to the application stage", () => {
-    expect(getPersonalizedGreeting(null, app({ status: "pre_approved" })).subtitle).toContain("pre-approved");
+    expect(getPersonalizedGreeting(null, app({ status: "pre_approved", financialDataProvenance: "verified" })).subtitle).toContain("pre-approved");
+    expect(getPersonalizedGreeting(null, app({ status: "pre_approved", financialDataProvenance: "self_reported" })).subtitle).toContain("initial review");
     expect(getPersonalizedGreeting(null, app({ status: "expired" })).subtitle).toContain("expired");
     expect(getPersonalizedGreeting(null, app({ status: "funded" })).subtitle).toContain("Congratulations");
   });
@@ -74,10 +80,14 @@ describe("getExpirationInfo (30-day pre-approval window)", () => {
 
   it("buckets urgency: normal → urgent (≤7 days) → expired (≤0)", () => {
     vi.setSystemTime(new Date("2026-07-19T12:00:00Z"));
-    const preApproved = (createdAt: string) => app({ status: "pre_approved", createdAt: createdAt as never });
+    const preApproved = (createdAt: string) => app({ status: "pre_approved", financialDataProvenance: "verified", createdAt: createdAt as never });
     expect(getExpirationInfo(preApproved("2026-07-10T12:00:00Z"))?.urgency).toBe("normal");   // 21 days left
     expect(getExpirationInfo(preApproved("2026-06-25T12:00:00Z"))?.urgency).toBe("urgent");   // 6 days left
     expect(getExpirationInfo(preApproved("2026-06-01T12:00:00Z"))?.urgency).toBe("expired");  // long gone
+  });
+
+  it("does not assign an approval expiration to a preliminary calculation", () => {
+    expect(getExpirationInfo(app({ status: "pre_approved", financialDataProvenance: "self_reported" }))).toBeNull();
   });
 });
 

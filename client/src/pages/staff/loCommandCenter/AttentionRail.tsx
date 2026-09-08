@@ -1,6 +1,7 @@
-import { useMemo } from "react";
-import { TrendingUp, Users } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Search, TrendingUp, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEALTH_META, HEALTH_ORDER, SIGNAL_META, type PipelineSummary, type StaffSignal } from "./types";
@@ -8,6 +9,9 @@ import { HEALTH_META, HEALTH_ORDER, SIGNAL_META, type PipelineSummary, type Staf
 // -----------------------------------------------------------------------------
 // Left pane — attention rail
 // -----------------------------------------------------------------------------
+const DEFAULT_VISIBLE_SIGNALS = 8;
+const DEFAULT_VISIBLE_FILES = 20;
+
 export function AttentionRail({
   queue,
   signals,
@@ -21,6 +25,7 @@ export function AttentionRail({
   onSelect: (applicationId: string) => void;
   loading: boolean;
 }) {
+  const [search, setSearch] = useState("");
   const filesSorted = useMemo(
     () =>
       [...queue].sort((a, b) => {
@@ -33,6 +38,25 @@ export function AttentionRail({
 
   // Signals that point at a file the LO can open (priority-sorted already).
   const actionableSignals = useMemo(() => signals.filter((s) => s.applicationId), [signals]);
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleSignals = useMemo(
+    () => normalizedSearch
+      ? actionableSignals.filter((signal) =>
+          `${signal.borrowerName} ${signal.title}`.toLocaleLowerCase().includes(normalizedSearch),
+        )
+      : actionableSignals.slice(0, DEFAULT_VISIBLE_SIGNALS),
+    [actionableSignals, normalizedSearch],
+  );
+  const visibleFiles = useMemo(() => {
+    if (normalizedSearch) {
+      return filesSorted.filter((file) => file.borrowerName.toLocaleLowerCase().includes(normalizedSearch));
+    }
+    const firstFiles = filesSorted.slice(0, DEFAULT_VISIBLE_FILES);
+    const selected = selectedId ? filesSorted.find((file) => file.applicationId === selectedId) : undefined;
+    return selected && !firstFiles.some((file) => file.applicationId === selected.applicationId)
+      ? [selected, ...firstFiles]
+      : firstFiles;
+  }, [filesSorted, normalizedSearch, selectedId]);
 
   if (loading) {
     return (
@@ -46,7 +70,19 @@ export function AttentionRail({
 
   return (
     <div className="space-y-6" data-testid="attention-rail">
-      {actionableSignals.length > 0 && (
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Find a pipeline borrower"
+          aria-label="Find a pipeline borrower"
+          className="h-9 pl-8 text-sm"
+          data-testid="input-pipeline-search"
+        />
+      </div>
+
+      {visibleSignals.length > 0 && (
         <section aria-labelledby="signals-heading">
           <h2
             id="signals-heading"
@@ -56,7 +92,7 @@ export function AttentionRail({
             Needs attention ({actionableSignals.length})
           </h2>
           <ul className="space-y-2">
-            {actionableSignals.map((signal, idx) => {
+            {visibleSignals.map((signal, idx) => {
               const meta = SIGNAL_META[signal.priority];
               const active = signal.applicationId === selectedId;
               return (
@@ -82,6 +118,11 @@ export function AttentionRail({
               );
             })}
           </ul>
+          {!normalizedSearch && actionableSignals.length > DEFAULT_VISIBLE_SIGNALS && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Showing the {DEFAULT_VISIBLE_SIGNALS} most urgent signals. Search to find another borrower.
+            </p>
+          )}
         </section>
       )}
 
@@ -99,7 +140,7 @@ export function AttentionRail({
           </p>
         ) : (
           <ul className="space-y-1">
-            {filesSorted.map((file) => {
+            {visibleFiles.map((file) => {
               const meta = HEALTH_META[file.fileHealth.light];
               const active = file.applicationId === selectedId;
               return (
@@ -133,6 +174,16 @@ export function AttentionRail({
               );
             })}
           </ul>
+        )}
+        {normalizedSearch && visibleFiles.length === 0 && visibleSignals.length === 0 && (
+          <p className="rounded-md border border-border p-3 text-sm text-muted-foreground" data-testid="text-no-pipeline-match">
+            No borrower matches that search.
+          </p>
+        )}
+        {!normalizedSearch && filesSorted.length > DEFAULT_VISIBLE_FILES && (
+          <p className="mt-2 text-xs text-muted-foreground" data-testid="text-pipeline-limited">
+            Showing the {DEFAULT_VISIBLE_FILES} most urgent files. Search to find another borrower.
+          </p>
         )}
       </section>
     </div>

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { US_STATES } from "@/lib/us-states";
 import { Plus, Trash2 } from "lucide-react";
-import type { EmploymentHistory, LoanApplication, OtherIncomeSource } from "@shared/schema";
+import type { EmploymentHistory, OtherIncomeSource } from "@shared/schema";
 import { MoneyInput } from "./MoneyInput";
 import { SelfEmploymentIncomeWorksheet } from "./SelfEmploymentIncomeWorksheet";
 import { INCOME_SOURCES } from "./types";
@@ -16,8 +16,6 @@ interface EmploymentSectionProps {
   onChange: (value: Partial<EmploymentHistory>[]) => void;
   otherIncomes: Partial<OtherIncomeSource>[];
   onOtherIncomesChange: (value: Partial<OtherIncomeSource>[]) => void;
-  app: LoanApplication;
-  activeSeq: number;
 }
 
 export function EmploymentSection({
@@ -25,8 +23,6 @@ export function EmploymentSection({
   onChange,
   otherIncomes,
   onOtherIncomesChange,
-  app,
-  activeSeq,
 }: EmploymentSectionProps) {
   return (
     <>
@@ -76,7 +72,7 @@ export function EmploymentSection({
                   <Label>Employer or Business Name</Label>
                   <Input
                     placeholder="Employer Name"
-                    value={emp.employerName || (index === 0 && activeSeq === 1 ? app.employerName || "" : "")}
+                    value={emp.employerName || ""}
                     onChange={(e) => {
                       const updated = [...employmentRecords];
                       updated[index] = { ...updated[index], employerName: e.target.value };
@@ -181,7 +177,7 @@ export function EmploymentSection({
                   <Input
                     type="number"
                     min="0"
-                    value={emp.yearsInLineOfWork ?? (index === 0 && activeSeq === 1 ? app.employmentYears || "" : "")}
+                    value={emp.yearsInLineOfWork ?? ""}
                     onChange={(e) => {
                       const updated = [...employmentRecords];
                       updated[index] = { ...updated[index], yearsInLineOfWork: parseInt(e.target.value) || 0 };
@@ -193,7 +189,7 @@ export function EmploymentSection({
                 <div className="flex items-center gap-2 pt-6">
                   <Checkbox
                     id={`self-employed-${index}`}
-                    checked={emp.isSelfEmployed || (activeSeq === 1 && app.employmentType === "self_employed")}
+                    checked={!!emp.isSelfEmployed}
                     onCheckedChange={(checked) => {
                       const updated = [...employmentRecords];
                       updated[index] = { ...updated[index], isSelfEmployed: !!checked };
@@ -212,7 +208,7 @@ export function EmploymentSection({
                 <div className="space-y-2">
                   <Label>Base Income</Label>
                   <MoneyInput
-                    value={emp.baseIncome || (index === 0 && activeSeq === 1 ? (parseFloat(app.annualIncome || "0") / 12).toFixed(0) : "")}
+                    value={emp.baseIncome || ""}
                     onChange={(e) => {
                       const updated = [...employmentRecords];
                       updated[index] = { ...updated[index], baseIncome: e.target.value };
@@ -283,7 +279,7 @@ export function EmploymentSection({
                 </div>
               </div>
 
-              {(emp.isSelfEmployed || (activeSeq === 1 && app.employmentType === "self_employed")) && (
+              {emp.isSelfEmployed && (
                 <>
                   <hr />
                   <SelfEmploymentIncomeWorksheet

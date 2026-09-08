@@ -39,6 +39,8 @@ const scheduleCWorksheet = (
 ): SelfEmploymentWorksheet => ({
   version: 1,
   businessStructure: "sole_proprietorship",
+  ownershipPercent: 100,
+  yearsSelfEmployed: 5,
   scheduleC: priorYear ? { currentYear, priorYear } : { currentYear },
 });
 

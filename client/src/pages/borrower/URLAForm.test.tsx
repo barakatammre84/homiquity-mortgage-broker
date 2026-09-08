@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { dashboardKeys, urlaKeys } from "@/lib/queryClient";
+import { orderEmploymentRecords, prefillPrimaryEmployment, prefillPrimaryPersonalInfo, prefillRealEstateOwned } from "./urla/types";
 
 // The #451 defect, for the OTHER borrower.
 //
@@ -44,7 +45,7 @@ vi.mock("wouter", () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
-import URLAForm from "./URLAForm";
+import URLAForm, { isEmploymentSectionComplete } from "./URLAForm";
 
 const APP_ID = "app-1";
 
@@ -55,7 +56,180 @@ const application = {
   purchasePrice: "400000",
   preferredLoanType: "conventional",
   amortizationType: "fixed",
+  ownsOtherRealEstate: false,
 };
+
+describe("URLA intake handoff", () => {
+  it("turns every captured self-employed entity into editable URLA state", () => {
+    const records = prefillPrimaryEmployment([], {
+      ...application,
+      employmentType: "self_employed",
+      employmentYears: 6,
+      annualIncome: "240000",
+      incomeSources: [
+        { type: "self_employed", annualAmount: "140000", employerName: "Northstar Consulting LLC", yearsInRole: "6" },
+        { type: "rental", annualAmount: "36000" },
+        { type: "self_employed", annualAmount: "70000", employerName: "Lakeview Design LLC", yearsInRole: "3" },
+      ],
+    } as never);
+
+    expect(records).toEqual([
+      expect.objectContaining({ employerName: "Northstar Consulting LLC", baseIncome: "11666.67", isSelfEmployed: true, employmentType: "current" }),
+      expect.objectContaining({ employerName: "Lakeview Design LLC", baseIncome: "5833.33", isSelfEmployed: true, employmentType: "additional" }),
+    ]);
+  });
+
+  it("keeps current and additional businesses in the borrower's intended order after refetch", () => {
+    const records = orderEmploymentRecords([
+      { id: "newer", employmentType: "additional", employerName: "Lakeview Design LLC" },
+      { id: "older", employmentType: "current", employerName: "Northstar Consulting LLC" },
+      { id: "oldest", employmentType: "previous", employerName: "Prior Studio" },
+    ] as never);
+
+    expect(records.map((record) => record.employerName)).toEqual([
+      "Northstar Consulting LLC",
+      "Lakeview Design LLC",
+      "Prior Studio",
+    ]);
+  });
+
+  it("reuses signup identity until the borrower has saved URLA identity", () => {
+    expect(prefillPrimaryPersonalInfo(undefined, {
+      firstName: "Jordan",
+      lastName: "Audit",
+      email: "jse@test.local",
+    } as never)).toEqual({
+      firstName: "Jordan",
+      lastName: "Audit",
+      email: "jse@test.local",
+    });
+  });
+
+  it("carries rental address, rent, and payment into editable URLA property state", () => {
+    const properties = prefillRealEstateOwned([], {
+      ...application,
+      ownsOtherRealEstate: null,
+      incomeSources: [{
+        type: "rental",
+        annualAmount: "36000",
+        rentalProperties: [{
+          address: "233 South Wacker Drive",
+          city: "Chicago",
+          state: "IL",
+          monthlyRentalIncome: "3000",
+          monthlyDebtPayment: "1450",
+        }],
+      }],
+    } as never);
+
+    expect(properties).toEqual([expect.objectContaining({
+      propertyAddress: "233 South Wacker Drive",
+      propertyCity: "Chicago",
+      propertyState: "IL",
+      monthlyRentalIncome: "3000",
+      mortgagePayment: "1450",
+      occupancyType: "investment",
+      verificationSource: "borrower_intake",
+    })]);
+  });
+
+  it("keeps saved URLA property details instead of overwriting them from intake", () => {
+    const saved = [{ id: "reo-1", propertyAddress: "Corrected address", marketValue: "525000" }];
+    expect(prefillRealEstateOwned(saved as never, {
+      ...application,
+      incomeSources: [{
+        type: "rental",
+        annualAmount: "12000",
+        rentalProperties: [{ address: "Old intake address", monthlyRentalIncome: "1000" }],
+      }],
+    } as never)).toBe(saved);
+  });
+
+  it("falls back through blank values from a partial URLA row", () => {
+    expect(prefillPrimaryPersonalInfo({
+      firstName: "Casey",
+      lastName: "",
+      email: "",
+    } as never, {
+      firstName: "Signup",
+      lastName: "Complex",
+      email: "casey@example.test",
+    } as never)).toMatchObject({
+      firstName: "Casey",
+      lastName: "Complex",
+      email: "casey@example.test",
+    });
+  });
+
+  it("does not mark self-employed work complete before the income worksheet and ownership are captured", () => {
+    expect(isEmploymentSectionComplete([
+      { employerName: "Northstar Consulting LLC", isSelfEmployed: true },
+    ])).toBe(false);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: {
+            currentYear: {
+              netProfitOrLoss: 0,
+              depreciation: 0,
+              depletion: 0,
+              amortizationOrCasualtyLoss: 0,
+              businessUseOfHome: 0,
+              mealsExclusion: 0,
+              nonRecurringIncome: 0,
+            },
+          },
+        },
+      },
+    ])).toBe(false);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: {
+            currentYear: {
+              netProfitOrLoss: 140000,
+              depreciation: 0,
+              depletion: 0,
+              amortizationOrCasualtyLoss: 0,
+              businessUseOfHome: 0,
+              mealsExclusion: 0,
+              nonRecurringIncome: 0,
+            },
+          },
+        },
+      },
+    ])).toBe(true);
+
+    expect(isEmploymentSectionComplete([
+      {
+        employerName: "Northstar Consulting LLC",
+        isSelfEmployed: true,
+        selfEmploymentIncome: {
+          version: 1,
+          businessStructure: "single_member_llc",
+          ownershipPercent: 100,
+          yearsSelfEmployed: 6,
+          scheduleC: { currentYear: { netProfitOrLoss: 140000, depreciation: 0, depletion: 0, amortizationOrCasualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 0, nonRecurringIncome: 0 } },
+        },
+      },
+      { employerName: "Lakeview Design LLC", isSelfEmployed: true },
+    ])).toBe(false);
+  });
+});
 
 /**
  * Seeds a file that already has a co-borrower, so `hasCoBorrower` latches from
@@ -88,6 +262,7 @@ function renderPage() {
     hmdaDemographics: [],
     otherIncomeSources: [],
     propertyInfo: {},
+    realEstateOwned: [],
   });
 
   return render(
@@ -280,6 +455,7 @@ describe("URLAForm — the progress bar counts the application, not the open tab
     hmdaDemographics: [],
     otherIncomeSources: [],
     propertyInfo: { propertyStreet: "1 Main St", propertyValue: "400000" },
+    realEstateOwned: [],
   };
 
   /** Same file, plus a co-borrower with nothing but a name. */
@@ -310,9 +486,9 @@ describe("URLAForm — the progress bar counts the application, not the open tab
   it("counts the co-borrower's unfinished sections instead of reporting the file nearly done", async () => {
     renderWith(WITH_COBORROWER);
 
-    // 4 primary sections + 1 shared, out of 6 per-borrower × 2 + 1 shared.
+    // 4 primary sections + 2 shared, out of 6 per-borrower × 2 + 2 shared.
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 13 sections complete");
+    expect(progress.textContent).toContain("6 of 14 sections complete");
   });
 
   it("does not change when the borrower switches tabs — one file, one number", async () => {
@@ -321,14 +497,14 @@ describe("URLAForm — the progress bar counts the application, not the open tab
     fireEvent.click(await screen.findByTestId("button-borrower-co"));
 
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 13 sections complete");
+    expect(progress.textContent).toContain("6 of 14 sections complete");
   });
 
-  it("stays at seven sections on a single-borrower file", async () => {
+  it("stays at eight sections on a single-borrower file", async () => {
     renderWith(PRIMARY_DONE);
 
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 7 sections complete");
+    expect(progress.textContent).toContain("6 of 8 sections complete");
     expect(progress.textContent).not.toContain("co-borrower");
   });
 });

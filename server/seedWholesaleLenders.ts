@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { db } from "./db";
 import { wholesaleLenders } from "@shared/schema";
 import { TARGET_LENDERS } from "./seedData/wholesaleLenderTargets";
@@ -39,7 +39,13 @@ export async function seedWholesaleLenderCounterparties(): Promise<void> {
     const existing = await db
       .select({ id: wholesaleLenders.id })
       .from(wholesaleLenders)
-      .where(eq(wholesaleLenders.lenderId, t.lenderId))
+      // Older environments may already contain the counterparty under a
+      // different external id. lenderCode is unique too, so either identity
+      // means the operator-owned row must be preserved.
+      .where(or(
+        eq(wholesaleLenders.lenderId, t.lenderId),
+        eq(wholesaleLenders.lenderCode, t.lenderCode),
+      ))
       .limit(1);
     if (existing.length > 0) continue;
 

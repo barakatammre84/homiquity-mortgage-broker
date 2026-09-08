@@ -79,8 +79,20 @@ export function computePreApprovalAnalysis(
   formValues: PreApprovalFormData,
   advertised30YrRate: number | null,
 ): PreApprovalAnalysis {
+  const detailedSelfEmployment =
+    formValues.employmentType === "self_employed" &&
+    (formValues.incomeSources ?? []).some(
+      (source) => source.type === "self_employed" && parseMaskedAmount(source.annualAmount) > 0,
+    );
+  // `annualIncome` is the borrower's initial estimate. Self-employed borrowers
+  // then break that estimate into business/1099 entries so the file can retain
+  // every entity. Once that detail exists it replaces the rough estimate;
+  // adding both is the optimistic double-count the detailed step is meant to
+  // prevent. W-2/retired borrowers use annualIncome as their primary source
+  // and the line items remain genuinely additional income.
   const income =
-    parseMaskedAmount(formValues.annualIncome) + sumIncomeSourcesAnnual(formValues.incomeSources);
+    (detailedSelfEmployment ? 0 : parseMaskedAmount(formValues.annualIncome)) +
+    sumIncomeSourcesAnnual(formValues.incomeSources);
   // Rental debt service typed on the income-sources step is a recurring
   // obligation the borrower just told us about — it belongs in DTI the moment
   // it is entered, same as monthlyDebts.

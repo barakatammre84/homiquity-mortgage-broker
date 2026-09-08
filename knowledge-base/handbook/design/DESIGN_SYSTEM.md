@@ -46,8 +46,8 @@ sites actually use it.
 
 | Capability | State | Measured |
 |---|---|---|
-| `PageShell` page geometry | **BUILT · ADOPTED 17%** | 49 of 284 page files import it — *pnpm guard:ui → `pageShellDrift`* |
-| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 24 file(s) import the registry, 323 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
+| `PageShell` page geometry | **BUILT · ADOPTED 17%** | 49 of 285 page files import it — *pnpm guard:ui → `pageShellDrift`* |
+| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 25 file(s) import the registry, 323 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
 | `PageShell fullHeight` | **BUILT · ADOPTED 0%** | zero call sites — correct: it is for `BareLayout` routes only, and none use PageShell yet |
 | `Heading` / `Text` (`ui/typography.tsx`) | **BUILT · ADOPTED 0%** | zero call sites — allowlisted in `scripts/orphan-scan.cjs` as known-unused |
 | `Logo` + `BrandingProvider` | **BUILT · ADOPTED** | 18 call site(s) |
@@ -63,7 +63,7 @@ sites actually use it.
 | `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **151** occurrence(s) |
 | `blindSpotPaletteClasses` — palette class in a shape the token guard cannot see | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `subMinTouchTarget` — Button size="sm" (h-9 = 36px) with no .touch-target | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
-| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **62** occurrence(s) |
+| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **58** occurrence(s) |
 
 <!-- END GENERATED -->
 

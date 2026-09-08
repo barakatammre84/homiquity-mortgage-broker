@@ -278,16 +278,20 @@ function scoreLiabilities(liabilities: UrlaLiability[]): URLASectionScore {
   return scoreSection("Liabilities & Debts", "2b", fields);
 }
 
-function scoreRealEstateOwned(reo: RealEstateOwned[]): URLASectionScore {
+function scoreRealEstateOwned(application: LoanApplication, reo: RealEstateOwned[]): URLASectionScore {
   // Section 2c (REO) is only meaningful when the borrower actually owns
   // property. Disclosure is derived from the real real_estate_owned rows
   // rather than a hardcoded assumption.
   const hasReo = reo.length > 0;
   const fields: { name: string; value: unknown; required: boolean }[] = [
-    { name: "Real estate ownership reviewed", value: "yes", required: true },
+    {
+      name: "Real estate ownership reviewed",
+      value: application.ownsOtherRealEstate === null || application.ownsOtherRealEstate === undefined ? null : "yes",
+      required: true,
+    },
   ];
 
-  if (hasReo) {
+  if (application.ownsOtherRealEstate === true && hasReo) {
     reo.forEach((p, i) => {
       fields.push(
         { name: `REO #${i + 1} Address`, value: p.propertyAddress, required: true },
@@ -296,6 +300,8 @@ function scoreRealEstateOwned(reo: RealEstateOwned[]): URLASectionScore {
         { name: `REO #${i + 1} Occupancy/Status`, value: p.status || p.occupancyType, required: true },
       );
     });
+  } else if (application.ownsOtherRealEstate === true) {
+    fields.push({ name: "Owned property details", value: null, required: true });
   } else {
     fields.push({ name: "Owned properties (if any)", value: null, required: false });
   }
@@ -656,7 +662,7 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
   const otherIncomeScore = scoreOtherIncome(urlaData.otherIncomeSources);
   const assetsScore = scoreAssets(urlaData.assets.filter(a => (a.borrowerSequenceNumber ?? 1) === 1));
   const liabilitiesScore = scoreLiabilities(urlaData.liabilities.filter(l => (l.borrowerSequenceNumber ?? 1) === 1));
-  const reoScore = scoreRealEstateOwned(urlaData.realEstateOwned);
+  const reoScore = scoreRealEstateOwned(application, urlaData.realEstateOwned);
   const propertyScore = scorePropertyInfo(application, urlaData.propertyInfo);
   const loanScore = scoreLoanInfo(application);
   const declarationsScore = scoreDeclarations(urlaData.declarations);

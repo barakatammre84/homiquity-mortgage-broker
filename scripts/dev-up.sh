@@ -77,7 +77,7 @@ fi
 
 if running; then
       echo "running  pid $(cat "$PIDFILE")  port $PORT"
-      curl -s "http://localhost:$PORT/api/health" | head -c 400; echo
+      curl --max-time 5 -s "http://localhost:$PORT/api/health" | head -c 400; echo
     else echo "not running on port $PORT"; fi
     exit 0 ;;
   up) ;;
@@ -157,7 +157,7 @@ if ! pnpm -s db:migrate >/tmp/dev-up-migrate.log 2>&1; then
 fi
 
 # ------------------------------------------------------------- 5. serve ----
-echo "starting the dev server on port $PORT…"
+echo "starting the dev server on port ${PORT}…"
 # `set -m` puts this background job in its own process group (pgid == pid), which
 # is what lets `down` kill the wrapper AND the server it spawns. Without it the
 # child outlives the kill and keeps the port. Works on bash 3.2 (macOS) too.
@@ -178,7 +178,10 @@ if [ "${code:-000}" != "200" ]; then
   echo
   echo "the server did not become healthy. Last 30 lines:"
   tail -30 "$DEVLOG" | sed 's/^/  | /'
-  rm -f "$PIDFILE"
+  # A slow or failed boot must not leave the wrapper and its child behind.
+  # Otherwise the next attempt sees an occupied port but has no pidfile with
+  # which to reclaim the process group.
+  stop_server || true
   exit 1
 fi
 
