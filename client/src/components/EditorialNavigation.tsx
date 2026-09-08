@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 
 import { useAuth } from "@/hooks/useAuth";
+import { Logo } from "@/components/brand/Logo";
 import { PRELAUNCH_GATED } from "@/lib/prelaunch";
 import { dashboardKeys } from "@/lib/queryClient";
 
@@ -39,8 +40,8 @@ export function EditorialNavigation() {
       )}
 
       <div className="mx-auto flex h-20 max-w-screen-2xl items-center justify-between gap-5 px-5 sm:px-8 lg:h-24 lg:px-12 2xl:px-20">
-        <Link href="/" className="touch-target flex shrink-0 items-center font-serif text-3xl font-bold tracking-tighter text-foreground sm:text-4xl" aria-label="Homiquity home" data-testid="logo-nav-editorial">
-          Homiquity
+        <Link href="/" className="touch-target flex shrink-0 items-center" aria-label="Homiquity home" data-testid="link-logo-nav-editorial">
+          <Logo size="xl" tone="brand" data-testid="logo-nav-editorial" />
         </Link>
 
         <div className="hidden items-center gap-6 lg:flex xl:gap-8">
@@ -60,7 +61,7 @@ export function EditorialNavigation() {
             <Link href="/login" className="touch-target inline-flex items-center px-3 text-sm font-medium text-foreground" data-testid="button-login">Log in</Link>
           )}
           {!PRELAUNCH_GATED && (
-            <Link href="/apply" className="touch-target inline-flex min-h-12 items-center justify-center bg-flare-ink px-7 text-sm font-semibold text-primary-foreground transition-colors hover:bg-flare-ink/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-testid="button-get-started">
+            <Link href="/apply" className="touch-target inline-flex min-h-12 items-center justify-center rounded-full bg-flare-ink px-7 text-sm font-semibold text-primary-foreground transition-colors hover:bg-flare-ink/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-testid="button-get-started">
               Get started
             </Link>
           )}
@@ -96,7 +97,7 @@ export function EditorialNavigation() {
               {isAuthenticated ? "Dashboard" : "Log in"}
             </Link>
             {!PRELAUNCH_GATED && (
-              <Link href="/apply" className="touch-target mt-4 flex min-h-12 items-center justify-center bg-flare-ink px-6 font-semibold text-primary-foreground" onClick={() => setMobileMenuOpen(false)} data-testid="mobile-button-apply">
+              <Link href="/apply" className="touch-target mt-4 flex min-h-12 items-center justify-center rounded-full bg-flare-ink px-6 font-semibold text-primary-foreground" onClick={() => setMobileMenuOpen(false)} data-testid="mobile-button-apply">
                 Get started
               </Link>
             )}

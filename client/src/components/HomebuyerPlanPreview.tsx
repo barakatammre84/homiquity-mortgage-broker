@@ -56,19 +56,19 @@ export function HomebuyerPlanPreview() {
       {!timeline ? (
         <div data-testid="homebuyer-plan-step">
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Question 1 of 3</p>
-          <h3 className="mt-2 font-serif text-2xl font-bold">When would you like to buy?</h3>
+          <h3 className="mt-2 font-display text-2xl font-bold">When would you like to buy?</h3>
           <div className="mt-5"><ChoiceList choices={TIMELINES} onChoose={setTimeline} prefix="homebuyer-timeline" /></div>
         </div>
       ) : !incomeStory ? (
         <div data-testid="homebuyer-plan-step">
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Question 2 of 3</p>
-          <h3 className="mt-2 font-serif text-2xl font-bold">How does your household earn income?</h3>
+          <h3 className="mt-2 font-display text-2xl font-bold">How does your household earn income?</h3>
           <div className="mt-5"><ChoiceList choices={INCOME_STORIES} onChoose={setIncomeStory} prefix="homebuyer-income" /></div>
         </div>
       ) : !blocker ? (
         <div data-testid="homebuyer-plan-step">
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Question 3 of 3</p>
-          <h3 className="mt-2 font-serif text-2xl font-bold">What feels hardest or most unclear?</h3>
+          <h3 className="mt-2 font-display text-2xl font-bold">What feels hardest or most unclear?</h3>
           <div className="mt-5"><ChoiceList choices={BLOCKERS} onChoose={setBlocker} prefix="homebuyer-blocker" /></div>
         </div>
       ) : plan ? (
@@ -76,7 +76,7 @@ export function HomebuyerPlanPreview() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Your planning stage</p>
-              <h3 className="mt-1 font-serif text-3xl font-bold">{plan.label}</h3>
+              <h3 className="mt-1 font-display text-3xl font-bold">{plan.label}</h3>
             </div>
             <button type="button" onClick={restart} className="touch-target text-sm font-semibold underline underline-offset-4" data-testid="button-restart-homebuyer-plan">Start over</button>
           </div>

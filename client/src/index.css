@@ -230,13 +230,13 @@
   --veteran-red: 351 66% 42%;      /* old-glory red ~#B02234 */
   --veteran-seal-bg: 45 44% 96%;   /* warm cream disc, mode-stable */
   --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  /* Display face. Bricolage Grotesque is an OFL variable grotesque with an
-     optical-size axis — characterful where Geist and Inter are the two most
-     common defaults on the web, which was the whole complaint. Free. */
-  --font-display: "Bricolage Grotesque", "Geist", system-ui, sans-serif;
-  /* No webfont: `font-serif` has ZERO uses in the app. Source Serif 4 was
-     downloaded on every page load and rendered nowhere. */
-  --font-serif: Georgia, "Times New Roman", serif;
+  /* One clean grotesque across product and marketing. Weight and scale create
+     hierarchy; changing type families between surfaces made the journey feel
+     like separate products. */
+  --font-display: "Geist", "Inter", system-ui, sans-serif;
+  /* Legacy alias: any remaining `font-serif` utility resolves to the same clean
+     product face instead of silently falling back to Times New Roman. */
+  --font-serif: var(--font-sans);
   /* JetBrains Mono was a fallback behind a face that always loads — dead bytes. */
   --font-mono: "Geist Mono", ui-monospace, monospace;
   /* Precision radius: 12px cards, tighter than consumer-soft */

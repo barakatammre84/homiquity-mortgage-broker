@@ -752,11 +752,11 @@ function PreApprovalFunnel() {
             className="max-w-2xl"
           >
             <p className="text-xs font-semibold uppercase tracking-widest text-flare-ink">{introLabel}</p>
-            <h1 className="mt-5 font-serif text-5xl font-bold leading-tight tracking-tighter text-foreground sm:text-6xl" data-testid="text-intro-title">
+            <h1 className="mt-5 font-display text-5xl font-bold leading-tight tracking-tighter text-foreground sm:text-6xl" data-testid="text-intro-title">
               {currentQ.title}
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground sm:text-xl">{currentQ.subtitle}</p>
-            <Button onClick={handleNext} size="lg" className="mt-10 h-auto min-h-14 rounded-none bg-flare-ink px-8 py-4 text-base font-semibold text-primary-foreground hover:bg-flare-ink/90" data-testid="button-start-preapproval">
+            <Button onClick={handleNext} size="lg" className="mt-10 h-auto min-h-14 rounded-full bg-flare-ink px-8 py-4 text-base font-semibold text-primary-foreground hover:bg-flare-ink/90" data-testid="button-start-preapproval">
               {currentQ.buttonText} <ArrowRight className="ml-2" />
             </Button>
             <p className="mt-7 text-sm text-muted-foreground">
