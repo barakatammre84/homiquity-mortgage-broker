@@ -100,6 +100,7 @@ doc-drift bug to fix):
   · [BROWSER_PROBE.md](runbooks/BROWSER_PROBE.md) — rendering a page in real Chromium to see what a text scan cannot
   · [TEST_ACCOUNTS.md](runbooks/TEST_ACCOUNTS.md) · [PRE_PRODUCTION_OPS_ROUTINES.md](runbooks/PRE_PRODUCTION_OPS_ROUTINES.md)
   · [PROD_ACCEPTANCE_TEST.md](runbooks/PROD_ACCEPTANCE_TEST.md) — the F1 launch-gate checklist
+  · [PHASE_0_TECH_READINESS.md](runbooks/PHASE_0_TECH_READINESS.md) — the evidence-backed technical gate for production truth, recovery, security, regulated data integrity, provider honesty, reliability and exact-build acceptance
   · [NEON_PREVIEW_DB.md](runbooks/NEON_PREVIEW_DB.md) — PII-free preview databases: the preview-seed branch + founder cutover
   · [BETA_GO_LIVE_READINESS.md](runbooks/BETA_GO_LIVE_READINESS.md) — dated beta-readiness snapshot (verified workflows + founder decisions)
 - [support-playbooks/](runbooks/support-playbooks/) — locked-out user, discrimination/credit-error escalation.
