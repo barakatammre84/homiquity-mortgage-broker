@@ -303,6 +303,15 @@ export function registerDashboardRoutes(
       // frequently-polled endpoint read-only after the one compatibility pass.
       const borrowerOwnsApplication = application.userId === user.id;
       const hasRentalIncome = getBorrowerProfileFromApplication(application).hasRentalIncome;
+      // Intake persists its decision before it initializes tasks. Give that
+      // normal path one minute to finish so this compatibility read cannot
+      // race the same read-then-create generators. Older files still repair on
+      // their next poll, while a failed fresh intake is handled by its recovery
+      // sweep and becomes eligible here after the grace period.
+      const applicationAgeMs = application.createdAt
+        ? Date.now() - new Date(application.createdAt).getTime()
+        : 0;
+      const isPastIntakeInitializationWindow = applicationAgeMs >= 60_000;
       const missingRentalTask = !allTasks.some(
         (task) => task.taskType === "document_request" && task.documentCategory === "lease_agreement",
       );
@@ -325,6 +334,7 @@ export function registerDashboardRoutes(
       if (
         borrowerOwnsApplication &&
         hasRentalIncome &&
+        isPastIntakeInitializationWindow &&
         !isTerminalLoanAppStatus(application.status) &&
         (missingRentalTask || staleOpenTaxTask || missingRentalCondition || staleOpenTaxCondition)
       ) {

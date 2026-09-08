@@ -391,11 +391,16 @@ export async function generateDocumentTasks(
   // (taskType, documentCategory) regardless of status: a completed upload
   // task should not resurrect either.
   const existingTasks = await storage.getTasksByApplication(applicationId);
-  const existingByDocCategory = new Map(
-    existingTasks
-      .filter((t) => t.taskType === "document_request" && t.documentCategory)
-      .map((t) => [t.documentCategory as string, t]),
-  );
+  const existingByDocCategory = new Map<string, Task>();
+  for (const task of existingTasks) {
+    if (
+      task.taskType === "document_request" &&
+      task.documentCategory &&
+      !existingByDocCategory.has(task.documentCategory)
+    ) {
+      existingByDocCategory.set(task.documentCategory, task);
+    }
+  }
 
   for (const req of requirements) {
     const yearsDescription = req.yearsRequired 
@@ -404,7 +409,21 @@ export async function generateDocumentTasks(
     const taskDescription = req.description + yearsDescription;
     const existingTask = existingByDocCategory.get(req.documentType);
     if (existingTask) {
+      // New pipeline tasks carry POLICY. Before that marker existed, this
+      // generator wrote a borrower-owned, borrower-created, non-custom task
+      // with the MANUAL default. Those are the only legacy rows it may repair.
+      // A staff-authored request can share the same document category, but its
+      // wording and priority belong to the loan officer and must survive a
+      // borrower-triggered compatibility pass unchanged.
+      const isPipelineTask =
+        existingTask.triggerSource === "POLICY" ||
+        (existingTask.triggerSource === "MANUAL" &&
+          existingTask.ownerRole === "BORROWER" &&
+          existingTask.assignedToUserId === userId &&
+          existingTask.createdByUserId === userId &&
+          !existingTask.isCustomRequest);
       if (
+        isPipelineTask &&
         existingTask.status === "OPEN" &&
         (existingTask.title !== `Upload: ${req.conditionTitle}` ||
           existingTask.description !== taskDescription ||
@@ -429,6 +448,7 @@ export async function generateDocumentTasks(
       taskType: "document_request",
       documentCategory: req.documentType,
       documentYear: req.yearsRequired?.[0]?.toString(),
+      triggerSource: "POLICY",
       // These tasks are assigned to the borrower (userId = application.userId,
       // the only way this generator is called), so they are BORROWER-owned per
       // deriveDocumentTaskOwnerRole — omitting this inherited the column's

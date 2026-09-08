@@ -8,6 +8,7 @@ vi.mock("../server/storage", () => ({
   storage: {
     createTask: vi.fn(async (data: InsertTask) => ({ id: "task-1", ...data })),
     getTasksByApplication: vi.fn(async () => [] as unknown[]),
+    updateTask: vi.fn(async (id: string, data: Partial<InsertTask>) => ({ id, ...data })),
   },
 }));
 
@@ -16,6 +17,7 @@ import { storage } from "../server/storage";
 
 const createTaskMock = vi.mocked(storage.createTask);
 const getTasksMock = vi.mocked(storage.getTasksByApplication);
+const updateTaskMock = vi.mocked(storage.updateTask);
 
 const requirement = (documentType: string) => ({
   documentType,
@@ -78,6 +80,7 @@ describe("generateDocumentTasks — borrower ownership", () => {
   beforeEach(() => {
     createTaskMock.mockClear();
     getTasksMock.mockClear();
+    updateTaskMock.mockClear();
     getTasksMock.mockResolvedValue([]);
   });
 
@@ -100,6 +103,7 @@ describe("generateDocumentTasks — borrower ownership", () => {
       expect(inserted.status).toBe("OPEN");
       expect(inserted.taskType).toBe("document_request");
       expect(inserted.assignedToUserId).toBe("borrower-1");
+      expect(inserted.triggerSource).toBe("POLICY");
     }
   });
 
@@ -136,5 +140,76 @@ describe("generateDocumentTasks — borrower ownership", () => {
       "creator-1",
     );
     expect(tasks).toHaveLength(1);
+  });
+
+  it("never rewrites a staff-authored request that uses the same document category", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "staff-task",
+        taskType: "document_request",
+        documentCategory: "tax_return",
+        status: "OPEN",
+        triggerSource: "MANUAL",
+        ownerRole: "BORROWER",
+        assignedToUserId: "borrower-1",
+        createdByUserId: "loan-officer-1",
+        isCustomRequest: false,
+        title: "Upload the amended return",
+        description: "Include the amended federal return and explanation.",
+        priority: "urgent",
+      },
+    ] as never);
+
+    await generateDocumentTasks(
+      "app-1",
+      "borrower-1",
+      [{
+        ...requirement("tax_return"),
+        conditionTitle: "Rental Property Tax Return & Schedule E Required",
+      }],
+      "borrower-1",
+    );
+
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(createTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("can repair a legacy task created by the borrower-side pipeline", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "legacy-policy-task",
+        taskType: "document_request",
+        documentCategory: "tax_return",
+        status: "OPEN",
+        triggerSource: "MANUAL",
+        ownerRole: "BORROWER",
+        assignedToUserId: "borrower-1",
+        createdByUserId: "borrower-1",
+        isCustomRequest: false,
+        title: "Upload: Tax Return Verification",
+        description: "Federal tax returns for the most recent year",
+        priority: "normal",
+      },
+    ] as never);
+
+    await generateDocumentTasks(
+      "app-1",
+      "borrower-1",
+      [{
+        ...requirement("tax_return"),
+        conditionTitle: "Rental Property Tax Return & Schedule E Required",
+        description: "Most recent signed return including Schedule E",
+        priority: "prior_to_approval",
+      }],
+      "borrower-1",
+    );
+
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      "legacy-policy-task",
+      expect.objectContaining({
+        title: "Upload: Rental Property Tax Return & Schedule E Required",
+        priority: "high",
+      }),
+    );
   });
 });

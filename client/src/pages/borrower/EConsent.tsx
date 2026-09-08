@@ -63,7 +63,13 @@ export default function EConsent() {
   const { toast } = useToast();
   const [expandedConsent, setExpandedConsent] = useState<string | null>(null);
   const [agreedConsents, setAgreedConsents] = useState<Set<string>>(new Set());
-  const { data: applications = [] } = useQuery<LoanApplication[]>({
+  const {
+    data: applications = [],
+    isLoading: applicationsLoading,
+    isError: applicationsError,
+    error: applicationsErrorObj,
+    refetch: refetchApplications,
+  } = useQuery<LoanApplication[]>({
     queryKey: loanApplicationKeys.all(),
   });
   const { activeApplication } = useActiveApplication(applications);
@@ -163,7 +169,7 @@ export default function EConsent() {
     );
   };
 
-  if (templatesLoading || consentsLoading) {
+  if (applicationsLoading || templatesLoading || consentsLoading) {
     return (
       <div className="p-6 flex items-center justify-center h-full">
         <div className="text-muted-foreground">Loading consents...</div>
@@ -174,12 +180,13 @@ export default function EConsent() {
   // A fetch failure used to fall through to a zeroed-out page indistinguishable
   // from "nothing to do" — show an honest error + retry instead, right at a
   // trust-critical consent gate (ux-09).
-  if (templatesError || consentsError) {
+  if (applicationsError || templatesError || consentsError) {
     return (
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <QueryErrorState
-          error={templatesErrorObj ?? consentsErrorObj}
+          error={applicationsErrorObj ?? templatesErrorObj ?? consentsErrorObj}
           onRetry={() => {
+            if (applicationsError) refetchApplications();
             if (templatesError) refetchTemplates();
             if (consentsError) refetchConsents();
           }}
@@ -328,7 +335,13 @@ export default function EConsent() {
           
           <div className="grid gap-3">
             {completedConsents.map((template) => {
-              const consent = myConsents?.find(c => c.consentType === template.consentType);
+              const consent = myConsents?.find(
+                (c) =>
+                  c.consentType === template.consentType &&
+                  c.consentGiven &&
+                  !c.isRevoked &&
+                  (!activeApplication || c.applicationId === activeApplication.id),
+              );
               const typeInfo = consentTypeLabels[template.consentType] || { label: template.title, icon: FileText };
               const Icon = typeInfo.icon;
 
