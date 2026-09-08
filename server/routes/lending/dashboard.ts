@@ -25,6 +25,7 @@ import { and, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import * as creditService from "../../services/creditService";
 import { routeParams } from "../../http/routeParams";
+import { getBorrowerProfileFromApplication, initializeLoanPipeline } from "../../pipelineEngine";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -289,18 +290,60 @@ export function registerDashboardRoutes(
       // Only borrower-owned tasks are actions for the borrower. Staff review
       // tasks may be visible as progress elsewhere, but they must never turn
       // into a second "Upload" button in this action list.
-      const allTasks = await storage.getTasksByApplication(applicationId);
+      let [allTasks, conditions, existingConsents, activeConsentTemplates] = await Promise.all([
+        storage.getTasksByApplication(applicationId),
+        storage.getLoanConditionsByApplication(applicationId),
+        storage.getBorrowerConsentsByApplication(applicationId),
+        storage.getActiveConsentTemplates(),
+      ]);
+
+      // Repair an existing rental file once when its open checklist still
+      // predates the Schedule E rule. New submissions are already initialized
+      // during intake; avoiding an unconditional re-drive here keeps this
+      // frequently-polled endpoint read-only after the one compatibility pass.
+      const borrowerOwnsApplication = application.userId === user.id;
+      const hasRentalIncome = getBorrowerProfileFromApplication(application).hasRentalIncome;
+      const missingRentalTask = !allTasks.some(
+        (task) => task.taskType === "document_request" && task.documentCategory === "lease_agreement",
+      );
+      const staleOpenTaxTask = allTasks.some(
+        (task) =>
+          task.taskType === "document_request" &&
+          task.documentCategory === "tax_return" &&
+          task.status === "OPEN" &&
+          !/schedule e/i.test(`${task.title} ${task.description ?? ""}`),
+      );
+      const missingRentalCondition = !conditions.some(
+        (condition) => condition.sourceRule === "DOC_REQ_LEASE_AGREEMENT",
+      );
+      const staleOpenTaxCondition = conditions.some(
+        (condition) =>
+          condition.sourceRule === "DOC_REQ_TAX_RETURN" &&
+          condition.status === "outstanding" &&
+          !/schedule e/i.test(`${condition.title} ${condition.description ?? ""}`),
+      );
+      if (
+        borrowerOwnsApplication &&
+        hasRentalIncome &&
+        !isTerminalLoanAppStatus(application.status) &&
+        (missingRentalTask || staleOpenTaxTask || missingRentalCondition || staleOpenTaxCondition)
+      ) {
+        await initializeLoanPipeline(application, user.id);
+        [allTasks, conditions] = await Promise.all([
+          storage.getTasksByApplication(applicationId),
+          storage.getLoanConditionsByApplication(applicationId),
+        ]);
+      }
       const borrowerTasks = allTasks.filter((task) => task.ownerRole === "BORROWER");
 
       // Get conditions that need attention
-      const conditions = await storage.getLoanConditionsByApplication(applicationId);
       const outstandingConditions = conditions.filter((c: any) => c.status === "outstanding");
 
-      // Get existing consents for this application
-      const existingConsents = await storage.getBorrowerConsentsByApplication(applicationId);
-      
-      // Check for required consent types that haven't been given
-      const requiredConsentTypes = ["credit_pull", "disclosure", "privacy_policy"];
+      // The active consent templates are the same source rendered by
+      // /e-consent. The old hardcoded names did not match the stored template
+      // types, so this action could never clear even after every real consent
+      // was signed.
+      const requiredConsentTypes = [...new Set(activeConsentTemplates.map((template) => template.consentType))];
       const givenConsentTypes = existingConsents
         .filter((c: any) => c.consentGiven && !c.isRevoked)
         .map((c: any) => c.consentType);
@@ -338,7 +381,7 @@ export function registerDashboardRoutes(
           id: `consent-pending`,
           type: "consent",
           title: "Sign Required Disclosures",
-          description: `${pendingConsentTypes.length} consent(s) need your signature`,
+          description: `${pendingConsentTypes.length} ${pendingConsentTypes.length === 1 ? "consent needs" : "consents need"} your signature`,
           priority: "high",
           status: "pending",
           // The client route is /e-consent (no param); /econsent/:id never existed.

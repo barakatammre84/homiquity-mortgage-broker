@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, consentKeys } from "@/lib/queryClient";
+import { apiRequest, consentKeys, loanApplicationKeys } from "@/lib/queryClient";
+import { useActiveApplication } from "@/hooks/useActiveApplication";
+import type { LoanApplication } from "@shared/schema";
 import { 
   CheckCircle, 
   Clock,
@@ -43,6 +45,7 @@ interface BorrowerConsent {
    * reports a revoked consent as still in force — see `isConsentGiven` below.
    */
   isRevoked?: boolean;
+  applicationId?: string | null;
 }
 
 const consentTypeLabels: Record<string, { label: string; icon: typeof Shield }> = {
@@ -60,6 +63,10 @@ export default function EConsent() {
   const { toast } = useToast();
   const [expandedConsent, setExpandedConsent] = useState<string | null>(null);
   const [agreedConsents, setAgreedConsents] = useState<Set<string>>(new Set());
+  const { data: applications = [] } = useQuery<LoanApplication[]>({
+    queryKey: loanApplicationKeys.all(),
+  });
+  const { activeApplication } = useActiveApplication(applications);
 
   const {
     data: templates,
@@ -85,6 +92,7 @@ export default function EConsent() {
     mutationFn: async (data: { consentType: string; templateId?: string; templateVersion?: string }) => {
       return await apiRequest("POST", "/api/consents", {
         ...data,
+        applicationId: activeApplication?.id,
         consentGiven: true,
         consentMethod: "click",
         signatureType: "none",
@@ -92,6 +100,7 @@ export default function EConsent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: consentKeys.me() });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItemsRoot() });
       toast({
         title: "Consent Recorded",
         description: "Your consent has been securely recorded.",
@@ -145,7 +154,11 @@ export default function EConsent() {
   const isConsentGiven = (consentType: string): boolean => {
     return (
       myConsents?.some(
-        (c) => c.consentType === consentType && c.consentGiven && !c.isRevoked,
+        (c) =>
+          c.consentType === consentType &&
+          c.consentGiven &&
+          !c.isRevoked &&
+          (!activeApplication || c.applicationId === activeApplication.id),
       ) || false
     );
   };

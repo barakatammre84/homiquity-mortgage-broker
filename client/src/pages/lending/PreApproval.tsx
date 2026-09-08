@@ -53,6 +53,7 @@ import { RestoreDraftBanner, AuthGateOverlay, AffordabilityTeaserOverlay, Funnel
 import { calculateAffordabilityEstimate, type AffordabilityEstimateResults } from "@/lib/affordabilityEstimate";
 import { buildTeaserInputs, parseTargetPrice } from "./preApproval/affordabilityTeaser";
 import { FUNNEL_SOFT_PULL_CONSENT_TEXT } from "@shared/creditConsentCopy";
+import { Logo } from "@/components/brand/Logo";
 
 export default function PreApproval() {
   return (
@@ -211,8 +212,12 @@ function PreApprovalFunnel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] }),
         queryClient.invalidateQueries({ queryKey: loanApplicationKeys.all() }),
-        queryClient.invalidateQueries({ queryKey: dashboardKeys.root() }),
       ]);
+      // The dashboard may still hold the pre-application empty response. If it
+      // survives, React Query paints the aspiring-owner dashboard for a moment
+      // before the fresh application arrives. Remove that snapshot so the next
+      // visit shows the loading shell until current data is available.
+      queryClient.removeQueries({ queryKey: dashboardKeys.root() });
 
       // Consume only now, on a SUCCESSFUL submit — a borrower who abandons the
       // funnel keeps their attribution for the next attempt. Clears both tiers
@@ -724,6 +729,9 @@ function PreApprovalFunnel() {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-2xl"
         >
+          <div className="mb-10 flex justify-center">
+            <Logo size="lg" data-testid="logo-apply-intro" />
+          </div>
           <div className="mb-8 flex justify-center">
             <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center">
               <Home className="h-10 w-10 text-primary" />
@@ -768,7 +776,7 @@ function PreApprovalFunnel() {
       <SEOHead title="Get Pre-Approved in 3 Minutes" description="Start your mortgage pre-approval application. Answer a few questions about your income and finances to get a clear, confident approval decision." />
       {restoreBanner}
       
-      <VerificationPulse active={submitMutation.isPending} />
+      <VerificationPulse active={submitMutation.isPending || (isAuthenticated && hasPendingSubmit())} />
 
       {/* Orientation chrome — chapter rail, step counter, percentage, and a
           time-to-finish derived from the steps actually left on this

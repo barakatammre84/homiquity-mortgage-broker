@@ -29,12 +29,13 @@ describe("assessIncomeSeasoning (Fannie B3-3.5-01)", () => {
     expect(result.conditionalSources[0].months).toBe(14);
   });
 
-  it("flags under 12 months as unseasoned (not usable)", () => {
+  it("does not apply the self-employment seasoning rule to rental income", () => {
     const result = assessIncomeSeasoning([
       { type: "rental", annualAmount: "18,000", yearsInRole: "0.5" } as never,
     ]);
-    expect(result.unseasonedSources).toHaveLength(1);
-    expect(result.unseasonedSources[0].months).toBe(6);
+    expect(result.unseasonedSources).toHaveLength(0);
+    expect(result.conditionalSources).toHaveLength(0);
+    expect(result.seasonedSources).toContain("rental");
   });
 
   it("passes 24+ months as fully seasoned", () => {

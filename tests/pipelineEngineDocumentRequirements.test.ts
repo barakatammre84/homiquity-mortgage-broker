@@ -12,6 +12,7 @@ const baseProfile = {
   isVeteran: false,
   isFirstTimeBuyer: false,
   isSelfEmployed: false,
+  hasRentalIncome: false,
 };
 
 describe("determineDocumentRequirements - employmentType 'other'", () => {
@@ -92,5 +93,19 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
 
     expect(documentTypes).not.toContain("purchase_contract");
     expect(documentTypes).toContain("homeowners_insurance");
+  });
+
+  it("asks a W-2 borrower with rental income for Schedule E and current leases", () => {
+    const requirements = determineDocumentRequirements({
+      ...baseProfile,
+      employmentType: "employed",
+      hasRentalIncome: true,
+    });
+
+    const taxReturn = requirements.find((requirement) => requirement.documentType === "tax_return");
+    expect(taxReturn?.conditionTitle).toContain("Schedule E");
+    expect(taxReturn?.description).toContain("Schedule E");
+    expect(taxReturn?.priority).toBe("prior_to_approval");
+    expect(requirements.some((requirement) => requirement.documentType === "lease_agreement")).toBe(true);
   });
 });

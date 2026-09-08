@@ -206,6 +206,7 @@ export default function Documents() {
       // condition to "submitted" and the banner should say so.
       queryClient.invalidateQueries({ queryKey: loanApplicationKeys.all() });
       if (focusAppId) {
+        queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItems(focusAppId) });
         queryClient.invalidateQueries({
           queryKey: applicationResourceKeys.documentChecklist(focusAppId),
         });

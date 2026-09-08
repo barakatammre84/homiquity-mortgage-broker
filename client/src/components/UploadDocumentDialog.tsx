@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, dashboardKeys, applicationResourceKeys, taskKeys } from "@/lib/queryClient";
+import { apiRequest, dashboardKeys, applicationResourceKeys, taskKeys, loanApplicationKeys } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { friendlyApiError } from "@/lib/errorMessage";
@@ -226,6 +226,7 @@ export function UploadDocumentDialog({
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.documentChecklist(applicationId) });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItemsRoot() });
       queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       if (confirmToRecipientId || requestMessageId) {
         queryClient.invalidateQueries({ queryKey: ["/api/messages"] });

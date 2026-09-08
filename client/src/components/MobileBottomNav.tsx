@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { isStaffRole, isPartnerRole } from "@shared/roles";
 import { useShellBadges } from "@/hooks/useShellBadges";
+import { useActiveBorrowerActionItems } from "@/hooks/useBorrowerActionItems";
 import {
   LayoutDashboard,
   CheckSquare,
@@ -32,7 +33,8 @@ export function MobileBottomNav() {
   const isCpa = isPartnerRole(userRole);
 
   const badges = useShellBadges();
-  const pendingTaskCount = isStaff ? 0 : badges.pendingTasks;
+  const { data: borrowerActions } = useActiveBorrowerActionItems(!isStaff && !isCpa);
+  const pendingTaskCount = isStaff ? 0 : borrowerActions?.stats.total ?? 0;
   const unreadCount = badges.unreadMessages;
 
   const borrowerItems: NavItem[] = [

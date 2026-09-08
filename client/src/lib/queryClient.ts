@@ -204,6 +204,7 @@ export const loanApplicationKeys = {
   pipeline: (id: string) => ["/api/loan-applications", id, "pipeline"] as const,
   options: (id: string) => ["/api/loan-applications", id, "options"] as const,
   offers: (id: string) => ["/api/loan-applications", id, "offers"] as const,
+  actionItemsRoot: () => ["/api/applications"] as const,
   // Note the different path prefix: the action-items route grew up on the
   // dashboard registrar under /api/applications.
   actionItems: (id: string) => ["/api/applications", id, "action-items"] as const,

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RestoreDraftBanner, AuthGateOverlay, AffordabilityTeaserOverlay, FunnelFooter } from "./FunnelChrome";
+import { RestoreDraftBanner, AuthGateOverlay, AffordabilityTeaserOverlay, FunnelFooter, FunnelProgressHeader } from "./FunnelChrome";
 import type { AffordabilityEstimateResults } from "@/lib/affordabilityEstimate";
 import { companyNmlsDisplay } from "@shared/companyIdentity";
 
@@ -120,5 +120,30 @@ describe("RestoreDraftBanner", () => {
     expect(onRestore).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTestId("button-dismiss-restore"));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("FunnelProgressHeader", () => {
+  it("keeps Homiquity visibly branded throughout the application", () => {
+    render(
+      <FunnelProgressHeader
+        progress={{
+          index: 3,
+          total: 12,
+          percent: 25,
+          remaining: 9,
+          sectionId: "goal",
+          sections: [
+            { id: "goal", number: 1, label: "Your goal", status: "current", percent: 50, stepsReached: 2, stepCount: 4 },
+          ],
+        }}
+        onBack={vi.fn()}
+        canGoBack
+        showSaved
+      />,
+    );
+
+    expect(screen.getByTestId("logo-apply")).toBeTruthy();
+    expect(screen.getByText("Step 3 of 12")).toBeTruthy();
   });
 });
