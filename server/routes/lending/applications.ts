@@ -110,6 +110,30 @@ export function registerApplicationRoutes(
         logAudit(req, "loan_application.created", "loan_application", application.id);
       }
 
+      // The fast application already collected each rental property. Carry it
+      // into URLA section 2c immediately so the borrower does not type it again
+      // and the loan officer receives a real property record rather than an
+      // income-only note. The intake source remains self-reported and still
+      // requires normal document review.
+      try {
+        const syncedRentalProperties = await storage.syncIntakeRentalProperties(
+          application.id,
+          userId,
+          formData.incomeSources,
+        );
+        if (syncedRentalProperties.length > 0) {
+          application = (await storage.getLoanApplication(application.id)) ?? application;
+          logAudit(req, "urla.real_estate_owned.intake_synced", "loan_application", application.id, {
+            propertyCount: syncedRentalProperties.length,
+          });
+        }
+      } catch (reoSyncErr) {
+        // The validated incomeSources JSON remains durable and the URLA screen
+        // can still rehydrate it. Keep intake fast and observable rather than
+        // inviting a duplicate application submission.
+        console.error("[Intake] Rental-property URLA sync failed (recoverable):", reoSyncErr);
+      }
+
       // Seed the readiness checklist from what the application already says.
       // Until now nothing fed it from the application — only the document
       // paths wrote to it — so a borrower who had stated income, employer,

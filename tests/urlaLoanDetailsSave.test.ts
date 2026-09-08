@@ -34,9 +34,9 @@ vi.mock("../server/services/trid", () => ({
   evaluateTridTrigger: vi.fn(async () => ({ justTriggered: false, leDueDate: null })),
 }));
 
-const recalcMock = vi.hoisted(() => vi.fn(async () => null));
-vi.mock("../server/services/decisionEngine", () => ({
-  recalculateDecision: recalcMock,
+const refreshAnalysisMock = vi.hoisted(() => vi.fn(async () => null));
+vi.mock("../server/services/loanAnalysis", () => ({
+  refreshEarlyStageIntakeAnalysis: refreshAnalysisMock,
 }));
 
 // The handler's fire-and-forget autopilot fan-out reaches the database; an OFF
@@ -106,7 +106,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
 
   beforeEach(() => {
     h.reset();
-    recalcMock.mockClear();
+    refreshAnalysisMock.mockClear();
     currentUser = { id: "borrower-1", role: "aspiring_owner" };
     h.applications.push({
       id: "app-1",
@@ -144,12 +144,12 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
     });
   });
 
-  it("re-runs the deterministic decision when the values change (loan type is a pricing input)", async () => {
+  it("refreshes the shared preliminary analysis when the values change", async () => {
     const res = await save({
       loanDetails: { preferredLoanType: "va", amortizationType: "fixed" },
     });
     expect(res.status).toBe(200);
-    expect(recalcMock).toHaveBeenCalledWith("app-1", "loan_details_updated");
+    expect(refreshAnalysisMock).toHaveBeenCalledWith("app-1", "urla_updated");
   });
 
   it("rejects an out-of-vocabulary loan type with a 400 and writes nothing", async () => {
@@ -160,7 +160,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
     const body = await res.json();
     expect(body.error).toBe("Invalid loan details");
     expect(h.updates).toHaveLength(0);
-    expect(recalcMock).not.toHaveBeenCalled();
+    expect(refreshAnalysisMock).not.toHaveBeenCalled();
   });
 
   it("rejects a partial section (one field alone would recreate the half-set state)", async () => {
@@ -178,7 +178,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
     });
     expect(res.status).toBe(200);
     expect(h.updates).toHaveLength(0);
-    expect(recalcMock).not.toHaveBeenCalled();
+    expect(refreshAnalysisMock).not.toHaveBeenCalled();
     // The section is still acknowledged so the client can render the truth.
     const body = await res.json();
     expect(body.loanDetails).toEqual({

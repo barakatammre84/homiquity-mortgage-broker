@@ -190,7 +190,10 @@ describe("triageIncomePaths", () => {
       bankStatementAnalysis: { months: 12, totalEligibleDeposits: 240_000 },
     });
     const items = triageIncomePaths(r.paths);
-    expect(items.find((i) => i.itemType === "se_income_review")?.tier).toBe("flagged");
+    // An incomplete worksheet is borrower work, not an officer review item;
+    // officer review begins after the worksheet produces a figure.
+    expect(r.paths.find((p) => p.pathId === "self_employment")?.missingItems).toHaveLength(1);
+    expect(items.find((i) => i.itemType === "se_income_review")).toBeUndefined();
     expect(items.find((i) => i.itemType === "dscr_review")?.tier).toBe("one_click");
     expect(items.find((i) => i.itemType === "bank_statement_review")?.tier).toBe("one_click");
   });

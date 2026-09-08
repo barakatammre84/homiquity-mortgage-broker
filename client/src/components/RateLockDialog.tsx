@@ -231,7 +231,7 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
                     : `${remaining} day${remaining === 1 ? "" : "s"} left`}
                 </Badge>
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+              <dl className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
                 <div>
                   <dt className="inline">Locked </dt>
                   <dd className="inline text-foreground">{new Date(activeLock.lockedAt).toLocaleDateString()}</dd>
@@ -258,7 +258,7 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
             {!activeLock.simulated ? (
             <div className="rounded-md border border-border p-4 space-y-3" data-testid="lock-extension-form">
               <p className="text-sm font-medium">Record a lender-confirmed extension</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="extension-days">Additional days</Label>
                   <Input id="extension-days" type="number" min="1" max="90" value={extensionDays} onChange={(event) => setExtensionDays(event.target.value)} />
@@ -272,7 +272,7 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
                 <Label htmlFor="extension-confirmation">Lender confirmation number</Label>
                 <Input id="extension-confirmation" value={extensionConfirmation} onChange={(event) => setExtensionConfirmation(event.target.value)} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="extension-fee">Extension fee (optional)</Label>
                   <Input id="extension-fee" type="number" min="0" step="0.01" value={extensionFee} onChange={(event) => setExtensionFee(event.target.value)} />
@@ -393,7 +393,7 @@ export function RateLockDialog({ applicationId, borrowerName }: RateLockDialogPr
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="confirmed-rate">Lender-confirmed rate</Label>
                     <Input id="confirmed-rate" type="number" min="0.001" max="99" step="0.001" value={confirmedRate} onChange={(event) => setConfirmedRate(event.target.value)} />

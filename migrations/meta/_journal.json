@@ -456,6 +456,20 @@
       "when": 1788572250000,
       "tag": "0064_reopen_rejected_document_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1788572260000,
+      "tag": "0065_relink_replacement_document_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1788825600000,
+      "tag": "0066_capture_application_real_estate",
+      "breakpoints": true
     }
   ]
 }

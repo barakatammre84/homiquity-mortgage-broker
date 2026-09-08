@@ -96,6 +96,13 @@ export const loanApplications = pgTable("loan_applications", {
   // Multi-income source tracking
   incomeSources: jsonb("income_sources"),
 
+  // URLA section 2c. NULL means the question has not been answered; FALSE is
+  // an explicit borrower/staff confirmation that this application has no
+  // other real estate. Keeping the third state prevents an empty REO table
+  // from being misread as a completed disclosure during lender-readiness
+  // checks.
+  ownsOtherRealEstate: boolean("owns_other_real_estate"),
+
   // S-07 (Fannie B3-3.8-01 / B3-6-06): what happens to the borrower's current
   // primary residence on this purchase. "converted_to_rental" activates the
   // departing-residence rental offset using departingResidence figures.

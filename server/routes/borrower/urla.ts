@@ -1,6 +1,7 @@
 // Borrower routes: URLA sections (personal info/SSN/employment/income/assets/liabilities/property) + bulk save.
 // One registrar in the original registration order — see ./index.ts.
 import type { Express } from "express";
+import { z } from "zod";
 import { isUrlaRowSaveable } from "@shared/lib/urlaRowContent";
 import type { IStorage } from "../../storage";
 import { isAuthenticated } from "../../auth";
@@ -17,6 +18,43 @@ import { evaluateTridTrigger } from "../../services/trid";
 // Exported: the LO-2 scenario route reuses this gate (one access model, no forks).
 import { maskUrlaPersonalInfo } from "./access";
 import { routeParams } from "../../http/routeParams";
+
+const optionalMoney = z.union([z.string(), z.number()])
+  .transform((value) => String(value).replace(/[,$]/g, "").trim())
+  .refine((value) => value === "" || (Number.isFinite(Number(value)) && Number(value) >= 0), "Must be a non-negative dollar amount")
+  .transform((value) => value || undefined)
+  .optional()
+  .nullable();
+
+const realEstateOwnedSaveSchema = z.object({
+  ownsOtherRealEstate: z.boolean(),
+  properties: z.array(z.object({
+    id: z.string().uuid().optional(),
+    propertyAddress: z.string().trim().min(1).max(500),
+    propertyCity: z.string().trim().max(100).optional().nullable(),
+    propertyState: z.string().trim().max(50).optional().nullable(),
+    propertyZip: z.string().trim().max(20).optional().nullable(),
+    propertyType: z.enum(["single_family", "condo", "townhouse", "multi_family", "other"]).optional().nullable(),
+    marketValue: optionalMoney,
+    mortgageBalance: optionalMoney,
+    mortgagePayment: optionalMoney,
+    monthlyRentalIncome: optionalMoney,
+    monthlyInsurance: optionalMoney,
+    monthlyTaxes: optionalMoney,
+    monthlyHoa: optionalMoney,
+    occupancyType: z.enum(["primary", "second_home", "investment"]).optional().nullable(),
+    status: z.enum(["retained", "pending_sale", "sold"]).optional().nullable(),
+    willBeSold: z.boolean().optional().nullable(),
+    willBeRented: z.boolean().optional().nullable(),
+  })).max(100),
+}).superRefine((value, ctx) => {
+  if (value.ownsOtherRealEstate && value.properties.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["properties"], message: "Add at least one property" });
+  }
+  if (!value.ownsOtherRealEstate && value.properties.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["properties"], message: "Properties must be empty when ownership is No" });
+  }
+});
 
 /**
  * B3-6-05, Debts Paid by Others: a liability the borrower says someone else
@@ -455,7 +493,7 @@ export function registerUrlaRoutes(
     try {
       const user = req.user as User;
       const { applicationId } = routeParams(req);
-      const { personalInfo, employmentHistory, otherIncomeSources, assets, liabilities, propertyInfo, loanDetails, declarations, demographics, coApplicants } = req.body;
+      const { personalInfo, employmentHistory, otherIncomeSources, assets, liabilities, propertyInfo, loanDetails, declarations, demographics, coApplicants, realEstateOwned } = req.body;
 
       // Verify the requesting user owns (or has staff access to) this application
       const application = await storage.getLoanApplicationWithAccess(applicationId, user.id, user.role);
@@ -688,6 +726,35 @@ export function registerUrlaRoutes(
             amortizationType: application.amortizationType,
           };
         }
+      }
+
+      // URLA 2c — this section has an explicit yes/no so an empty table can no
+      // longer mean both "none" and "never asked." Replacing the application-
+      // scoped rows also makes removing a property a durable operation instead
+      // of letting it reappear after refetch.
+      if (realEstateOwned !== undefined) {
+        const parsedReo = realEstateOwnedSaveSchema.safeParse(realEstateOwned);
+        if (!parsedReo.success) {
+          return res.status(400).json({
+            error: "Invalid real estate owned details",
+            details: parsedReo.error.flatten(),
+          });
+        }
+        const savedReo = await storage.replaceRealEstateOwnedForApplication(
+          applicationId,
+          application.userId,
+          parsedReo.data.properties as any,
+          parsedReo.data.ownsOtherRealEstate,
+        );
+        if (!savedReo) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+        results.realEstateOwned = savedReo;
+        results.ownsOtherRealEstate = parsedReo.data.ownsOtherRealEstate;
+        await logAudit(req, "urla.real_estate_owned.saved", "loan_application", applicationId, {
+          ownsOtherRealEstate: parsedReo.data.ownsOtherRealEstate,
+          propertyCount: savedReo.length,
+        });
       }
 
       // Other income sources (primary only)

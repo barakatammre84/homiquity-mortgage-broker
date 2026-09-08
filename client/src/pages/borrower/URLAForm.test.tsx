@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { dashboardKeys, urlaKeys } from "@/lib/queryClient";
-import { orderEmploymentRecords, prefillPrimaryEmployment, prefillPrimaryPersonalInfo } from "./urla/types";
+import { orderEmploymentRecords, prefillPrimaryEmployment, prefillPrimaryPersonalInfo, prefillRealEstateOwned } from "./urla/types";
 
 // The #451 defect, for the OTHER borrower.
 //
@@ -56,6 +56,7 @@ const application = {
   purchasePrice: "400000",
   preferredLoanType: "conventional",
   amortizationType: "fixed",
+  ownsOtherRealEstate: false,
 };
 
 describe("URLA intake handoff", () => {
@@ -102,6 +103,46 @@ describe("URLA intake handoff", () => {
       lastName: "Audit",
       email: "jse@test.local",
     });
+  });
+
+  it("carries rental address, rent, and payment into editable URLA property state", () => {
+    const properties = prefillRealEstateOwned([], {
+      ...application,
+      ownsOtherRealEstate: null,
+      incomeSources: [{
+        type: "rental",
+        annualAmount: "36000",
+        rentalProperties: [{
+          address: "233 South Wacker Drive",
+          city: "Chicago",
+          state: "IL",
+          monthlyRentalIncome: "3000",
+          monthlyDebtPayment: "1450",
+        }],
+      }],
+    } as never);
+
+    expect(properties).toEqual([expect.objectContaining({
+      propertyAddress: "233 South Wacker Drive",
+      propertyCity: "Chicago",
+      propertyState: "IL",
+      monthlyRentalIncome: "3000",
+      mortgagePayment: "1450",
+      occupancyType: "investment",
+      verificationSource: "borrower_intake",
+    })]);
+  });
+
+  it("keeps saved URLA property details instead of overwriting them from intake", () => {
+    const saved = [{ id: "reo-1", propertyAddress: "Corrected address", marketValue: "525000" }];
+    expect(prefillRealEstateOwned(saved as never, {
+      ...application,
+      incomeSources: [{
+        type: "rental",
+        annualAmount: "12000",
+        rentalProperties: [{ address: "Old intake address", monthlyRentalIncome: "1000" }],
+      }],
+    } as never)).toBe(saved);
   });
 
   it("falls back through blank values from a partial URLA row", () => {
@@ -221,6 +262,7 @@ function renderPage() {
     hmdaDemographics: [],
     otherIncomeSources: [],
     propertyInfo: {},
+    realEstateOwned: [],
   });
 
   return render(
@@ -413,6 +455,7 @@ describe("URLAForm — the progress bar counts the application, not the open tab
     hmdaDemographics: [],
     otherIncomeSources: [],
     propertyInfo: { propertyStreet: "1 Main St", propertyValue: "400000" },
+    realEstateOwned: [],
   };
 
   /** Same file, plus a co-borrower with nothing but a name. */
@@ -443,9 +486,9 @@ describe("URLAForm — the progress bar counts the application, not the open tab
   it("counts the co-borrower's unfinished sections instead of reporting the file nearly done", async () => {
     renderWith(WITH_COBORROWER);
 
-    // 4 primary sections + 1 shared, out of 6 per-borrower × 2 + 1 shared.
+    // 4 primary sections + 2 shared, out of 6 per-borrower × 2 + 2 shared.
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 13 sections complete");
+    expect(progress.textContent).toContain("6 of 14 sections complete");
   });
 
   it("does not change when the borrower switches tabs — one file, one number", async () => {
@@ -454,14 +497,14 @@ describe("URLAForm — the progress bar counts the application, not the open tab
     fireEvent.click(await screen.findByTestId("button-borrower-co"));
 
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 13 sections complete");
+    expect(progress.textContent).toContain("6 of 14 sections complete");
   });
 
-  it("stays at seven sections on a single-borrower file", async () => {
+  it("stays at eight sections on a single-borrower file", async () => {
     renderWith(PRIMARY_DONE);
 
     const progress = await screen.findByTestId("text-urla-progress");
-    expect(progress.textContent).toContain("5 of 7 sections complete");
+    expect(progress.textContent).toContain("6 of 8 sections complete");
     expect(progress.textContent).not.toContain("co-borrower");
   });
 });

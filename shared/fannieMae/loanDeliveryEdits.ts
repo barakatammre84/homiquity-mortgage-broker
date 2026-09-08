@@ -634,12 +634,12 @@ export function evaluateLoanDeliveryEdits(data: LoanDeliveryDataset): LoanDelive
     }
   }
 
-  if (
-    (data.propertyUsageType === "SecondHome" || data.propertyUsageType === "Investment") &&
-    data.financedPropertiesCount != null &&
-    data.financedPropertiesCount > 6
-  ) {
-    fail("6439", "EarlyCheck", "The number of mortgaged properties must be less than or equal to six for second home and investment property loans.", ["FinancedPropertiesCount", "PropertyUsageType"]);
+  if (data.propertyUsageType === "SecondHome" || data.propertyUsageType === "Investment") {
+    if (data.financedPropertiesCount == null) {
+      skip("6439", "EarlyCheck", "Financed property count has not been confirmed for this application.");
+    } else if (data.financedPropertiesCount > 6) {
+      fail("6439", "EarlyCheck", "The number of mortgaged properties must be less than or equal to six for second home and investment property loans.", ["FinancedPropertiesCount", "PropertyUsageType"]);
+    }
   }
 
   // -------------------------------------------------------------------------

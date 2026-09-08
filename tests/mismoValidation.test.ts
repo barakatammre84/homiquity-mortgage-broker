@@ -55,6 +55,7 @@ function baseApplication(overrides: Record<string, any> = {}) {
     propertyZip: "78701",
     ltvRatio: "80",
     dtiRatio: "36",
+    ownsOtherRealEstate: false,
     // ARM fields (only relevant when amortizationType === "adjustable")
     armIndexType: null,
     armMargin: null,
@@ -865,8 +866,18 @@ describe("conditional real-estate-owned detail requirements (section 2c)", () =>
     expect(reo.missingFields).toEqual([]);
   });
 
+  it("does not treat an unanswered ownership question as a completed disclosure", async () => {
+    setFixtures({
+      application: { ownsOtherRealEstate: null },
+      urla: baseUrla({ realEstateOwned: [] }),
+    });
+    const result = await validateMISMOCompleteness("app-1");
+    expect(sectionByNumber(result, "2c").missingFields).toContain("Real estate ownership reviewed");
+  });
+
   it("requires every REO detail field once a property is listed", async () => {
     setFixtures({
+      application: { ownsOtherRealEstate: true },
       urla: baseUrla({
         realEstateOwned: [
           {

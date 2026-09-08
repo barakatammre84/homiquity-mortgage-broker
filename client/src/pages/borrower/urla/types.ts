@@ -1,6 +1,6 @@
 import { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES } from "@shared/statusVocabularies";
 import { URLA_LIABILITY_TYPES } from "@shared/liabilityTypes";
-import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
+import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, RealEstateOwned, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
 import { OTHER_INCOME_LABELS } from "@shared/incomeTypes";
 // SSN and account numbers are WRITE-ONLY virtual fields: the server encrypts
 // them at rest and never returns the value — responses carry only ssnLast4 /
@@ -10,6 +10,7 @@ import { OTHER_INCOME_LABELS } from "@shared/incomeTypes";
 export type PersonalInfoForm = Partial<UrlaPersonalInfo>;
 export type AssetForm = Partial<UrlaAsset> & { accountNumber?: string };
 export type LiabilityForm = Partial<UrlaLiability> & { accountNumber?: string };
+export type RealEstateOwnedForm = Partial<RealEstateOwned>;
 
 export interface DemographicsState {
   ethnicityHispanicLatino: boolean;
@@ -51,6 +52,10 @@ export interface UrlaSavePayload extends SectionsPayload {
   propertyInfo: Partial<UrlaPropertyInfo>;
   /** Section 4a — loan type + amortization type (loan_applications columns). */
   loanDetails: UrlaLoanDetails;
+  realEstateOwned?: {
+    ownsOtherRealEstate: boolean;
+    properties: RealEstateOwnedForm[];
+  };
   coApplicants?: SectionsPayload[];
 }
 
@@ -181,6 +186,34 @@ export function prefillPrimaryEmployment(
     baseIncome: monthlyFromAnnual(app.annualIncome),
     borrowerSequenceNumber: 1,
   }];
+}
+
+/** Carry every rental the borrower already described into editable URLA 2c state. */
+export function prefillRealEstateOwned(
+  existing: RealEstateOwned[],
+  app: LoanApplication,
+): RealEstateOwnedForm[] {
+  if (existing.length > 0) return existing;
+  if (app.ownsOtherRealEstate === false) return [];
+
+  return (Array.isArray(app.incomeSources) ? app.incomeSources : [])
+    .filter((source): source is IncomeSourceEntry => {
+      const candidate = source as Partial<IncomeSourceEntry> | null;
+      return !!candidate && candidate.type === "rental";
+    })
+    .flatMap((source) => source.rentalProperties ?? [])
+    .map((property) => ({
+      propertyAddress: property.address,
+      propertyCity: property.city ?? null,
+      propertyState: property.state ?? null,
+      propertyType: "single_family",
+      mortgagePayment: property.monthlyDebtPayment || null,
+      monthlyRentalIncome: property.monthlyRentalIncome,
+      occupancyType: "investment",
+      status: "retained",
+      willBeRented: true,
+      verificationSource: "borrower_intake",
+    }));
 }
 
 export const hmdaToState = (h: HmdaDemographics): DemographicsState => ({

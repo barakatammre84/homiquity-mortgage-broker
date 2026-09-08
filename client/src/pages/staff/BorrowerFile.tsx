@@ -41,7 +41,7 @@ import { canReviewDocuments } from "@shared/documentStatus";
 import { formatCurrency } from "@/lib/formatters";
 import { DocumentReviewPanel } from "@/components/staff/DocumentReviewPanel";
 import { CREDIT_DECISION_ROLES, FINANCIAL_VERIFICATION_ROLES } from "@shared/loanApplicationStatus";
-import type { UrlaPersonalInfo } from "@shared/schema";
+import type { RealEstateOwned, UrlaPersonalInfo } from "@shared/schema";
 import { type ApplicationData, type PipelineData } from "./borrowerFile/model";
 import { StatusUpdateDialog } from "./borrowerFile/StatusUpdateDialog";
 import { CompensationCard } from "./borrowerFile/CompensationCard";
@@ -118,7 +118,10 @@ export default function BorrowerFile() {
     enabled: !!applicationId && !authLoading,
   });
 
-  const { data: urlaData } = useQuery<{ personalInfo: UrlaPersonalInfo | null }>({
+  const { data: urlaData } = useQuery<{
+    personalInfo: UrlaPersonalInfo | null;
+    realEstateOwned: RealEstateOwned[];
+  }>({
     queryKey: urlaKeys.detail(applicationId),
     enabled: !!applicationId && !authLoading,
   });
@@ -174,6 +177,7 @@ export default function BorrowerFile() {
   const acceptedDocuments = documents.filter(document => document.status === "verified").length;
   const conditionProgress = pipelineData?.progress.conditions;
   const personalInfo = urlaData?.personalInfo;
+  const ownedProperties = urlaData?.realEstateOwned ?? [];
 
   if (!application) {
     return (
@@ -452,7 +456,7 @@ export default function BorrowerFile() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
                           <span className="text-muted-foreground">Name:</span>
                           <span>{personalInfo?.firstName || "N/A"} {personalInfo?.lastName || ""}</span>
                           <span className="text-muted-foreground">Email:</span>
@@ -473,7 +477,7 @@ export default function BorrowerFile() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
                           <span className="text-muted-foreground">Type:</span>
                           <span className="capitalize">{application.employmentType || "N/A"}</span>
                           <span className="text-muted-foreground">Employer:</span>
@@ -494,7 +498,7 @@ export default function BorrowerFile() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
                           <span className="text-muted-foreground">Address:</span>
                           <span>{application.propertyAddress || "N/A"}</span>
                           <span className="text-muted-foreground">City/State:</span>
@@ -515,7 +519,7 @@ export default function BorrowerFile() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
                           <span className="text-muted-foreground">Purpose:</span>
                           <span className="capitalize">{application.loanPurpose || "Purchase"}</span>
                           <span className="text-muted-foreground">Down Payment:</span>
@@ -525,6 +529,52 @@ export default function BorrowerFile() {
                           <span className="text-muted-foreground">{hasDecisionGradeDti ? "DTI:" : "Preliminary DTI:"}</span>
                           <span>{application.dtiRatio ? `${Number(application.dtiRatio).toFixed(1)}%` : "N/A"}</span>
                         </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="md:col-span-2" data-testid="card-owned-properties">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Home className="h-5 w-5" />
+                          Properties Owned
+                          <Badge variant="secondary">{ownedProperties.length}</Badge>
+                        </CardTitle>
+                        <CardDescription>
+                          One record feeds rental income, property obligations, reserves, and lender delivery.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {application.ownsOtherRealEstate === null || application.ownsOtherRealEstate === undefined ? (
+                          <p className="text-sm text-warning-subtle-foreground">
+                            Ownership has not been confirmed. Ask the borrower to complete URLA section 2c.
+                          </p>
+                        ) : application.ownsOtherRealEstate === false ? (
+                          <p className="text-sm text-muted-foreground">Borrower reported no other real estate.</p>
+                        ) : ownedProperties.length === 0 ? (
+                          <p className="text-sm text-warning-subtle-foreground">
+                            Borrower reported owning real estate, but no property details are on file.
+                          </p>
+                        ) : (
+                          ownedProperties.map((property, index) => (
+                            <div key={property.id} className="rounded-lg border p-3" data-testid={`owned-property-${index}`}>
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <p className="font-medium">{property.propertyAddress}</p>
+                                <div className="flex gap-2">
+                                  <Badge variant="outline" className="capitalize">
+                                    {(property.occupancyType || "use not provided").replace(/_/g, " ")}
+                                  </Badge>
+                                  {!property.verifiedAt && <Badge variant="secondary">Borrower reported</Badge>}
+                                </div>
+                              </div>
+                              <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                <span><span className="text-muted-foreground">Value: </span>{property.marketValue != null ? formatCurrency(property.marketValue) : "Needed"}</span>
+                                <span><span className="text-muted-foreground">Mortgage balance: </span>{property.mortgageBalance != null ? formatCurrency(property.mortgageBalance) : "Needed"}</span>
+                                <span><span className="text-muted-foreground">Monthly payment: </span>{property.mortgagePayment != null ? formatCurrency(property.mortgagePayment) : "Needed"}</span>
+                                <span><span className="text-muted-foreground">Monthly rent: </span>{property.monthlyRentalIncome != null ? formatCurrency(property.monthlyRentalIncome) : "None reported"}</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </CardContent>
                     </Card>
                   </div>

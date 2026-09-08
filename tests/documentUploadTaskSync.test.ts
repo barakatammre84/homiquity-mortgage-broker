@@ -58,7 +58,12 @@ describe("document upload borrower-task synchronization", () => {
     });
     expect(storageMocks.updateTask).toHaveBeenCalledWith("task-profit-loss", {
       status: "IN_PROGRESS",
+      completedAt: null,
       verificationStatus: "pending",
+      verifiedByUserId: null,
+      verifiedAt: null,
+      verificationNotes: null,
+      documentInstructions: null,
     });
   });
 
@@ -93,6 +98,42 @@ describe("document upload borrower-task synchronization", () => {
 
     expect(storageMocks.createTaskDocument).not.toHaveBeenCalled();
     expect(storageMocks.updateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("reopens completed borrower work when its accepted version is replaced", async () => {
+    storageMocks.getTasksByApplication.mockResolvedValue([
+      task({ status: "COMPLETED", completedAt: new Date(), verificationStatus: "verified" }),
+    ]);
+    storageMocks.getTaskDocuments.mockResolvedValue([
+      { id: "link-old", documentId: "doc-old", isVerified: true },
+    ]);
+
+    const result = await advanceMatchingDocumentTasks({
+      applicationId: "app-1",
+      documentId: "doc-new",
+      documentType: "profit_loss",
+      replacesDocumentId: "doc-old",
+    });
+
+    expect(result.advancedTaskIds).toEqual(["task-profit-loss"]);
+    expect(storageMocks.updateTaskDocument).toHaveBeenCalledWith("link-old", {
+      isVerified: false,
+      verificationNotes: "Superseded by a newer document version",
+    });
+    expect(storageMocks.createTaskDocument).toHaveBeenCalledWith({
+      taskId: "task-profit-loss",
+      documentId: "doc-new",
+    });
+    expect(storageMocks.updateTask).toHaveBeenCalledWith(
+      "task-profit-loss",
+      expect.objectContaining({
+        status: "IN_PROGRESS",
+        completedAt: null,
+        verificationStatus: "pending",
+        verifiedByUserId: null,
+        verifiedAt: null,
+      }),
+    );
   });
 });
 

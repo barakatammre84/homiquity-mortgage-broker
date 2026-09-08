@@ -20,6 +20,7 @@ import type {
   UrlaLiability,
   UrlaPropertyInfo,
   OtherIncomeSource,
+  RealEstateOwned,
   BorrowerDeclarations,
   HmdaDemographics,
 } from "@shared/schema";
@@ -45,11 +46,13 @@ import {
   prefillPrimaryEmployment,
   orderEmploymentRecords,
   prefillPrimaryPersonalInfo,
+  prefillRealEstateOwned,
   toLoanDetailsState,
   type AssetForm,
   type BorrowerSlice,
   type LiabilityForm,
   type PersonalInfoForm,
+  type RealEstateOwnedForm,
   type SectionsPayload,
   type UrlaSavePayload,
 } from "./urla/types";
@@ -63,6 +66,7 @@ import { LiabilitiesSection } from "./urla/LiabilitiesSection";
 import { PropertySection } from "./urla/PropertySection";
 import { DeclarationsSection } from "./urla/DeclarationsSection";
 import { DemographicsSection } from "./urla/DemographicsSection";
+import { RealEstateOwnedSection } from "./urla/RealEstateOwnedSection";
 
 interface DashboardData {
   applications: LoanApplication[];
@@ -80,12 +84,15 @@ interface UrlaData {
   declarations?: BorrowerDeclarations | null;
   allDeclarations?: BorrowerDeclarations[];
   hmdaDemographics?: HmdaDemographics[];
+  realEstateOwned?: RealEstateOwned[];
 }
 
 interface StepContext {
   slice: BorrowerSlice;
   otherIncomes: Partial<OtherIncomeSource>[];
   propertyInfo: Partial<UrlaPropertyInfo>;
+  realEstateOwned: RealEstateOwnedForm[];
+  ownsOtherRealEstate: boolean | null;
   app: LoanApplication;
 }
 
@@ -109,6 +116,7 @@ type UrlaStepId =
   | "employment"
   | "assets"
   | "liabilities"
+  | "real-estate"
   | "property"
   | "declarations"
   | "demographics";
@@ -167,6 +175,23 @@ const STEPS: UrlaStep[] = [
       slice.liabilities.some((l) => l.liabilityType || l.creditorName),
   },
   {
+    id: "real-estate",
+    label: "Properties you own",
+    estimate: "~2 min",
+    intro: "One property record powers rental income, monthly obligations, reserves, and the lender package — review it once here.",
+    isComplete: ({ ownsOtherRealEstate, realEstateOwned }) =>
+      ownsOtherRealEstate === false || (
+        ownsOtherRealEstate === true &&
+        realEstateOwned.length > 0 &&
+        realEstateOwned.every((property) =>
+          !!property.propertyAddress &&
+          property.marketValue !== null && property.marketValue !== undefined && property.marketValue !== "" &&
+          property.mortgageBalance !== null && property.mortgageBalance !== undefined && property.mortgageBalance !== "" &&
+          !!(property.status || property.occupancyType),
+        )
+      ),
+  },
+  {
     id: "property",
     label: "Property & loan",
     estimate: "~2 min",
@@ -205,7 +230,7 @@ const STEPS: UrlaStep[] = [
  * total counts them once no matter how many borrowers are on it. Every other
  * step reads `slice`, and therefore exists once PER borrower.
  */
-const SHARED_STEP_IDS: ReadonlySet<UrlaStepId> = new Set<UrlaStepId>(["property"]);
+const SHARED_STEP_IDS: ReadonlySet<UrlaStepId> = new Set<UrlaStepId>(["real-estate", "property"]);
 
 export default function URLAForm() {
   const queryClient = useQueryClient();
@@ -246,6 +271,8 @@ export default function URLAForm() {
   // Shared (primary-only) data
   const [otherIncomes, setOtherIncomes] = useState<Partial<OtherIncomeSource>[]>([]);
   const [propertyInfo, setPropertyInfo] = useState<Partial<UrlaPropertyInfo>>({});
+  const [realEstateOwned, setRealEstateOwned] = useState<RealEstateOwnedForm[]>([]);
+  const [ownsOtherRealEstate, setOwnsOtherRealEstate] = useState<boolean | null>(null);
   // Section 4a (WF2-F4): borrower-stated loan type + amortization type, with
   // borrower-safe defaults preselected — visible and editable, never a silent
   // server-side default. Saved to the loan_applications columns section-4
@@ -295,6 +322,14 @@ export default function URLAForm() {
     setBorrowerData({ 1: buildSlice(1), 2: buildSlice(2) });
     setOtherIncomes(urlaData.otherIncomeSources?.length ? urlaData.otherIncomeSources : []);
     setPropertyInfo(urlaData.propertyInfo || {});
+    const carriedRealEstate = prefillRealEstateOwned(
+      urlaData.realEstateOwned || [],
+      urlaData.application,
+    );
+    setRealEstateOwned(carriedRealEstate);
+    setOwnsOtherRealEstate(
+      urlaData.application.ownsOtherRealEstate ?? (carriedRealEstate.length > 0 ? true : null),
+    );
     setLoanDetails(toLoanDetailsState(urlaData.application));
 
     const hasCo =
@@ -389,6 +424,13 @@ export default function URLAForm() {
           ? `one ${whose}${noun} row still needs ${missing.join(" and ")}`
           : `${blocked.length} ${whose}${noun} rows still need ${missing.join(" and ")}`,
       );
+    }
+    if (ownsOtherRealEstate === null) {
+      notes.push("the properties-you-own question still needs Yes or No");
+    } else if (ownsOtherRealEstate && realEstateOwned.length === 0) {
+      notes.push("the properties-you-own section still needs a property");
+    } else if (ownsOtherRealEstate && realEstateOwned.some((property) => !property.propertyAddress?.trim())) {
+      notes.push("one property row still needs its address");
     }
     return notes;
   };
@@ -496,6 +538,18 @@ export default function URLAForm() {
       loanDetails,
     };
 
+    const realEstateRowsHaveAddresses =
+      realEstateOwned.length > 0 && realEstateOwned.every((property) => !!property.propertyAddress?.trim());
+    if (
+      ownsOtherRealEstate === false ||
+      (ownsOtherRealEstate === true && realEstateRowsHaveAddresses)
+    ) {
+      payload.realEstateOwned = {
+        ownsOtherRealEstate,
+        properties: ownsOtherRealEstate ? realEstateOwned : [],
+      };
+    }
+
     if (hasCoBorrower) {
       payload.coApplicants = [buildSectionsPayload(borrowerData[2] ?? emptySlice())];
     }
@@ -585,7 +639,14 @@ export default function URLAForm() {
   }
 
   const app = urlaData?.application || activeApplication;
-  const stepContext: StepContext = { slice, otherIncomes, propertyInfo, app };
+  const stepContext: StepContext = {
+    slice,
+    otherIncomes,
+    propertyInfo,
+    realEstateOwned,
+    ownsOtherRealEstate,
+    app,
+  };
 
   // The rail's check marks are per-borrower — the "Editing for:" control above
   // says whose, so that scope is right. The progress bar is not: it is labelled
@@ -614,6 +675,8 @@ export default function URLAForm() {
           slice: borrowerData[seq] ?? emptySlice(),
           otherIncomes,
           propertyInfo,
+          realEstateOwned,
+          ownsOtherRealEstate,
           app,
         };
         if (step.isComplete(ctx)) acc.done += 1;
@@ -813,6 +876,15 @@ export default function URLAForm() {
 
               <TabsContent value={"liabilities" satisfies UrlaStepId} className="mt-0 space-y-6">
                 <LiabilitiesSection liabilities={slice.liabilities} onChange={setLiabilities} />
+              </TabsContent>
+
+              <TabsContent value={"real-estate" satisfies UrlaStepId} className="mt-0 space-y-6">
+                <RealEstateOwnedSection
+                  ownsOtherRealEstate={ownsOtherRealEstate}
+                  properties={realEstateOwned}
+                  onOwnershipChange={setOwnsOtherRealEstate}
+                  onChange={setRealEstateOwned}
+                />
               </TabsContent>
 
               <TabsContent value={"property" satisfies UrlaStepId} className="mt-0 space-y-6">

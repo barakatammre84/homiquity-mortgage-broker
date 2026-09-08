@@ -448,28 +448,48 @@ export async function advanceMatchingDocumentTasks(args: {
   applicationId: string;
   documentId: string;
   documentType: string;
+  replacesDocumentId?: string;
 }): Promise<{ advancedTaskIds: string[] }> {
-  const { applicationId, documentId, documentType } = args;
+  const { applicationId, documentId, documentType, replacesDocumentId } = args;
   const tasks = await storage.getTasksByApplication(applicationId);
-  const matches = tasks.filter(
-    (task) =>
-      task.taskType === "document_request" &&
-      task.ownerRole === "BORROWER" &&
-      task.status !== "COMPLETED" &&
-      task.status !== "EXPIRED" &&
-      !!task.documentCategory &&
-      documentTypesMatch(task.documentCategory, documentType),
-  );
+  const matches: typeof tasks = [];
 
-  for (const task of matches) {
+  for (const task of tasks) {
+    if (
+      task.taskType !== "document_request" ||
+      task.ownerRole !== "BORROWER" ||
+      task.status === "EXPIRED" ||
+      !task.documentCategory ||
+      !documentTypesMatch(task.documentCategory, documentType)
+    ) continue;
     const existingDocuments = await storage.getTaskDocuments(task.id);
+    const replacedLink = replacesDocumentId
+      ? existingDocuments.find((entry) => entry.documentId === replacesDocumentId)
+      : undefined;
+    // A routine extra upload must not reopen completed work. A true lineage
+    // replacement is different: the accepted version is no longer current, so
+    // this task must follow the replacement back through review.
+    if (task.status === "COMPLETED" && !replacedLink) continue;
+
+    if (replacedLink) {
+      await storage.updateTaskDocument(replacedLink.id, {
+        isVerified: false,
+        verificationNotes: "Superseded by a newer document version",
+      });
+    }
     if (!existingDocuments.some((entry) => entry.documentId === documentId)) {
       await storage.createTaskDocument({ taskId: task.id, documentId });
     }
     await storage.updateTask(task.id, {
       status: "IN_PROGRESS",
+      completedAt: null,
       verificationStatus: "pending",
+      verifiedByUserId: null,
+      verifiedAt: null,
+      verificationNotes: null,
+      documentInstructions: null,
     });
+    matches.push(task);
   }
 
   return { advancedTaskIds: matches.map((task) => task.id) };

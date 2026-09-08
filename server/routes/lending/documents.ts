@@ -328,6 +328,7 @@ export function registerDocumentRoutes(
                 applicationId,
                 documentId: document.id,
                 documentType,
+                replacesDocumentId: parsed.data.replacesDocumentId,
               });
               await matchUploadedDocumentToConditions({
                 applicationId,

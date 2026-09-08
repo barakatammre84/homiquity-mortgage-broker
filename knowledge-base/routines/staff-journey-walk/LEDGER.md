@@ -18,7 +18,7 @@ together — the client lane's two ledgers already drift (#644 updated one and n
 
 | date | desk | server (commit · port) | sessions held | verdict | report |
 |---|---|---|---|---|---|
-| — | — | — | — | — | *(none yet)* |
+| 2026-09-07 | **S1 — Loan officer, core-file leg** | `codex/end-to-end-journey` · :5021 | fictional complex borrower ⇄ `lo@test.com` | **WARN — the central application-to-officer path passes, but this was not the charter's full invite + pool + retirement walk.** Queue search/open, income/property provenance, document correction and letter/AUS/export/submission gates were driven in the browser. Rotation does not advance. | [2026-09-07-complex-borrower-lo-loop.md](../../feature-review/journey-walks/2026-09-07-complex-borrower-lo-loop.md) |
 
 ## Standing notes for the next walker
 
