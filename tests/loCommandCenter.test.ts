@@ -95,6 +95,13 @@ describe("pipeline queue scoping + fileHealth contract", () => {
     expect(Array.isArray(loQueue)).toBe(true);
     expect(Array.isArray(adminQueue)).toBe(true);
 
+    // The queue's identity is the application, not a deal-team membership.
+    // Historical rows can repeat the same staffer/file pairing, and one person
+    // may legitimately hold multiple roles on one file. Neither may inflate the
+    // workload count or render the same borrower more than once.
+    expect(new Set(loQueue.map(q => q.applicationId)).size).toBe(loQueue.length);
+    expect(new Set(adminQueue.map(q => q.applicationId)).size).toBe(adminQueue.length);
+
     // The LO's view must be a subset of the platform-wide (admin) view: any
     // file visible to the LO without admin seeing it would mean the two
     // paths disagree about what exists.
