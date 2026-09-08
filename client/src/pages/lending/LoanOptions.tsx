@@ -19,6 +19,7 @@ import { LoanOptionCard } from "./loanOptions/LoanOptionCard";
 import { LoanLetterButton } from "./loanOptions/LoanLetterButton";
 import { WhatIfPanel } from "./loanOptions/WhatIfPanel";
 import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
+import { getLoanOptionsPresentation } from "./loanOptions/loanOptionsPresentation";
 
 interface LoanOptionsData {
   application: LoanApplication;
@@ -126,35 +127,30 @@ export default function LoanOptions() {
   const preApprovalAmount = application.preApprovalAmount
     ? formatCurrency(application.preApprovalAmount)
     : formatCurrency(application.purchasePrice || "0");
-  // Only a pre-approved (or further-along) file gets the congratulations
-  // header. Anything still in front of an underwriter gets the honest state.
-  const awaitingDecision = !financialsVerified || ["draft", "submitted", "analyzing", "under_review", "denied"].includes(application.status);
+  const presentation = getLoanOptionsPresentation({
+    status: application.status,
+    financialsVerified,
+    hasOptions: options.length > 0,
+  });
 
   return (
     <div className="min-h-screen">
       <div className="bg-gradient-to-b from-primary/5 to-surface py-12">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            {awaitingDecision ? (
+            {presentation.kind === "estimate" ? (
               <>
                 <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-warning-subtle px-4 py-1.5">
                   <Clock className="h-4 w-4 text-warning-subtle-foreground" />
                   <span className="text-sm font-medium text-warning-subtle-foreground">
-                    Under Review
+                    {presentation.badge}
                   </span>
                 </div>
-                {/* Broker rail: Homiquity arranges financing and does not make
-                    credit decisions or fund loans — the standing disclosure in
-                    this page's own footer. This read "Your application is with
-                    our underwriting team / A licensed underwriter is reviewing
-                    your numbers", which two independent journey walks flagged
-                    against that disclosure a few hundred pixels below it. */}
                 <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                  Your file is being prepared for review
+                  {presentation.title}
                 </h1>
                 <p className="mt-4 text-muted-foreground" data-testid="text-under-review">
-                  We're getting your numbers ready for a lending partner to review — check your
-                  dashboard for what was flagged. The scenarios below are estimates, not offers.
+                  {presentation.description}
                 </p>
               </>
             ) : (
@@ -162,17 +158,17 @@ export default function LoanOptions() {
                 <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-success-subtle px-4 py-1.5">
                   <CheckCircle2 className="h-4 w-4 text-success-subtle-foreground" />
                   <span className="text-sm font-medium text-success-subtle-foreground">
-                    Pre-Approved
+                    {presentation.badge}
                   </span>
                 </div>
                 <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                  Congratulations! You're pre-approved for
+                  {presentation.title}
                 </h1>
                 <p className="mt-4 text-5xl font-bold text-primary" data-testid="text-preapproval-amount">
                   {preApprovalAmount}
                 </p>
                 <p className="mt-4 text-muted-foreground">
-                  Compare your loan options below and lock in your rate today.
+                  {presentation.description}
                 </p>
               </>
             )}

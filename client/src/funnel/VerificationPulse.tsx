@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2 } from "lucide-react";
+import { Logo } from "@/components/brand/Logo";
 
 /**
  * The "backstage pass" during submission: instead of a generic spinner, show
@@ -13,10 +14,10 @@ import { CheckCircle2 } from "lucide-react";
 const STAGE_INTERVAL_MS = 1400;
 
 export const PRE_APPROVAL_STAGES = [
-  "Reviewing your financial profile…",
-  "Computing your ratios (DTI · LTV)…",
-  "Building your loan scenarios…",
-  "Finalizing your decision…",
+  "Saving your application…",
+  "Checking the information you provided…",
+  "Building estimated loan scenarios…",
+  "Preparing your next steps…",
 ] as const;
 
 export function VerificationPulse({
@@ -55,9 +56,12 @@ export function VerificationPulse({
             animate={{ scale: 1, opacity: 1 }}
             className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-lg"
           >
-            <p className="mb-5 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Working on your pre-approval
-            </p>
+            <div className="mb-5 flex flex-col items-center gap-3 text-center">
+              <Logo size="sm" data-testid="logo-submit-transition" />
+              <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Submitting your application
+              </p>
+            </div>
             <div className="space-y-3">
               {stages.map((label, i) => {
                 const done = i < stageIndex;

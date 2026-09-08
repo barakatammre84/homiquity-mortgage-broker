@@ -5,11 +5,9 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ShellBadges } from "@/hooks/useShellBadges";
 
-// The notification-bell badge count. Pins the M1/M2 consolidation: the count is
-// sourced ENTIRELY from the shared shell-badges poll (unreadMessages +
-// unreadNotifications + pendingTasks), no longer a sum of a second /api/dashboard
-// poll drilled through props. Staff have no borrower task queue, so pendingTasks
-// is suppressed for them — matching the sidebar and mobile nav exactly.
+// The notification-bell badge count. The bell opens a notification/activity
+// panel, so its badge measures unread notifications only. Messages and borrower
+// actions each have their own navigation badge and must not be added here.
 
 let badges: ShellBadges;
 let role: string;
@@ -46,23 +44,22 @@ beforeEach(() => {
 });
 
 describe("NotificationsBell badge count", () => {
-  it("sums all three shell-badge axes for a borrower", () => {
+  it("shows unread notifications only for a borrower", () => {
     badges = { unreadMessages: 2, unreadNotifications: 1, pendingTasks: 3 };
     role = "active_buyer";
     renderBell();
-    expect(screen.getByTestId("badge-notification-count").textContent).toBe("6");
+    expect(screen.getByTestId("badge-notification-count").textContent).toBe("1");
   });
 
-  it("suppresses pendingTasks for staff (matches sidebar/mobile-nav)", () => {
+  it("uses the same notification-only meaning for staff", () => {
     badges = { unreadMessages: 2, unreadNotifications: 1, pendingTasks: 3 };
     role = "lo";
     renderBell();
-    // 2 + 1, pendingTasks dropped.
-    expect(screen.getByTestId("badge-notification-count").textContent).toBe("3");
+    expect(screen.getByTestId("badge-notification-count").textContent).toBe("1");
   });
 
   it("caps the display at 9+", () => {
-    badges = { unreadMessages: 8, unreadNotifications: 5, pendingTasks: 0 };
+    badges = { unreadMessages: 0, unreadNotifications: 12, pendingTasks: 0 };
     role = "active_buyer";
     renderBell();
     expect(screen.getByTestId("badge-notification-count").textContent).toBe("9+");

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, taskKeys, dashboardKeys, applicationResourceKeys } from "@/lib/queryClient";
+import { apiRequest, taskKeys, dashboardKeys, applicationResourceKeys, loanApplicationKeys } from "@/lib/queryClient";
 import { friendlyApiError } from "@/lib/errorMessage";
 import { titleCaseFromSnake } from "@/lib/formatters";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import type { Task, LoanApplication, TaskPriority } from "@shared/schema";
 import { useActiveApplication } from "@/hooks/useActiveApplication";
+import { useBorrowerActionItems } from "@/hooks/useBorrowerActionItems";
 import {
   CheckCircle2,
   Clock,
@@ -28,6 +29,7 @@ import {
   Calendar,
   File,
   X,
+  CheckSquare,
 } from "lucide-react";
 import { format } from "date-fns";
 import { PageShell } from "@/components/PageShell";
@@ -94,6 +96,21 @@ function getDocumentCategoryLabel(category: string) {
   return labels[category] || titleCaseFromSnake(category);
 }
 
+function getDocumentTaskLabel(
+  task: Pick<Task, "documentCategory" | "title" | "description">,
+) {
+  if (
+    task.documentCategory === "tax_return" &&
+    /schedule e/i.test(`${task.title} ${task.description ?? ""}`)
+  ) {
+    return "Rental Tax Return & Schedule E";
+  }
+
+  return task.documentCategory
+    ? getDocumentCategoryLabel(task.documentCategory)
+    : task.title;
+}
+
 export default function Tasks() {
   const queryClient = useQueryClient();
   const { user, isLoading: authLoading } = useAuth();
@@ -113,6 +130,7 @@ export default function Tasks() {
   // hook call after the loading/error early returns below.
   const applications = dashboardData?.applications || [];
   const { activeApplication } = useActiveApplication(applications);
+  const { data: actionItemsData } = useBorrowerActionItems(activeApplication?.id);
 
   const {
     data: tasks,
@@ -132,6 +150,7 @@ export default function Tasks() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItemsRoot() });
       toast({ title: "Task updated", description: "Your task has been updated." });
     },
     onError: (error: Error) => {
@@ -174,6 +193,7 @@ export default function Tasks() {
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
       queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItems(selectedTask.applicationId) });
       // Was ["/api/documents"] — a key no client query reads. The upload also
       // satisfies a checklist item, so refresh the checklist root.
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.all() });
@@ -259,6 +279,9 @@ export default function Tasks() {
   // drop the percentage, making their progress run backwards.
   const totalTasks = myTasks.length;
   const completedCount = completedTasks.length;
+  const additionalActions = (actionItemsData?.items ?? []).filter(
+    (item) => !myTasks.some((task) => task.id === item.id),
+  );
 
   const openUploadDialog = (task: Task) => {
     setSelectedTask(task);
@@ -268,7 +291,7 @@ export default function Tasks() {
   return (
     <>
       <PageShell width="wide" title="My Tasks" subtitle="Complete these tasks to move forward with your loan application">
-            {myTasks.length === 0 ? (
+            {myTasks.length === 0 && additionalActions.length === 0 ? (
               // Scoped to what this page knows — the ACTIVE application's tasks,
               // never a global "you're all caught up" (DESIGN_SYSTEM §13).
               <EmptyState
@@ -290,16 +313,50 @@ export default function Tasks() {
               />
             ) : (
               <>
-                <Card className="mb-8">
-                  <CardContent className="p-6">
-                    <TaskProgress
-                      label="Tasks completed on this application"
-                      completed={completedCount}
-                      total={totalTasks}
-                      data-testid="tasks-progress"
-                    />
-                  </CardContent>
-                </Card>
+                <div className="mb-4 flex items-center justify-between gap-3" data-testid="tasks-open-action-count">
+                  <h2 className="text-lg font-semibold">Your next steps</h2>
+                  <Badge variant="secondary">{actionItemsData?.stats.total ?? pendingTasks.length} remaining</Badge>
+                </div>
+                {myTasks.length > 0 && (
+                  <Card className="mb-8">
+                    <CardContent className="p-6">
+                      <TaskProgress
+                        label="Tasks completed on this application"
+                        completed={completedCount}
+                        total={totalTasks}
+                        data-testid="tasks-progress"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
+                {additionalActions.length > 0 && (
+                  <div className="mb-8" data-testid="section-additional-actions">
+                    <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+                      <CheckSquare className="h-5 w-5 text-muted-foreground" />
+                      Other required steps ({additionalActions.length})
+                    </h2>
+                    <div className="space-y-3">
+                      {additionalActions.map((item) => (
+                        <Card key={item.id}>
+                          <CardContent className="flex items-center justify-between gap-4 p-4">
+                            <div>
+                              <p className="font-medium">{item.title}</p>
+                              {item.description && (
+                                <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+                              )}
+                            </div>
+                            <Button asChild size="sm" className="touch-target shrink-0">
+                              <Link href={item.actionUrl} data-testid={`task-action-${item.id}`}>
+                                {item.actionLabel}
+                              </Link>
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {rejectedTasks.length > 0 && (
                   <div className="mb-8">
@@ -370,9 +427,7 @@ export default function Tasks() {
                                 </div>
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-medium">
-                                    {task.documentCategory
-                                      ? getDocumentCategoryLabel(task.documentCategory)
-                                      : task.title}
+                                    {getDocumentTaskLabel(task)}
                                     {task.documentYear && (
                                       <span className="text-muted-foreground"> · {task.documentYear}</span>
                                     )}
@@ -424,7 +479,7 @@ export default function Tasks() {
                                 {task.documentCategory && (
                                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <FileText className="h-4 w-4" />
-                                    {getDocumentCategoryLabel(task.documentCategory)}
+                                    {getDocumentTaskLabel(task)}
                                     {task.documentYear && ` (${task.documentYear})`}
                                   </div>
                                 )}
@@ -477,7 +532,7 @@ export default function Tasks() {
                                 {task.documentCategory && (
                                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <FileText className="h-4 w-4" />
-                                    {getDocumentCategoryLabel(task.documentCategory)}
+                                    {getDocumentTaskLabel(task)}
                                     {task.documentYear && ` (${task.documentYear})`}
                                   </div>
                                 )}
@@ -509,7 +564,7 @@ export default function Tasks() {
                                 <h4 className="font-medium">{task.title}</h4>
                                 {task.documentCategory && (
                                   <p className="text-sm text-muted-foreground">
-                                    {getDocumentCategoryLabel(task.documentCategory)}
+                                    {getDocumentTaskLabel(task)}
                                   </p>
                                 )}
                               </div>
@@ -533,7 +588,7 @@ export default function Tasks() {
               {selectedTask?.title}
               {selectedTask?.documentCategory && (
                 <span className="block mt-1">
-                  Required: {getDocumentCategoryLabel(selectedTask.documentCategory)}
+                  Required: {getDocumentTaskLabel(selectedTask)}
                   {selectedTask.documentYear && ` for ${selectedTask.documentYear}`}
                 </span>
               )}

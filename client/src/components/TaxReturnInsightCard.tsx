@@ -8,6 +8,7 @@ import {
   consentTemplateKeys,
   applicationResourceKeys,
   taskKeys,
+  loanApplicationKeys,
 } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
@@ -125,6 +126,7 @@ export function TaxReturnInsightCard() {
       queryClient.invalidateQueries({ queryKey: applicationResourceKeys.all() });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItemsRoot() });
       queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       setPendingFile(null);
       setStep("idle");

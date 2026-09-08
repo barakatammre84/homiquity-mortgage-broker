@@ -107,17 +107,9 @@ describe("under_review intake produces action items", () => {
     // Wait for a DOCUMENT item, not merely a non-empty list — the next line
     // asserts document items exist, so that is what this must wait for.
     //
-    // Waiting on `items.length > 0` made this test time-dependent and it failed
-    // intermittently in CI ("expected 0 to be greater than 0", runs 32760904513
-    // and 33431131762). The list is assembled consent-item-first
-    // (server/routes/lending/dashboard.ts:337-351), and the consent item is
-    // ALWAYS present: `requiredConsentTypes` there is
-    // ["credit_pull","disclosure","privacy_policy"], three types the product
-    // never writes (open finding J-0820-02), so `pendingConsentTypes` can never
-    // be empty. That item exists the instant the application does, satisfying
-    // `length > 0` on the first poll — while initializeLoanPipeline is still
-    // creating the document_request tasks and conditions the document items
-    // come from. The assertion then read a list that was merely early, not wrong.
+    // Waiting on `items.length > 0` made this test time-dependent because the
+    // consent action can appear before initializeLoanPipeline finishes creating
+    // document tasks. Wait for the exact promise this test makes instead.
     //
     // This STRENGTHENS the precondition; no assertion is weakened. If document
     // items genuinely never arrive, pollUntil throws "Timed out waiting for …"
@@ -138,6 +130,10 @@ describe("under_review intake produces action items", () => {
       expect(item.actionLabel, "every item carries a CTA label").toBeTruthy();
     }
     expect(actionItems.stats.total).toBe(actionItems.items.length);
+    const consentItem = actionItems.items.find((item: any) => item.type === "consent");
+    if (consentItem) {
+      expect(consentItem.description).not.toContain("consent(s)");
+    }
 
     // (b) The borrower-tasks surface (dashboard card) is also non-empty —
     // the exact widget that used to say "You're all caught up".

@@ -5,6 +5,7 @@ import { COMPANY_IDENTITY, companyNmlsDisplay } from "@shared/companyIdentity";
 import { ArrowRight, Check, ChevronLeft, Clock, Home, LogIn, Shield, TrendingUp } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 import { PresalesDisclaimer } from "@/components/PresalesDisclaimer";
+import { Logo } from "@/components/brand/Logo";
 import type { AffordabilityEstimateResults } from "@/lib/affordabilityEstimate";
 import { estimateTimeRemaining, type FunnelProgress } from "@/funnel/preApprovalMachine";
 
@@ -323,31 +324,38 @@ export function FunnelProgressHeader({
     <div className="fixed top-0 w-full z-40 bg-background/90 backdrop-blur-sm border-b">
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-3 pb-2.5 sm:pt-4 sm:pb-3">
         {/* Row 1 — back, counter + percentage, autosave */}
-        <div className="flex items-center justify-between gap-3">
-          <button
-            onClick={onBack}
-            disabled={!canGoBack}
-            aria-label="Go back to the previous question"
-            className={`-ml-2 p-2 rounded-full hover:bg-muted transition-all ${
-              canGoBack ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
-            data-testid="button-back"
-          >
-            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
-          </button>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+            <button
+              onClick={onBack}
+              disabled={!canGoBack}
+              aria-label="Go back to the previous question"
+              className={`-ml-2 shrink-0 rounded-full p-2 transition-all hover:bg-muted ${
+                canGoBack ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+              data-testid="button-back"
+            >
+              <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+            </button>
+            <Logo
+              size="sm"
+              className="shrink-0 [&>span:last-child]:hidden sm:[&>span:last-child]:inline"
+              data-testid="logo-apply"
+            />
+          </div>
 
           <div
-            className="flex flex-1 min-w-0 items-baseline justify-center gap-x-2 gap-y-0 flex-wrap"
+            className="flex min-w-0 items-baseline justify-center gap-x-2 gap-y-0"
             data-testid="text-step-counter"
           >
             <span className="text-sm font-semibold text-foreground whitespace-nowrap">
               Step {progress.index} of {progress.total}
             </span>
-            <span className="text-sm text-muted-foreground/50" aria-hidden="true">
+            <span className="hidden text-sm text-muted-foreground/50 sm:inline" aria-hidden="true">
               ·
             </span>
             <span
-              className="text-sm font-semibold text-primary whitespace-nowrap"
+              className="hidden text-sm font-semibold text-primary whitespace-nowrap sm:inline"
               data-testid="text-progress-percent"
             >
               {percent}% complete

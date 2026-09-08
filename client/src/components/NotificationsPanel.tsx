@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { isStaffRole } from "@shared/roles";
-import { useAuth } from "@/hooks/useAuth";
 import { useShellBadges } from "@/hooks/useShellBadges";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -185,17 +183,14 @@ export function realNotificationToItem(n: RealNotification): NotificationItem {
 export function NotificationsBell() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const { user } = useAuth();
-
   // Every shell badge count comes from the single shared shell-badges poll
   // (useShellBadges) — the same source the sidebar and mobile nav read. The
   // bell no longer takes drilled counts/activities from a second /api/dashboard
   // poll in the layout; that double-poll (and the double-count it produced) is
-  // gone. Staff have no borrower task queue, so — exactly like the sidebar —
-  // pendingTasks is suppressed for them.
+  // gone. The bell opens notifications, so its badge is deliberately limited
+  // to unread notifications. Messages and borrower actions each have their own
+  // labelled navigation badge.
   const badges = useShellBadges();
-  const isStaff = isStaffRole(user?.role ?? "");
-  const pendingTasks = isStaff ? 0 : badges.pendingTasks;
 
   const { data: notifData, isLoading: notifLoading } = useQuery<{ notifications: RealNotification[] }>({
     queryKey: ["/api/notifications"],
@@ -217,8 +212,7 @@ export function NotificationsBell() {
     .slice(0, 10)
     .map((a, i) => activityToNotification(a, i));
 
-  const realUnread = badges.unreadNotifications;
-  const totalUnread = badges.unreadMessages + realUnread + pendingTasks;
+  const totalUnread = badges.unreadNotifications;
 
   const allNotifications = [...realNotifications, ...activityNotifications];
 
@@ -260,7 +254,7 @@ export function NotificationsBell() {
                 {totalUnread} new
               </Badge>
             )}
-            {realUnread > 0 && (
+            {totalUnread > 0 && (
               <Button
                 variant="ghost"
                 size="sm"

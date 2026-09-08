@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, CheckCircle2, ListChecks } from "lucide-react";
 
@@ -7,30 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { loanApplicationKeys } from "@/lib/queryClient";
+import { useBorrowerActionItems } from "@/hooks/useBorrowerActionItems";
 
 // The post-submit page's first job is telling the borrower what to do next.
 // This renders the server-computed action items (tasks + unsigned consents +
 // outstanding conditions from GET /api/applications/:id/action-items — an
 // endpoint that previously had zero client callers) as the page's lead
 // section. The server owns the list and its priorities; this renders.
-
-interface ActionItem {
-  id: string;
-  type: string;
-  title: string;
-  description?: string | null;
-  priority: "urgent" | "high" | "normal" | string;
-  dueDate?: string;
-  status: "pending" | "in_progress" | string;
-  actionUrl: string;
-  actionLabel: string;
-}
-
-interface ActionItemsResponse {
-  items: ActionItem[];
-  stats: { total: number; urgent: number; pending: number; completed: number };
-}
 
 const MAX_VISIBLE_ITEMS = 5;
 
@@ -48,17 +30,18 @@ export interface ActionItemsSectionProps {
 }
 
 export function ActionItemsSection({ applicationId, stillAnalyzing }: ActionItemsSectionProps) {
-  const { data, isLoading, refetch } = useQuery<ActionItemsResponse>({
-    queryKey: loanApplicationKeys.actionItems(applicationId),
-    // While the intake pass is still running, its tasks may not exist yet —
-    // poll gently, and stop the moment the parent sees scenarios arrive.
-    refetchInterval: stillAnalyzing ? 5000 : false,
-  });
+  const { data, isLoading, refetch } = useBorrowerActionItems(applicationId);
 
   useEffect(() => {
     if (!stillAnalyzing) {
       refetch();
     }
+  }, [stillAnalyzing, refetch]);
+
+  useEffect(() => {
+    if (!stillAnalyzing) return;
+    const timer = window.setInterval(() => void refetch(), 5000);
+    return () => window.clearInterval(timer);
   }, [stillAnalyzing, refetch]);
 
   if (isLoading) {

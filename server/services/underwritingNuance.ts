@@ -44,14 +44,11 @@ export const SEASONING_CONDITIONAL_MONTHS = 12;
 /**
  * Self-employment/contract income types that carry the seasoning requirement.
  *
- * ⚠️ B3-3.5-01 governs SELF-EMPLOYMENT only — it defines a self-employed borrower
- * as one holding a 25%-or-greater ownership interest. `rental`, `investment` and
- * `other` are carried here without an authority that reaches them (rental has its
- * own, B3-3.8-01, cited below). Narrowing the set would REMOVE a flag, which is
- * the loosening direction, so it is recorded as gap G-22 and left to the founder
- * rather than decided here.
+ * B3-3.5-01 governs self-employment. Rental income follows B3-3.8-01 and must
+ * never inherit this 24-month rule; doing so turned a rental documentation need
+ * into a false borrower-facing eligibility block.
  */
-const SEASONING_GOVERNED_TYPES = new Set(["self_employed", "rental", "investment", "other"]);
+const SEASONING_GOVERNED_TYPES = new Set(["self_employed", "other"]);
 
 export function assessIncomeSeasoning(
   incomeSources: IncomeSourceEntry[] | null | undefined,

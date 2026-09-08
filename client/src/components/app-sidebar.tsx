@@ -24,6 +24,7 @@ import { getPresenceColor } from "@/lib/formatters";
 import { isStaffRole, isInternalStaffRole, isPartnerRole, ROLE_DISPLAY_NAMES, type UserRole } from "@shared/roles";
 import { ROUTE_GATES } from "@/lib/routeGates";
 import { useShellBadges } from "@/hooks/useShellBadges";
+import { useActiveBorrowerActionItems } from "@/hooks/useBorrowerActionItems";
 import {
   BarChart3,
   LayoutDashboard,
@@ -233,8 +234,8 @@ export function AppSidebar() {
     refetchInterval: 30000,
   });
 
-  // Message/task badge counts come from the shared shell-badges poll so the
-  // sidebar, mobile nav, and notifications bell make one request between them.
+  // Messages and notifications are shell-level. Borrower actions are scoped to
+  // the selected application and use the same payload as What to do next.
   const badges = useShellBadges();
   const unreadCount = badges.unreadMessages;
 
@@ -249,8 +250,8 @@ export function AppSidebar() {
   const isSelfServicePartner = isPartnerRole(userRole);
   const isAdmin = userRole === "admin";
   const isAspiringOwner = userRole === "aspiring_owner";
-
-  const pendingTaskCount = isStaff ? 0 : badges.pendingTasks;
+  const { data: borrowerActions } = useActiveBorrowerActionItems(!isStaff && !isSelfServicePartner);
+  const pendingTaskCount = isStaff ? 0 : borrowerActions?.stats.total ?? 0;
 
   let navigation: NavSection[];
   if (isInternalStaff) {

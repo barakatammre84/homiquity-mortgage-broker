@@ -99,7 +99,7 @@ export default function Dashboard() {
     }
   }, [authLoading, isStaff, navigate]);
 
-  const { data, isLoading } = useQuery<DashboardData>({
+  const { data, isLoading, isFetching } = useQuery<DashboardData>({
     queryKey: dashboardKeys.root(),
     enabled: !authLoading && !isStaff,
   });
@@ -168,7 +168,10 @@ export default function Dashboard() {
     ),
   });
 
-  if (authLoading || isLoading || isStaff) {
+  const waitingForSubmittedApplication =
+    user?.role === "active_buyer" && isFetching && (data?.applications?.length ?? 0) === 0;
+
+  if (authLoading || isLoading || waitingForSubmittedApplication || isStaff) {
     return (
       // Geometry matches the real page (max-w-6xl + the canonical gutter) so the
       // layout does not jump when data lands. It used to be `p-8 max-w-xl`, a

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { consentKeys } from "@/lib/queryClient";
+import { consentKeys, loanApplicationKeys } from "@/lib/queryClient";
 
 // The E-Consent page had no test file. These pin the fact two surfaces were
 // disagreeing about (DESIGN_SYSTEM §13, Agreement):
@@ -39,7 +39,7 @@ const TEMPLATE = {
   regulatoryReference: "IRC §7216",
 };
 
-function renderPage(consents: Array<Record<string, unknown>>) {
+function renderPage(consents: Array<Record<string, unknown>>, applicationId?: string) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity, queryFn: () => new Promise(() => {}) },
@@ -47,6 +47,10 @@ function renderPage(consents: Array<Record<string, unknown>>) {
   });
   client.setQueryData(["/api/consent-templates"], [TEMPLATE]);
   client.setQueryData(consentKeys.me(), consents);
+  client.setQueryData(
+    loanApplicationKeys.all(),
+    applicationId ? [{ id: applicationId, status: "processing" }] : [],
+  );
   return render(
     <QueryClientProvider client={client}>
       <EConsent />
@@ -107,6 +111,23 @@ describe("EConsent — the agreement control", () => {
 
     expect(checkbox.getAttribute("data-state")).toBe("checked");
     expect(submit.disabled).toBe(false);
+  });
+
+  it("attaches the recorded consent to the selected loan application", async () => {
+    apiRequest.mockResolvedValue({});
+    const user = userEvent.setup();
+    renderPage([], "app-1");
+
+    await user.click(screen.getByTestId("checkbox-agree-tax_document_use"));
+    await user.click(screen.getByTestId("button-submit-tax_document_use"));
+
+    await waitFor(() => {
+      expect(apiRequest).toHaveBeenCalledWith(
+        "POST",
+        "/api/consents",
+        expect.objectContaining({ applicationId: "app-1", consentType: "tax_document_use" }),
+      );
+    });
   });
 
   it("names the document it agrees to, and states that nothing is recorded yet", () => {

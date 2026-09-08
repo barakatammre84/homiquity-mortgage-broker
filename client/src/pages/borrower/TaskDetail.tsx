@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, dashboardKeys, taskKeys } from "@/lib/queryClient";
+import { apiRequest, dashboardKeys, taskKeys, loanApplicationKeys } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -105,6 +105,9 @@ export default function TaskDetail() {
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId!) });
       queryClient.invalidateQueries({ queryKey: taskKeys.all() });
       queryClient.invalidateQueries({ queryKey: dashboardKeys.root() });
+      if (task?.applicationId) {
+        queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItems(task.applicationId) });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/shell/badges"] });
       toast({
         title: "Document Uploaded",

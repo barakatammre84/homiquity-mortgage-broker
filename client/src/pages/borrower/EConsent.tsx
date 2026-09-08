@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, consentKeys } from "@/lib/queryClient";
+import { apiRequest, consentKeys, loanApplicationKeys } from "@/lib/queryClient";
+import { useActiveApplication } from "@/hooks/useActiveApplication";
+import type { LoanApplication } from "@shared/schema";
 import { 
   CheckCircle, 
   Clock,
@@ -43,6 +45,7 @@ interface BorrowerConsent {
    * reports a revoked consent as still in force — see `isConsentGiven` below.
    */
   isRevoked?: boolean;
+  applicationId?: string | null;
 }
 
 const consentTypeLabels: Record<string, { label: string; icon: typeof Shield }> = {
@@ -60,6 +63,16 @@ export default function EConsent() {
   const { toast } = useToast();
   const [expandedConsent, setExpandedConsent] = useState<string | null>(null);
   const [agreedConsents, setAgreedConsents] = useState<Set<string>>(new Set());
+  const {
+    data: applications = [],
+    isLoading: applicationsLoading,
+    isError: applicationsError,
+    error: applicationsErrorObj,
+    refetch: refetchApplications,
+  } = useQuery<LoanApplication[]>({
+    queryKey: loanApplicationKeys.all(),
+  });
+  const { activeApplication } = useActiveApplication(applications);
 
   const {
     data: templates,
@@ -85,6 +98,7 @@ export default function EConsent() {
     mutationFn: async (data: { consentType: string; templateId?: string; templateVersion?: string }) => {
       return await apiRequest("POST", "/api/consents", {
         ...data,
+        applicationId: activeApplication?.id,
         consentGiven: true,
         consentMethod: "click",
         signatureType: "none",
@@ -92,6 +106,7 @@ export default function EConsent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: consentKeys.me() });
+      queryClient.invalidateQueries({ queryKey: loanApplicationKeys.actionItemsRoot() });
       toast({
         title: "Consent Recorded",
         description: "Your consent has been securely recorded.",
@@ -145,12 +160,16 @@ export default function EConsent() {
   const isConsentGiven = (consentType: string): boolean => {
     return (
       myConsents?.some(
-        (c) => c.consentType === consentType && c.consentGiven && !c.isRevoked,
+        (c) =>
+          c.consentType === consentType &&
+          c.consentGiven &&
+          !c.isRevoked &&
+          (!activeApplication || c.applicationId === activeApplication.id),
       ) || false
     );
   };
 
-  if (templatesLoading || consentsLoading) {
+  if (applicationsLoading || templatesLoading || consentsLoading) {
     return (
       <div className="p-6 flex items-center justify-center h-full">
         <div className="text-muted-foreground">Loading consents...</div>
@@ -161,12 +180,13 @@ export default function EConsent() {
   // A fetch failure used to fall through to a zeroed-out page indistinguishable
   // from "nothing to do" — show an honest error + retry instead, right at a
   // trust-critical consent gate (ux-09).
-  if (templatesError || consentsError) {
+  if (applicationsError || templatesError || consentsError) {
     return (
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <QueryErrorState
-          error={templatesErrorObj ?? consentsErrorObj}
+          error={applicationsErrorObj ?? templatesErrorObj ?? consentsErrorObj}
           onRetry={() => {
+            if (applicationsError) refetchApplications();
             if (templatesError) refetchTemplates();
             if (consentsError) refetchConsents();
           }}
@@ -315,7 +335,13 @@ export default function EConsent() {
           
           <div className="grid gap-3">
             {completedConsents.map((template) => {
-              const consent = myConsents?.find(c => c.consentType === template.consentType);
+              const consent = myConsents?.find(
+                (c) =>
+                  c.consentType === template.consentType &&
+                  c.consentGiven &&
+                  !c.isRevoked &&
+                  (!activeApplication || c.applicationId === activeApplication.id),
+              );
               const typeInfo = consentTypeLabels[template.consentType] || { label: template.title, icon: FileText };
               const Icon = typeInfo.icon;
 

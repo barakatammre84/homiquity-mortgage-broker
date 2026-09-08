@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { taskKeys, dashboardKeys } from "@/lib/queryClient";
+import { taskKeys, dashboardKeys, loanApplicationKeys } from "@/lib/queryClient";
 import type { Task, LoanApplication } from "@shared/schema";
 
 // The borrower's task surface had no test file. These pin the two honesty
@@ -41,7 +41,7 @@ const task = (overrides: Partial<Task>): Task =>
     ...overrides,
   }) as unknown as Task;
 
-function renderTasks(tasks: Task[]) {
+function renderTasks(tasks: Task[], additionalActions: any[] = []) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity, queryFn: () => new Promise(() => {}) },
@@ -49,6 +49,23 @@ function renderTasks(tasks: Task[]) {
   });
   client.setQueryData(dashboardKeys.root(), { applications: [app] });
   client.setQueryData(taskKeys.all(), tasks);
+  client.setQueryData(loanApplicationKeys.actionItems(app.id), {
+    items: [
+      ...tasks
+        .filter((item) => !["COMPLETED", "EXPIRED"].includes(item.status))
+        .map((item) => ({
+          id: item.id,
+          type: item.taskType === "document_request" ? "document" : item.taskType,
+          title: item.title,
+          status: "pending",
+          priority: "normal",
+          actionUrl: "/tasks",
+          actionLabel: "Complete",
+        })),
+      ...additionalActions,
+    ],
+    stats: { total: tasks.filter((item) => !["COMPLETED", "EXPIRED"].includes(item.status)).length + additionalActions.length, urgent: 0, pending: 0, completed: 0 },
+  });
   const utils = render(
     <QueryClientProvider client={client}>
       <Tasks />
@@ -114,5 +131,40 @@ describe("Tasks — empty state scope", () => {
     expect(empty).toContain("No tasks on this application yet");
     expect(empty).not.toMatch(/caught up/i);
     expect(empty).toContain("loan officer will assign");
+  });
+});
+
+describe("Tasks — complete action list", () => {
+  it("includes required disclosures in the same total shown by What to do next", () => {
+    renderTasks(
+      [task({ id: "t-1", status: "OPEN", taskType: "document_request" })],
+      [{
+        id: "consent-pending",
+        type: "consent",
+        title: "Sign Required Disclosures",
+        description: "1 consent needs your signature",
+        status: "pending",
+        priority: "high",
+        actionUrl: "/e-consent",
+        actionLabel: "Review & Sign",
+      }],
+    );
+
+    expect(screen.getByTestId("tasks-open-action-count").textContent).toContain("2");
+    expect(screen.getByTestId("task-action-consent-pending").getAttribute("href")).toBe("/e-consent");
+  });
+
+  it("names Schedule E in the rental tax-return checklist item", () => {
+    renderTasks([
+      task({
+        id: "rental-tax",
+        taskType: "document_request",
+        documentCategory: "tax_return",
+        title: "Upload: Rental Property Tax Return & Schedule E Required",
+        description: "Most recent signed federal tax return, including Schedule 1 and Schedule E",
+      }),
+    ]);
+
+    expect(screen.getByText("Rental Tax Return & Schedule E")).toBeTruthy();
   });
 });
