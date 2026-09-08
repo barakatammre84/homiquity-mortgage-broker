@@ -115,6 +115,9 @@ doc-drift bug to fix):
 ### Feature Review — the durable QA program · [`feature-review/`](feature-review/)
 The re-runnable QA teams (agents in `.claude/agents/`) that review every feature vs intended use.
 - [CHARTER.md](feature-review/CHARTER.md) — program rules, severity scale, the Reality Map.
+- [Core intelligence audit](feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md) — current
+  Homi, document extraction, complex-income, underwriting and lender-delivery reality; fixes,
+  benchmark evidence and ordered build gates.
 - [DOMAINS.md](feature-review/DOMAINS.md) — the 13 domain charters + UX lens.
 - [design-identity/ILLUSTRATION_BRIEF.md](design-identity/ILLUSTRATION_BRIEF.md) — what to commission for the animated scenes, and the mechanism that already exists.
 - [design-identity/LEDGER.md](design-identity/LEDGER.md) — Design Identity Engine cross-run memory: what each run raised, what it proved it on, and the directions it refused.

@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `958d7cf2cc15902a19f146ae23b80a8900d2cde7` on 2026-09-08.
+**Audited production baseline:** `d77e356fdc76d8ebaec17fea854da421bc24034d` on 2026-09-08.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -69,6 +69,7 @@ underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
+| Guide the borrower with Homi | **Built · Proven internally** | Record production provider canaries and prove that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · Proven internally** | Production upload → restart → download → replacement, with access control, on a pilot file. |
 | Review complicated income | **Built · Proven internally** | A licensed reviewer reproduces the mixed-income calculation, approves it from a real client's accepted evidence and reconciles it with the pilot lender. |
@@ -76,6 +77,23 @@ underwriter and closer also remain unproven.
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built** | One approved lender accepts the package and completes an acknowledgement/correction exchange. |
 | Close, fund and service | **Built** | One real closing, funding record, borrower update sequence and post-close handoff. |
+
+## Core intelligence build order
+
+1. **Make evidence ingestion durable:** persisted extraction jobs, restart recovery, staff-visible
+   failures and recorded provider canaries.
+2. **Connect the page-level evidence model:** classify and split packets, retain source pages and
+   boxes, review fields beside the document, and measure accuracy from human-graded values.
+3. **Make decisions expire correctly:** invalidate stale underwriting/AUS output, add an explicit
+   manual-underwrite outcome, deliver co-borrowers, and retain final findings.
+4. **Activate one live stack:** production storage, real credit and verification, current approved
+   pricing, required AUS, and one lender receiver.
+5. **Improve Homi from measured friction:** change guidance only when a journey metric shows that
+   it reduces borrower or loan-officer effort.
+
+The dated [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md)
+contains the evidence and acceptance tests. This order is part of Phase 0 and Phase 1; it does not
+create another product or a parallel roadmap.
 
 ## Phase 0 — establish a safe operating floor
 
@@ -94,7 +112,8 @@ Run the full [Phase 0 technical readiness gate](knowledge-base/runbooks/PHASE_0_
    application clock, HMDA/MISMO, decisions/notices, pricing, TRID, evidence lineage and package
    reproducibility.
 5. **0E — provider and background truth:** every external leg and scheduled process is visibly
-   live, simulated, disabled or failed; retry, idempotency and manual-evidence paths are proven.
+   live, simulated, disabled or failed; document extraction survives restart; retry, idempotency
+   and manual-evidence paths are proven.
 6. **0F — reliability and capacity:** alerts, scheduled jobs, service targets, pilot load, database
    safeguards, graceful restart and incident response are measured.
 7. **0G — exact-build acceptance:** repeat the complete synthetic journey and failure set in
@@ -220,6 +239,7 @@ The next decisions are:
 ## Evidence and maintenance
 
 Current evidence: [Core integration](knowledge-base/specs/CORE_INTEGRATION.md) ·
+[core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md) ·
 [complex borrower and loan-officer walk](knowledge-base/feature-review/journey-walks/2026-09-07-complex-borrower-lo-loop.md) ·
 [mixed-income analysis walk](knowledge-base/feature-review/journey-walks/2026-09-08-mixed-income-analysis-loop.md) ·
 [production acceptance test](knowledge-base/runbooks/PROD_ACCEPTANCE_TEST.md) ·
