@@ -37,8 +37,8 @@ const SCHEDULES: ReadonlyArray<readonly [string, string]> = [
   // Credit monitoring (2026-08-08). Runs after lifecycle so a score drop and the
   // day's other borrower-state changes land in the same working window.
   ["15 13 * * *", "credit-monitoring"],
-  // Synthetic, borrower-data-free proof for Homi, document extraction, and
-  // private object storage. A failed capability makes the workflow fail loudly.
+  // Synthetic, borrower-data-free proof for the five core capabilities. A
+  // failed capability makes the workflow fail loudly.
   ["30 11,23 * * *", "core-provider-canaries"],
 ];
 
@@ -82,12 +82,20 @@ describe("cron-jobs.yml schedules", () => {
     expect(workflow).toContain('-X "${METHOD}"');
   });
 
+  it("offers two CSRF-protected manual legs for the controlled storage restart proof", () => {
+    for (const job of ["core-storage-restart-seed", "core-storage-restart-verify"]) {
+      expect(jobs).toContain(`app.post("/api/jobs/${job}"`);
+      expect(workflow).toContain(`- ${job}`);
+      expect(workflow).toContain(`core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify) method="POST"`);
+    }
+  });
+
   it("prints only redacted provider diagnostics before failing a canary sweep", () => {
     const canaryBlock = workflow.slice(
-      workflow.indexOf('# Provider canaries are a state-changing POST.'),
+      workflow.indexOf('# Core proofs are state-changing POSTs.'),
       workflow.indexOf('# Read-only sweeps retain transient retries.'),
     );
-    expect(workflow).toContain('if [ "$JOB" = "core-provider-canaries" ]');
+    expect(workflow).toContain('core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify)');
     expect(workflow).toContain("results.map((result) => ({");
     for (const field of ["capabilityId", "provider", "operation", "status", "latencyMs", "failureClass", "commitSha", "completedAt"]) {
       expect(workflow).toContain(`${field}: result.${field}`);

@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `8c57107d2575078703d2b79114f2db62410016db` on 2026-09-09.
+**Audited production baseline:** `bd6a48cd31557528fdf68873a6fa605f80663fe6` on 2026-09-09.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -50,8 +50,11 @@ lender results never satisfy a verified decision or lender-acceptance gate.
 Production served the exact `main` commit above on 2026-09-09. Health and the scheduled core-proof
 route returned successfully, and the service reported SendGrid email configured. The repository
 has a strict required test gate, automatic production migrations and post-deploy commit
-verification. Borrower-data-free production canaries passed for Homi, PDF vision and private
-object-storage write/read/delete after a revoked Anthropic credential was detected and replaced.
+verification. On the exact build above, borrower-data-free production canaries passed for Homi,
+the real pay-statement extraction path with page evidence, private object-storage write/read/delete,
+mixed W-2/business/rental analysis and deterministic underwriting. Their retained latencies were
+1.303 s, 10.790 s, 0.588 s, 0.006 s and 0.749 s respectively. This proves operability and asserted
+invariants, not model accuracy or lender acceptance.
 
 The internal complex-borrower journey is proven. Fictional multi-business, rental and mixed W-2
 plus side-business borrowers moved through the public application, full URLA, database
@@ -85,8 +88,9 @@ licensed loan officer, processor, underwriter and closer also remains unproven.
    restart recovery and staff-visible failures are built and proven locally for ordinary documents
    and consented multi-form tax packages. Document status, confidence, extracted facts and
    readiness commit atomically, demonstration extraction fails closed in production, and
-   tax-consent cleanup preserves unrelated work. The canary ledger is live and Homi, PDF vision and
-   private-storage round trips pass in production. Complete one controlled production
+   tax-consent cleanup preserves unrelated work. The canary ledger is live and Homi, the real
+   pay-statement pipeline, private storage, mixed-income analysis and underwriting repeatability
+   pass in production. Complete one controlled production
    interruption/recovery proof.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
    link logical documents, retain field-level source pages and support field and boundary review.

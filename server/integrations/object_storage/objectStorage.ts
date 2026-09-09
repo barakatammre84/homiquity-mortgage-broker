@@ -39,6 +39,107 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+export type PrivateStorageRestartProofFailure =
+  | "runtime_identity_missing"
+  | "proof_in_progress"
+  | "proof_missing"
+  | "restart_not_observed"
+  | "commit_changed"
+  | "marker_expired"
+  | "marker_invalid";
+
+export class PrivateStorageRestartProofError extends Error {
+  constructor(readonly code: PrivateStorageRestartProofFailure) {
+    super(code);
+    this.name = "PrivateStorageRestartProofError";
+    Object.setPrototypeOf(this, PrivateStorageRestartProofError.prototype);
+  }
+}
+
+export interface PrivateStorageRestartMarker {
+  version: 1;
+  sourceDeploymentId: string;
+  sourceCommitSha: string;
+  seededAt: string;
+  nonce: string;
+}
+
+export interface PrivateStorageRestartSeedResult {
+  status: "seeded";
+  sourceCommitSha: string;
+  seededAt: string;
+  reused: boolean;
+}
+
+export interface PrivateStorageRestartVerifyResult {
+  status: "verified";
+  sourceCommitSha: string;
+  currentCommitSha: string;
+  seededAt: string;
+  verifiedAt: string;
+  ageMs: number;
+}
+
+const RESTART_PROOF_MAX_AGE_MS = 60 * 60 * 1_000;
+
+function runtimeDeploymentIdentity(): { deploymentId: string; commitSha: string } {
+  const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID?.trim();
+  const commitSha = process.env.RAILWAY_GIT_COMMIT_SHA?.trim();
+  if (!deploymentId || !commitSha) {
+    throw new PrivateStorageRestartProofError("runtime_identity_missing");
+  }
+  return { deploymentId, commitSha };
+}
+
+export function parsePrivateStorageRestartMarker(
+  bytes: Buffer,
+  nowMs = Date.now(),
+): PrivateStorageRestartMarker {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new PrivateStorageRestartProofError("marker_invalid");
+  }
+  const marker = value as Partial<PrivateStorageRestartMarker>;
+  const seededMs = typeof marker.seededAt === "string" ? Date.parse(marker.seededAt) : NaN;
+  if (
+    marker.version !== 1 ||
+    typeof marker.sourceDeploymentId !== "string" || marker.sourceDeploymentId.length < 8 ||
+    typeof marker.sourceCommitSha !== "string" || !/^[0-9a-f]{40}$/i.test(marker.sourceCommitSha) ||
+    typeof marker.nonce !== "string" || !/^[0-9a-f-]{36}$/i.test(marker.nonce) ||
+    !Number.isFinite(seededMs)
+  ) {
+    throw new PrivateStorageRestartProofError("marker_invalid");
+  }
+  if (seededMs > nowMs + 5_000 || nowMs - seededMs > RESTART_PROOF_MAX_AGE_MS) {
+    throw new PrivateStorageRestartProofError("marker_expired");
+  }
+  return marker as PrivateStorageRestartMarker;
+}
+
+export function validatePrivateStorageRestartTransition(
+  marker: PrivateStorageRestartMarker,
+  current: { deploymentId: string; commitSha: string },
+  now = new Date(),
+): PrivateStorageRestartVerifyResult {
+  if (marker.sourceDeploymentId === current.deploymentId) {
+    throw new PrivateStorageRestartProofError("restart_not_observed");
+  }
+  if (marker.sourceCommitSha !== current.commitSha) {
+    throw new PrivateStorageRestartProofError("commit_changed");
+  }
+  const seededMs = Date.parse(marker.seededAt);
+  return {
+    status: "verified",
+    sourceCommitSha: marker.sourceCommitSha,
+    currentCommitSha: current.commitSha,
+    seededAt: marker.seededAt,
+    verifiedAt: now.toISOString(),
+    ageMs: now.getTime() - seededMs,
+  };
+}
+
 // The object storage service is used to interact with the object storage service.
 export class ObjectStorageService {
   constructor() {}
@@ -283,6 +384,94 @@ export class ObjectStorageService {
     } finally {
       await file.delete({ ignoreNotFound: true }).catch(() => undefined);
     }
+  }
+
+  private privateStorageRestartProofFile(): File {
+    const privateDir = this.getPrivateObjectDir();
+    const { bucketName, objectName: privatePrefix } = parseObjectPath(privateDir);
+    const objectName = `${privatePrefix.replace(/\/$/, "")}/canaries/restart-proof-v1.json`;
+    return objectStorageClient.bucket(bucketName).file(objectName);
+  }
+
+  /**
+   * Seed the first half of a controlled restart proof. The marker is fixed,
+   * synthetic and private; it contains only Railway runtime identity, a time
+   * and a nonce. Repeating the seed in the same deployment is idempotent.
+   */
+  async seedPrivateStorageRestartProof(now = new Date()): Promise<PrivateStorageRestartSeedResult> {
+    const runtime = runtimeDeploymentIdentity();
+    const file = this.privateStorageRestartProofFile();
+    const [exists] = await file.exists();
+    if (exists) {
+      const [existingBytes] = await file.download({ validation: "crc32c" });
+      let existing: PrivateStorageRestartMarker | null = null;
+      try {
+        existing = parsePrivateStorageRestartMarker(existingBytes, now.getTime());
+      } catch (error) {
+        if (
+          error instanceof PrivateStorageRestartProofError &&
+          ["marker_expired", "marker_invalid"].includes(error.code)
+        ) {
+          await file.delete({ ignoreNotFound: true });
+        } else {
+          throw error;
+        }
+      }
+      if (existing) {
+        if (
+          existing.sourceDeploymentId === runtime.deploymentId &&
+          existing.sourceCommitSha === runtime.commitSha
+        ) {
+          return {
+            status: "seeded",
+            sourceCommitSha: existing.sourceCommitSha,
+            seededAt: existing.seededAt,
+            reused: true,
+          };
+        }
+        throw new PrivateStorageRestartProofError("proof_in_progress");
+      }
+    }
+
+    const marker: PrivateStorageRestartMarker = {
+      version: 1,
+      sourceDeploymentId: runtime.deploymentId,
+      sourceCommitSha: runtime.commitSha,
+      seededAt: now.toISOString(),
+      nonce: randomUUID(),
+    };
+    await file.save(Buffer.from(JSON.stringify(marker), "utf8"), {
+      contentType: "application/json",
+      resumable: false,
+      validation: "crc32c",
+      preconditionOpts: { ifGenerationMatch: 0 },
+      metadata: { cacheControl: "private, no-store" },
+    });
+    return {
+      status: "seeded",
+      sourceCommitSha: marker.sourceCommitSha,
+      seededAt: marker.seededAt,
+      reused: false,
+    };
+  }
+
+  /**
+   * Complete a restart proof from a different Railway deployment running the
+   * same commit. Successful verification removes the synthetic marker. A call
+   * made before the restart leaves it in place and fails closed.
+   */
+  async verifyPrivateStorageRestartProof(
+    now = new Date(),
+  ): Promise<PrivateStorageRestartVerifyResult> {
+    const runtime = runtimeDeploymentIdentity();
+    const file = this.privateStorageRestartProofFile();
+    const [exists] = await file.exists();
+    if (!exists) throw new PrivateStorageRestartProofError("proof_missing");
+    const [bytes] = await file.download({ validation: "crc32c" });
+    const marker = parsePrivateStorageRestartMarker(bytes, now.getTime());
+    const proof = validatePrivateStorageRestartTransition(marker, runtime, now);
+    await file.delete({ ignoreNotFound: false });
+    return proof;
   }
 
   /**

@@ -51,6 +51,8 @@ on:
           - aggregate-data
           - credit-monitoring
           - core-provider-canaries
+          - core-storage-restart-seed
+          - core-storage-restart-verify
 
 permissions:
   contents: none
@@ -84,11 +86,10 @@ jobs:
                 ;;
             esac
           fi
-          if [ "$job" = "core-provider-canaries" ]; then
-            method="POST"
-          else
-            method="GET"
-          fi
+          case "$job" in
+            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify) method="POST" ;;
+            *) method="GET" ;;
+          esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
           echo "method=$method" >> "$GITHUB_OUTPUT"
       - name: Trigger the sweep
@@ -117,11 +118,12 @@ jobs:
             echo "::error::CRON_SECRET repository secret is not set — sweep NOT triggered (founder: create it with the same value as the app env var)"
             exit 1
           fi
-          # Provider canaries are a state-changing POST. Run it once, retain
+          # Core proofs are state-changing POSTs. Run each once, retain
           # only its explicitly redacted status fields in the Actions log, and
           # fail after printing the diagnosis. Retrying a timed-out POST could
           # duplicate provider calls and ledger rows.
-          if [ "$JOB" = "core-provider-canaries" ]; then
+          case "$JOB" in
+          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify)
             response_file="$(mktemp)"
             set +e
             http_status="$(curl -sS --max-time 120 \
@@ -136,12 +138,16 @@ jobs:
               echo "::error::Core provider canary transport failed (curl exit ${curl_status})"
               exit "$curl_status"
             fi
-            node - "$response_file" "$http_status" <<'NODE'
+            node - "$response_file" "$http_status" "$JOB" <<'NODE'
           const fs = require("fs");
           const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const safe = {
+          const job = process.argv[4];
+          const common = {
             httpStatus: Number(process.argv[3]),
             ok: body.ok === true,
+          };
+          const safe = job === "core-provider-canaries" ? {
+            ...common,
             total: body.total ?? null,
             successful: body.successful ?? null,
             failed: body.failed ?? null,
@@ -155,6 +161,24 @@ jobs:
               commitSha: result.commitSha,
               completedAt: result.completedAt,
             })) : [],
+          } : {
+            ...common,
+            phase: body.phase ?? null,
+            status: body.status ?? null,
+            sourceCommitSha: body.sourceCommitSha ?? null,
+            currentCommitSha: body.currentCommitSha ?? null,
+            seededAt: body.seededAt ?? null,
+            verifiedAt: body.verifiedAt ?? null,
+            ageMs: body.ageMs ?? null,
+            reused: body.reused ?? null,
+            failureClass: body.failureClass ?? body.canary?.failureClass ?? null,
+            canary: body.canary ? {
+              capabilityId: body.canary.capabilityId,
+              operation: body.canary.operation,
+              status: body.canary.status,
+              latencyMs: body.canary.latencyMs,
+              commitSha: body.canary.commitSha,
+            } : null,
           };
           console.log(JSON.stringify(safe, null, 2));
           NODE
@@ -163,7 +187,8 @@ jobs:
               *) echo "::error::Core provider canary returned HTTP ${http_status}"; exit 1 ;;
             esac
             exit 0
-          fi
+            ;;
+          esac
 
           # Read-only sweeps retain transient retries. `--retry-all-errors`
           # covers DNS; curl's default set does not.

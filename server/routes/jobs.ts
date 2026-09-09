@@ -12,7 +12,14 @@ import { db } from "../db";
 import { intentEvents } from "@shared/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { routeParam } from "../http/routeParams";
-import { runCoreProviderCanarySweep } from "../services/coreProviderCanaries";
+import {
+  runCoreProviderCanarySweep,
+  runCoreStorageRestartVerification,
+} from "../services/coreProviderCanaries";
+import {
+  ObjectStorageService,
+  PrivateStorageRestartProofError,
+} from "../integrations/object_storage";
 
 /**
  * Scheduled-job endpoints.
@@ -33,7 +40,113 @@ function isCronRequest(req: Request): boolean {
 }
 
 export function registerJobRoutes(app: Express) {
-  // Borrower-data-free proof that the three core provider paths can execute in
+  const seedStorageRestartProof = async (triggeredByUserId: string | null) => {
+    const objectStorage = new ObjectStorageService();
+    if (!objectStorage.isConfigured()) {
+      throw new PrivateStorageRestartProofError("runtime_identity_missing");
+    }
+    const proof = await objectStorage.seedPrivateStorageRestartProof();
+    return {
+      ok: true,
+      phase: "seed" as const,
+      ...proof,
+      triggeredBy: triggeredByUserId ? "admin" : "cron",
+    };
+  };
+
+  const restartProofError = (error: unknown) => {
+    if (error instanceof PrivateStorageRestartProofError) {
+      const status = ["proof_in_progress", "restart_not_observed"].includes(error.code) ? 409 : 503;
+      return {
+        status,
+        body: { ok: false, phase: "seed", failureClass: error.code },
+      };
+    }
+    return {
+      status: 500,
+      body: { ok: false, phase: "seed", failureClass: "unknown" },
+    };
+  };
+
+  // First half of the controlled storage restart proof. It writes one fixed,
+  // private synthetic marker. The verify route must be called from a different
+  // Railway deployment running the same commit; only then is the marker read
+  // and removed.
+  app.post("/api/jobs/core-storage-restart-seed", async (req, res) => {
+    if (isCronRequest(req)) {
+      try {
+        return res.json(await seedStorageRestartProof(null));
+      } catch (error) {
+        const safe = restartProofError(error);
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await seedStorageRestartProof(user.id);
+        await logAudit(req, "jobs.core_storage_restart_seed", "system", "object_storage", {
+          sourceCommitSha: result.sourceCommitSha,
+          seededAt: result.seededAt,
+          reused: result.reused,
+        });
+        return res.json(result);
+      } catch (error) {
+        const safe = restartProofError(error);
+        return res.status(safe.status).json(safe.body);
+      }
+    });
+  });
+
+  app.post("/api/jobs/core-storage-restart-verify", async (req, res) => {
+    const verify = async (triggeredByUserId: string | null) => {
+      const result = await runCoreStorageRestartVerification(triggeredByUserId);
+      return {
+        ok: result.canary.status === "success",
+        phase: "verify" as const,
+        status: result.proof?.status ?? "failed",
+        sourceCommitSha: result.proof?.sourceCommitSha ?? null,
+        currentCommitSha: result.proof?.currentCommitSha ?? result.canary.commitSha,
+        seededAt: result.proof?.seededAt ?? null,
+        verifiedAt: result.proof?.verifiedAt ?? null,
+        ageMs: result.proof?.ageMs ?? null,
+        canary: result.canary,
+      };
+    };
+    if (isCronRequest(req)) {
+      try {
+        const result = await verify(null);
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch {
+        return res.status(500).json({
+          ok: false,
+          phase: "verify",
+          failureClass: "persistence_failure",
+        });
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await verify(user.id);
+        await logAudit(req, "jobs.core_storage_restart_verify", "system", "object_storage", {
+          status: result.status,
+          sourceCommitSha: result.sourceCommitSha,
+          currentCommitSha: result.currentCommitSha,
+          ageMs: result.ageMs,
+        });
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch {
+        return res.status(500).json({
+          ok: false,
+          phase: "verify",
+          failureClass: "persistence_failure",
+        });
+      }
+    });
+  });
+
+  // Borrower-data-free proof that the five core paths can execute in
   // the deployed environment. Every capability records its own redacted row;
   // an unhealthy result returns 503 so the scheduler becomes a visible alarm.
   app.post("/api/jobs/core-provider-canaries", async (req, res) => {
