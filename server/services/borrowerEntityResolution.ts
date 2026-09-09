@@ -15,6 +15,7 @@ import {
   getLatestInstancesForUser,
   type PublicTaxFormInstance,
 } from "./taxDocumentIntelligence";
+import type { DatabaseTransaction } from "./documentLineage";
 
 /**
  * Borrower business-entity resolution (UAL P2b). Reconstructs the borrower's
@@ -237,15 +238,20 @@ export function resolveBusinessEntities(instances: PublicTaxFormInstance[]): Res
  * overwrite a human-confirmed row (auto_resolved=false), and link each
  * source logical_documents row to its entity.
  */
-export async function resolveAndPersistEntities(userId: string): Promise<{
+export async function resolveAndPersistEntities(
+  userId: string,
+  applicationId?: string,
+  existingTransaction?: DatabaseTransaction,
+): Promise<{
   entities: BorrowerBusinessEntity[];
   linkedForms: number;
 }> {
-  const instances = await getLatestInstancesForUser(userId);
+  const transaction = existingTransaction ?? db;
+  const instances = await getLatestInstancesForUser(userId, applicationId, transaction);
   const resolved = resolveBusinessEntities(instances);
   if (resolved.length === 0) return { entities: [], linkedForms: 0 };
 
-  const existing = await db
+  const existing = await transaction
     .select()
     .from(borrowerBusinessEntities)
     .where(eq(borrowerBusinessEntities.userId, userId));
@@ -254,7 +260,7 @@ export async function resolveAndPersistEntities(userId: string): Promise<{
   const persisted: BorrowerBusinessEntity[] = [];
   let linkedForms = 0;
 
-  await db.transaction(async (tx) => {
+  const persist = async (tx: DatabaseTransaction) => {
     for (const entity of resolved) {
       const prior = existingByKey.get(entity.identityKey);
       let row: BorrowerBusinessEntity;
@@ -315,7 +321,9 @@ export async function resolveAndPersistEntities(userId: string): Promise<{
         linkedForms += formIds.length;
       }
     }
-  });
+  };
+  if (existingTransaction) await persist(existingTransaction);
+  else await db.transaction(persist);
 
   return { entities: persisted, linkedForms };
 }

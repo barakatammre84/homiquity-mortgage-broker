@@ -63,8 +63,18 @@ just supporting detail.
   bank statements, leases and tax returns; `extractionService.ts` is the re-export shim,
   per-doc extractors live in `extractionDocuments.ts`);
   `server/services/documentConfidence.ts` scores how trustworthy the
-  extraction is. Ordinary borrower uploads launch this work in the web process;
-  a durable extraction queue and restart recovery remain open.
+  extraction is. Supported uploads commit a `document_extraction_jobs` row with the
+  document version. A background worker claims it with an expiring database lease,
+  retries transient failures and resumes abandoned work after restart. Tax returns
+  join the queue only after the borrower grants `tax_document_use` consent; the
+  multi-form result feeds both staff analysis and the borrower's readiness snapshot.
+  Final tax persistence and consent revocation share a borrower-scoped database lock,
+  so revocation cannot be followed by a late derived write from an in-flight worker.
+  Pay-stub, bank-statement and lease extraction also classifies every page independently.
+  Mislabeled, mixed or low-confidence packets are held for staff correction and cannot
+  create borrower facts or readiness credit. Accepted fields retain their source page,
+  confidence and normalized box when the provider supplies one; staff can review and
+  correct those values beside the source.
 
 ### 5. Verification
 - `server/plaid.ts` + `server/services/verification.ts`: borrower links
@@ -87,6 +97,11 @@ just supporting detail.
 - Pricing: `server/pricing.ts` (LLPA math) + `server/services/pricingAdapter.ts`
   (compose base rate + adjustments across wholesale lenders from rate sheets).
 - `server/services/decisionEngine.ts` orchestrates decision records.
+- `server/services/ausDecisionIntegrity.ts` rebuilds and fingerprints the current
+  AUS casefile inputs. Changes to borrower facts, current evidence, verification or
+  policy make prior findings and their pre-approval letters stale and block delivery
+  until the decision is run again. Files outside the automatic matrix follow the
+  explicit `manual_underwrite` path.
 
 ### 8. Outputs
 - `server/services/pdfLetterGenerator.ts` + `loanEstimate.ts` — branded PDFs.

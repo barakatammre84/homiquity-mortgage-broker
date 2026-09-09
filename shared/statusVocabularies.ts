@@ -74,6 +74,7 @@ export function canSetConditionVerdict(role: string | undefined, verdict: Condit
 export const PRE_APPROVAL_LETTER_STATUS = [
   "draft",
   "issued",
+  "stale",
   "superseded",
   "expired",
   "revoked",

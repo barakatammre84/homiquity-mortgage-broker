@@ -10,6 +10,7 @@ import {
   jsonb,
   index,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -196,6 +197,35 @@ export const documentUploads = pgTable("document_uploads", {
   index("idx_doc_uploads_borrower").on(table.borrowerId),
   index("idx_doc_uploads_status").on(table.processingStatus),
 ]);
+
+// Durable background work for the borrower upload path. The document row and
+// this job are inserted in one transaction, so an acknowledged upload cannot
+// lose its extraction when the web process restarts. Workers claim rows with a
+// bounded lease; an expired lease is eligible for another worker to resume.
+export const documentExtractionJobs = pgTable("document_extraction_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  documentId: varchar("document_id").references(() => documents.id).notNull(),
+  requestedByUserId: varchar("requested_by_user_id").references(() => users.id).notNull(),
+  mode: varchar("mode", { length: 20 }).notNull(), // standard, autopilot, tax_package
+  status: varchar("status", { length: 20 }).default("pending").notNull(), // pending, processing, completed, failed, cancelled
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(3).notNull(),
+  availableAt: timestamp("available_at").defaultNow().notNull(),
+  claimedAt: timestamp("claimed_at"),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  claimedBy: varchar("claimed_by", { length: 100 }),
+  lastErrorCode: varchar("last_error_code", { length: 100 }),
+  lastErrorAt: timestamp("last_error_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => [
+  uniqueIndex("idx_document_extraction_jobs_document_mode").on(table.documentId, table.mode),
+  index("idx_document_extraction_jobs_claim").on(table.status, table.availableAt),
+  index("idx_document_extraction_jobs_lease").on(table.status, table.leaseExpiresAt),
+]);
+
+export type DocumentExtractionJob = typeof documentExtractionJobs.$inferSelect;
 
 // C. Document Page Entity (CRITICAL - All intelligence happens at page level)
 export const documentPages = pgTable("document_pages", {

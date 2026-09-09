@@ -20,7 +20,7 @@ import {
   STANDARD_PRE_APPROVAL_CONDITIONS,
   type StoredPreApprovalLetter,
 } from "../server/services/pdfLetterGenerator";
-import { effectiveLetterStatus, resolveLetterAmount } from "../shared/letters";
+import { effectiveLetterStatus, effectivePreApprovalLetterStatus, resolveLetterAmount } from "../shared/letters";
 
 const storedRow: StoredPreApprovalLetter = {
   letterNumber: "BN-TEST123-ABCD",
@@ -191,6 +191,18 @@ describe("effectiveLetterStatus", () => {
   });
 });
 
+describe("effectivePreApprovalLetterStatus", () => {
+  const letter = { status: "issued", expirationDate: "2099-01-01T00:00:00.000Z" };
+
+  it("marks an issued letter stale when its decision fingerprints no longer match", () => {
+    expect(effectivePreApprovalLetterStatus(letter, false)).toBe("stale");
+  });
+
+  it("keeps a current decision letter issued", () => {
+    expect(effectivePreApprovalLetterStatus(letter, true)).toBe("issued");
+  });
+});
+
 describe("letter lifecycle route guards", () => {
   const lettersSource = () =>
     readFile(join(__dirname, "../server/routes/lending/letters.ts"), "utf8");
@@ -235,12 +247,13 @@ describe("letter lifecycle route guards", () => {
     ).toBe(true);
   });
 
-  it("status endpoints report the computed status, expiry included", async () => {
+  it("status endpoints report computed expiry and decision staleness", async () => {
     const source = await lettersSource();
     expect(
       (source.match(/status: effectiveLetterStatus\(letter\)/g) || []).length,
-      "expected both letter-status and prequal-status to report effectiveLetterStatus(letter) — the API must never assert 'issued' on an expired letter, whatever the sweep's timing",
-    ).toBe(2);
+      "expected the educational prequal status to report effectiveLetterStatus(letter)",
+    ).toBe(1);
+    expect(source).toContain("status: effectivePreApprovalLetterStatus(letter, decisionCurrent)");
   });
 
   it("revocation validates with the shared schema; letter-status exposes the revocation target", async () => {

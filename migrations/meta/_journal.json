@@ -477,6 +477,27 @@
       "when": 1788840614000,
       "tag": "0067_capture_subject_property_intent",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1788898827000,
+      "tag": "0068_document_extraction_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1788985227000,
+      "tag": "0069_decision_input_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1788985228000,
+      "tag": "0070_preapproval_letter_decision_fingerprints",
+      "breakpoints": true
     }
   ]
 }

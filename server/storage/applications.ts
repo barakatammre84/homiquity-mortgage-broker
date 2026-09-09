@@ -26,6 +26,7 @@ import {
 import { WRITER_CONTRACT_KEY, WRITER_CONTRACT_VERSION } from "@shared/borrowerActivityView";
 import { DOCUMENT_STATUS } from "@shared/documentStatus";
 import { UsersStorage } from "./users";
+import type { DatabaseTransaction } from "../services/documentLineage";
 export class ApplicationsStorage extends UsersStorage {
   /** Keep one current upload per explicit replacement lineage. If the caller's
    * initial visibility includes any version, expand that exact application +
@@ -143,12 +144,12 @@ export class ApplicationsStorage extends UsersStorage {
       .orderBy(desc(loanApplications.createdAt));
   }
 
-  async getAllLoanApplications(limit: number = 500): Promise<LoanApplication[]> {
-    return await db
+  async getAllLoanApplications(limit?: number): Promise<LoanApplication[]> {
+    const query = db
       .select()
       .from(loanApplications)
-      .orderBy(desc(loanApplications.createdAt))
-      .limit(limit);
+      .orderBy(desc(loanApplications.createdAt));
+    return limit === undefined ? await query : await query.limit(limit);
   }
 
   async updateLoanApplication(
@@ -274,7 +275,11 @@ export class ApplicationsStorage extends UsersStorage {
       .limit(1);
   }
 
-  async updateDocument(id: string, data: Partial<Document>): Promise<Document | undefined> {
+  async updateDocument(
+    id: string,
+    data: Partial<Document>,
+    transaction: DatabaseTransaction | typeof db = db,
+  ): Promise<Document | undefined> {
     const update: Record<string, unknown> = { ...data, updatedAt: new Date() };
     if (
       data.status === DOCUMENT_STATUS.UPLOADED ||
@@ -288,7 +293,7 @@ export class ApplicationsStorage extends UsersStorage {
         ELSE ${data.status}
       END`;
     }
-    const [doc] = await db
+    const [doc] = await transaction
       .update(documents)
       .set(update)
       .where(eq(documents.id, id))

@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { firstQueryValue } from "../queryParams";
 import { routeParams } from "../../http/routeParams";
+import { revokeTaxDocumentConsentAndPurge } from "../../services/taxConsentWorkflow";
 import { clientIpForRecord } from "../../clientIp";
 
 // Verify that an internal staff user is actually assigned to the given application.
@@ -148,32 +149,27 @@ export function registerConsentRoutes(
         return res.status(400).json({ error: "This consent type cannot be revoked from here" });
       }
 
-      const revoked = await storage.revokeConsentsByTypeAndUser(
-        consentType,
+      const purge = await revokeTaxDocumentConsentAndPurge(
         user.id,
         "borrower_requested",
       );
+      const { revoked, ...purgeCounts } = purge;
       if (revoked.length === 0) {
         return res.status(404).json({ error: "No active consent to revoke" });
       }
 
-      // Revocation must stop downstream use of already-derived data, not just
-      // future derivations: purge the derived tax_insights rows so the staff
-      // DSCR feed (getRecentDscrCandidates) and the borrower graph stop
-      // reading them. The encrypted extraction lineage stays on the source
-      // document (extraction_raw_* columns) for audit purposes.
-      let taxInsightsDeleted = 0;
-      if (consentType === "tax_document_use") {
-        taxInsightsDeleted = await storage.deleteTaxInsightsByUser(user.id);
-      }
+      // The revocation and purge share the same borrower-scoped database lock
+      // as final tax persistence. An in-flight worker therefore cannot restore
+      // a derived signal after this response succeeds. Encrypted extraction
+      // lineage stays on the source document for audit purposes.
 
       await logAudit(req, "consent.revoked", "borrower_consent", revoked[0].id, {
         consentType,
         consentsRevoked: revoked.length,
-        taxInsightsDeleted,
+        ...purgeCounts,
       });
 
-      res.json({ revoked: revoked.length, taxInsightsDeleted });
+      res.json({ revoked: revoked.length, ...purgeCounts });
     } catch (error) {
       console.error("Revoke consent error:", error);
       res.status(500).json({ error: "Failed to revoke consent" });

@@ -121,6 +121,10 @@ interface AusFindings {
   casefileId?: string;
   duVersion?: string;
   recommendation?: string;
+  decisionPath?: "automated" | "manual_underwrite";
+  inputIntegrity?: {
+    decisionPath?: "automated" | "manual_underwrite";
+  };
   riskAssessment?: { dti?: number | null; ltv?: number | null; creditScore?: number | null };
   day1Certainty?: Record<string, { relief: boolean; reason?: string | null }>;
   messages?: AusMessage[];
@@ -381,6 +385,9 @@ export function SubmissionReadinessDialog({
                           const d1c = findings.day1Certainty ?? {};
                           const messages = findings.messages ?? [];
                           const lpaMessages = findings.lpa?.messages ?? [];
+                          const inputsAreStale = stage.blockers.some(blocker =>
+                            blocker.toLowerCase().includes("aus findings are stale"),
+                          );
                           return (
                             <Collapsible>
                               <CollapsibleTrigger asChild>
@@ -409,6 +416,16 @@ export function SubmissionReadinessDialog({
                                     {findings.simulated && (
                                       <Badge variant="outline" data-testid="aus-findings-simulated">
                                         Simulated
+                                      </Badge>
+                                    )}
+                                    {inputsAreStale && (
+                                      <Badge variant="destructive" data-testid="aus-findings-stale">
+                                        Stale — rerun required
+                                      </Badge>
+                                    )}
+                                    {(findings.inputIntegrity?.decisionPath ?? findings.decisionPath) === "manual_underwrite" && (
+                                      <Badge variant="outline" data-testid="aus-findings-manual">
+                                        Manual underwriting
                                       </Badge>
                                     )}
                                     <span className="ml-auto text-xs text-muted-foreground">

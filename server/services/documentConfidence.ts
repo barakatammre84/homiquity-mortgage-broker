@@ -5,6 +5,7 @@ import {
 } from "@shared/schema";
 import { eq, and, gte, sql, desc, avg } from "drizzle-orm";
 import { emitEvent } from "./analyticsEventPipeline";
+import type { DatabaseTransaction } from "./documentLineage";
 
 export interface FieldConfidence {
   fieldName: string;
@@ -24,15 +25,15 @@ export async function recordExtractionConfidence(options: {
   pageCount?: number;
   extractionEngine?: string;
   extractionVersion?: string;
-}): Promise<{ humanReviewRequired: boolean }> {
+}, transaction: DatabaseTransaction | typeof db = db): Promise<{ humanReviewRequired: boolean }> {
   const reviewThreshold = getReviewThreshold(options.documentType);
   const humanReviewRequired = options.overallConfidence < reviewThreshold;
 
   // Persist the confidence row + analytics event. This is a quality-gate signal,
   // not the extraction itself, so a persistence failure must never break the
   // upload flow — compute the review flag first and return it regardless.
-  try {
-    await db.insert(documentConfidenceScores).values({
+  const persist = async () => {
+    await transaction.insert(documentConfidenceScores).values({
       documentId: options.documentId,
       documentType: options.documentType,
       applicationId: options.applicationId || null,
@@ -59,9 +60,19 @@ export async function recordExtractionConfidence(options: {
         lowConfidenceFields: options.fieldConfidences.filter(f => f.confidence < 0.7).map(f => f.fieldName),
       },
       automationTriggered: true,
-    });
-  } catch (err) {
-    console.error("[doc-confidence] Failed to record extraction confidence (non-fatal):", err);
+    }, transaction);
+  };
+
+  if (transaction === db) {
+    try {
+      await persist();
+    } catch (err) {
+      console.error("[doc-confidence] Failed to record extraction confidence (non-fatal):", err);
+    }
+  } else {
+    // A caller supplied its transaction because confidence is part of a larger
+    // document write. Let failures roll the whole unit back for a clean retry.
+    await persist();
   }
 
   return { humanReviewRequired };
@@ -174,14 +185,15 @@ export async function recordHumanReview(
     fieldsCorrect: number;
     fieldsCorrected: number;
     fieldsMissed: number;
-  }
+  },
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<void> {
   const totalFields = corrections.fieldsCorrect + corrections.fieldsCorrected + corrections.fieldsMissed;
   const accuracyPct = totalFields > 0
     ? ((corrections.fieldsCorrect / totalFields) * 100).toFixed(2)
     : null;
 
-  await db.update(documentConfidenceScores).set({
+  await transaction.update(documentConfidenceScores).set({
     humanReviewCompleted: true,
     humanReviewedBy: reviewedBy,
     humanReviewedAt: new Date(),

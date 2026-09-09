@@ -18,7 +18,8 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { computeHash, encryptSensitiveData } from "./services/encryptionService";
-import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedBankStatementData, type ExtractedLeaseData, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
+import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedBankStatementData, type ExtractedLeaseData, type DocumentClassification, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
+import { DOCUMENT_TYPE_TAXONOMY, type DocumentTypeTaxonomy } from "@shared/schema/documents";
 
 // Model lineage, persisted with every extraction so a past result can be traced
 // to the exact model + prompt that produced it. Bump EXTRACTION_PROMPT_VERSION
@@ -50,6 +51,58 @@ const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(
 const confidenceLevel = z.enum(["high", "medium", "low"]).catch("low");
 const extractedFieldsList = z.array(z.string().max(100)).max(50).catch([]);
 const warningsList = z.array(z.string().max(500)).max(20).optional().catch(undefined);
+const normalizedCoordinate = z.number().finite().min(0).max(1);
+const boundingBoxSchema = z.object({
+  x: normalizedCoordinate,
+  y: normalizedCoordinate,
+  width: normalizedCoordinate,
+  height: normalizedCoordinate,
+}).refine(
+  (box) => box.x + box.width <= 1.001 && box.y + box.height <= 1.001,
+  "Bounding box must stay within the page",
+);
+const fieldEvidenceSchema = z.record(
+  z.string().trim().min(1).max(100),
+  z.object({
+    pageNumber: z.number().int().min(1).max(1000),
+    confidence: z.number().finite().min(0).max(1),
+    boundingBox: boundingBoxSchema.optional().catch(undefined),
+  }),
+).optional().catch(undefined);
+const pageCount = z.number().int().min(1).max(1000).optional().catch(undefined);
+const documentTypeTaxonomy = new Set<string>(DOCUMENT_TYPE_TAXONOMY);
+const classifiedDocumentType = z.custom<DocumentTypeTaxonomy>(
+  (value) => typeof value === "string" && documentTypeTaxonomy.has(value),
+  "Unknown mortgage document type",
+);
+const documentClassificationSchema: z.ZodType<DocumentClassification> = z.object({
+  pageCount: z.number().int().min(1).max(1000),
+  pages: z.array(z.object({
+    pageNumber: z.number().int().min(1).max(1000),
+    documentType: classifiedDocumentType,
+    confidence: z.number().finite().min(0).max(1),
+  }).strict()).min(1).max(1000),
+}).strict().superRefine((classification, context) => {
+  if (classification.pages.length !== classification.pageCount) {
+    context.addIssue({
+      code: "custom",
+      path: ["pages"],
+      message: "Classification must contain exactly one entry for every page",
+    });
+    return;
+  }
+  const ordered = [...classification.pages].sort((a, b) => a.pageNumber - b.pageNumber);
+  for (let index = 0; index < ordered.length; index += 1) {
+    if (ordered[index].pageNumber !== index + 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["pages", index, "pageNumber"],
+        message: "Classification pages must cover the source once, in 1-indexed order",
+      });
+      return;
+    }
+  }
+});
 
 export const taxReturnSchema = z.object({
   documentYear: z.string().trim().regex(/^\d{4}$/).optional().catch(undefined),
@@ -77,6 +130,8 @@ export const taxReturnSchema = z.object({
   confidence: confidenceLevel,
   extractedFields: extractedFieldsList,
   warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
 });
 
 /**
@@ -105,6 +160,9 @@ export const payStubSchema = z.object({
   confidence: confidenceLevel,
   extractedFields: extractedFieldsList,
   warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
+  documentClassification: documentClassificationSchema,
 });
 
 export const bankStatementSchema = z.object({
@@ -128,6 +186,9 @@ export const bankStatementSchema = z.object({
   confidence: confidenceLevel,
   extractedFields: extractedFieldsList,
   warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
+  documentClassification: documentClassificationSchema,
 });
 
 export const leaseSchema = z.object({
@@ -141,7 +202,16 @@ export const leaseSchema = z.object({
   confidence: confidenceLevel,
   extractedFields: extractedFieldsList,
   warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
+  documentClassification: documentClassificationSchema,
 });
+
+/** Test seam for the page-classification boundary on simple documents. */
+export function validateDocumentClassification(value: unknown) {
+  const result = documentClassificationSchema.safeParse(value);
+  return result.success ? result.data : null;
+}
 
 /**
  * Parse + schema-validate a raw model response. Returns null when the payload
@@ -263,4 +333,3 @@ export function rawLineage(rawText: string, model: string): ExtractionLineage {
     rawResponseKeyId: enc.keyId,
   };
 }
-

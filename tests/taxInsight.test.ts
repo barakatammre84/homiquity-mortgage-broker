@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { validateTaxReturnResponse, extractTaxReturnData } from "../server/extractionService";
-import { deriveTaxInsight } from "../server/services/taxInsightService";
+import {
+  deriveTaxInsight,
+  deriveTaxInsightFromStructuredRun,
+} from "../server/services/taxInsightService";
 import type { ExtractedTaxReturnData } from "../server/extractionService";
 
 /**
@@ -131,6 +134,98 @@ describe("deriveTaxInsight", () => {
   it("falls back to the prior year when documentYear is unparseable", () => {
     const insight = deriveTaxInsight(baseExtraction({ documentYear: "unknown" }));
     expect(insight.taxYear).toBe(new Date().getFullYear() - 1);
+  });
+});
+
+describe("deriveTaxInsightFromStructuredRun", () => {
+  it("feeds the borrower snapshot from the richer multi-form package without double counting", () => {
+    const insight = deriveTaxInsightFromStructuredRun({
+      runId: "run-1",
+      documentId: "doc-1",
+      status: "completed",
+      simulated: false,
+      modelId: "model-1",
+      promptVersion: "tax-v1",
+      pageCount: 20,
+      formCount: 4,
+      overallConfidence: 0.9,
+      humanReviewRequired: false,
+      warnings: [],
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:01:00.000Z",
+      forms: [
+        {
+          logicalDocumentId: "1040",
+          formType: "tax_return_1040",
+          taxYear: 2025,
+          entityName: null,
+          k1Variant: null,
+          pageStart: 1,
+          pageEnd: 2,
+          classificationConfidence: 0.95,
+          fields: {
+            wagesSalariesTips: { value: 68_000, confidence: 0.95 },
+            totalIncome: { value: 115_000, confidence: 0.92 },
+            adjustedGrossIncome: { value: 110_000, confidence: 0.91 },
+          },
+          warnings: [],
+        },
+        {
+          logicalDocumentId: "schedule-c-1",
+          formType: "schedule_c",
+          taxYear: 2025,
+          entityName: "Consulting One",
+          k1Variant: null,
+          pageStart: 3,
+          pageEnd: 4,
+          classificationConfidence: 0.9,
+          fields: { netProfitOrLoss: { value: 20_000, confidence: 0.9 } },
+          warnings: [],
+        },
+        {
+          logicalDocumentId: "schedule-c-2",
+          formType: "schedule_c",
+          taxYear: 2025,
+          entityName: "Consulting Two",
+          k1Variant: null,
+          pageStart: 5,
+          pageEnd: 6,
+          classificationConfidence: 0.9,
+          fields: { netProfitOrLoss: { value: 15_000, confidence: 0.9 } },
+          warnings: [],
+        },
+        {
+          logicalDocumentId: "schedule-e",
+          formType: "schedule_e",
+          taxYear: 2025,
+          entityName: null,
+          k1Variant: null,
+          pageStart: 7,
+          pageEnd: 8,
+          classificationConfidence: 0.9,
+          fields: {
+            netRentalRealEstateIncomeOrLoss: { value: 12_000, confidence: 0.9 },
+            rentsReceivedTotal: { value: 36_000, confidence: 0.9 },
+            propertyCount: { value: 2, confidence: 0.9 },
+          },
+          warnings: [],
+        },
+      ],
+    });
+
+    expect(insight).toMatchObject({
+      taxYear: 2025,
+      wagesW2: "68000.00",
+      grossIncome: "115000.00",
+      adjustedGrossIncome: "110000.00",
+      scheduleCNetProfit: "35000.00",
+      scheduleENetRental: "12000.00",
+      scheduleEGrossRents: "36000.00",
+      rentalPropertyCount: 2,
+      selfEmployed: true,
+      dscrCandidate: true,
+      confidence: "high",
+    });
   });
 });
 

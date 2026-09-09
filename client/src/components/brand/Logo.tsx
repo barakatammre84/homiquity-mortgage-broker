@@ -41,7 +41,11 @@ const imgHeight = {
 } as const;
 
 const toneClass = {
-  brand: "text-flare", // the wordmark carries the orange accent on light surfaces.
+  // On a light surface the real orange mark is the accent and the company name
+  // uses the same green-black as the rest of the product. Making the entire
+  // lockup orange weakened the wordmark and made the header read like a text
+  // treatment rather than a finished brand asset.
+  brand: "text-foreground",
   // WCAG 1.4.3 exempts logotypes from contrast, which is why the BRIGHT flare is
   // permitted here and nowhere a person has to read prose (use --flare-ink there).
   onDark: "text-sidebar-foreground", // on the royal sidebar / dark surfaces
@@ -110,7 +114,7 @@ export function Logo({
     );
   }
 
-  const label = isWhiteLabeled && brandName ? brandName : "homiquity";
+  const label = isWhiteLabeled && brandName ? brandName : "Homiquity";
   const showMark = variant !== "wordmark";
   const showWord = variant !== "mark";
 
@@ -125,7 +129,12 @@ export function Logo({
       // supply the name or the logo is an unlabelled decoration.
       {...(showWord ? {} : { role: "img", "aria-label": label })}
     >
-      {showMark && <Logomark className={markSize[size]} mark={mark} />}
+      {showMark && (
+        <Logomark
+          className={cn(markSize[size], tone === "brand" && "text-flare")}
+          mark={mark}
+        />
+      )}
       {showWord && (
         <span className={cn("font-bold tracking-tight", wordmarkSize[size])}>
           {label}

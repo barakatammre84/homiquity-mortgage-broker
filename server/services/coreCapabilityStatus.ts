@@ -95,19 +95,25 @@ export function getCoreCapabilityReport(
       id: "document_extraction",
       label: "Document extraction",
       provider: "Anthropic Claude vision",
-      state: anthropicExtraction
+      state: production && extractionSimulation
+        ? "configuration_error"
+        : anthropicExtraction
         ? "live"
         : extractionSimulation
           ? "simulated"
           : "disabled",
       criticalForLiveLoan: true,
       lastSuccessfulVerificationAt: null,
-      detail: anthropicExtraction
+      detail: production && extractionSimulation
+        ? "EXTRACTION_SIMULATE is incompatible with production and extraction will fail closed."
+        : anthropicExtraction
         ? "The extraction adapter is configured; field accuracy still requires human-graded evidence."
         : extractionSimulation
           ? "Deterministic sample values are enabled and must never be treated as borrower facts."
           : "Uploads can be reviewed manually, but automated extraction is unavailable.",
-      nextAction: anthropicExtraction
+      nextAction: production && extractionSimulation
+        ? "Remove EXTRACTION_SIMULATE from the production environment."
+        : anthropicExtraction
         ? "Run a labeled production document set and grade fields before setting an accuracy claim."
         : "Configure an extraction key and validate it with a representative document set.",
     },
@@ -160,8 +166,8 @@ export function getCoreCapabilityReport(
       state: "live",
       criticalForLiveLoan: true,
       lastSuccessfulVerificationAt: null,
-      detail: "Deterministic rules, policy fingerprints, evidence gates, and decision snapshots are implemented.",
-      nextAction: "Add stale-input invalidation and a manual-underwrite/out-of-scope result before external AUS handoff.",
+      detail: "Deterministic rules, evidence gates, input and policy fingerprints, stale-output blocking, decision snapshots, and a manual-underwrite path are implemented.",
+      nextAction: "Retain final AUS findings, deliver co-borrowers, and prove the selected live AUS path before lender handoff.",
     },
     {
       id: "financial_analysis",

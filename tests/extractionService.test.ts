@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { checkTaxReturnConsistency } from "../server/extractionService";
+import {
+  checkTaxReturnConsistency,
+  extractBankStatementData,
+  extractLeaseData,
+  extractPayStubData,
+} from "../server/extractionService";
 import type { ExtractedTaxReturnData } from "../server/extractionService";
+import { extractionSimulationEnabled } from "../server/extractionCore";
 
 /**
  * Unit tests for the tax-return cross-field consistency hardening. This runs in
@@ -82,5 +88,66 @@ describe("checkTaxReturnConsistency", () => {
     checkTaxReturnConsistency(data);
     expect(data.confidence).toBe("medium");
     expect(data.warnings?.length).toBe(3);
+  });
+});
+
+describe("deterministic document extraction simulation", () => {
+  it("covers pay stubs, bank statements, and leases with labeled source evidence", async () => {
+    const prior = process.env.EXTRACTION_SIMULATE;
+    process.env.EXTRACTION_SIMULATE = "true";
+    try {
+      const [payStub, bank, lease] = await Promise.all([
+        extractPayStubData("/objects/demo-paystub"),
+        extractBankStatementData("/objects/demo-bank"),
+        extractLeaseData(Buffer.from("synthetic lease"), "application/pdf"),
+      ]);
+      for (const result of [payStub, bank, lease]) {
+        expect(result.modelId).toBe("simulated");
+        expect(result.confidence).toBe("medium");
+        expect(result.extractedFields.length).toBeGreaterThan(0);
+        expect(result.warnings?.join(" ")).toMatch(/simulated/i);
+        expect(result.pageCount).toBeGreaterThan(0);
+        expect(result.documentClassification?.pageCount).toBe(result.pageCount);
+        expect(result.documentClassification?.pages).toHaveLength(result.pageCount!);
+        for (const fieldName of result.extractedFields) {
+          expect(result.fieldEvidence?.[fieldName]).toEqual(expect.objectContaining({
+            pageNumber: expect.any(Number),
+            confidence: expect.any(Number),
+          }));
+        }
+      }
+      await expect(extractPayStubData("/objects/demo-paystub"))
+        .resolves.toEqual(payStub);
+    } finally {
+      process.env.EXTRACTION_SIMULATE = prior;
+    }
+  });
+
+  it("fails closed before any simulated values can be produced in production", async () => {
+    const priorEnvironment = process.env.NODE_ENV;
+    const priorSimulation = process.env.EXTRACTION_SIMULATE;
+    process.env.NODE_ENV = "production";
+    process.env.EXTRACTION_SIMULATE = "true";
+    try {
+      expect(() => extractionSimulationEnabled()).toThrow(
+        "EXTRACTION_SIMULATE cannot be enabled in production",
+      );
+      const attempts = await Promise.allSettled([
+        extractPayStubData("/objects/production-paystub"),
+        extractBankStatementData("/objects/production-bank"),
+        extractLeaseData(Buffer.from("production lease"), "application/pdf"),
+      ]);
+      expect(attempts.every((attempt) => attempt.status === "rejected")).toBe(true);
+      for (const attempt of attempts) {
+        if (attempt.status === "rejected") {
+          expect(String(attempt.reason)).toMatch(/cannot be enabled in production/i);
+        }
+      }
+    } finally {
+      if (priorEnvironment === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = priorEnvironment;
+      if (priorSimulation === undefined) delete process.env.EXTRACTION_SIMULATE;
+      else process.env.EXTRACTION_SIMULATE = priorSimulation;
+    }
   });
 });

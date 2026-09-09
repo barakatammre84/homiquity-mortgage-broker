@@ -61,6 +61,15 @@ describe("getCoreCapabilityReport", () => {
     expect(capability(report, "credit").state).toBe("configuration_error");
     expect(capability(report, "du").state).toBe("configuration_error");
     expect(capability(report, "lpa").state).toBe("configuration_error");
+
+    const productionSimulation = getCoreCapabilityReport({
+      NODE_ENV: "production",
+      EXTRACTION_SIMULATE: "true",
+    });
+    expect(capability(productionSimulation, "document_extraction")).toMatchObject({
+      state: "configuration_error",
+      nextAction: "Remove EXTRACTION_SIMULATE from the production environment.",
+    });
   });
 
   it("never exposes credential values and does not invent verification dates", () => {

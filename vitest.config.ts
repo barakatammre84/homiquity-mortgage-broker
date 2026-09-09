@@ -99,6 +99,8 @@ export default defineConfig({
       "tests/documentCorrectionJourney.test.ts",
       "tests/applicationSignalIsolation.test.ts",
       "tests/staleEvidenceIsolation.test.ts",
+      "tests/documentExtractionQueue.integration.test.ts",
+      "tests/documentFieldReview.integration.test.ts",
     ],
     // Some modules under test transitively import server/db.ts, which refuses to
     // boot without a DATABASE_URL. Unit tests never touch the database, so a

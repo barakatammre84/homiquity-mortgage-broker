@@ -24,6 +24,15 @@ const PAY_STUB = {
   ytdGross: 25_200,
   confidence: "high" as const,
   extractedFields: ["employerName", "grossPay", "ytdGross"],
+  fieldEvidence: {
+    employerName: { pageNumber: 1, confidence: 0.99 },
+    grossPay: {
+      pageNumber: 1,
+      confidence: 0.97,
+      boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+    },
+    ytdGross: { pageNumber: 1, confidence: 0.96 },
+  },
 };
 
 /** Matches ExtractedBankStatementData. */
@@ -118,17 +127,30 @@ describe("F-028 — facts built from the real extraction shapes", () => {
     expect(facts.find(f => f.fieldName === "employer_name")).toBeDefined();
   });
 
-  it("ignores a zero or negative balance rather than recording it as an asset", () => {
+  it("preserves an overdrawn balance for review without turning it positive", () => {
     const overdrawn = { ...BANK_STATEMENT, closingBalance: -320 };
     expect(buildDocumentFacts("bank_statement", overdrawn).find(f => f.fieldName === "closing_balance"))
-      .toBeUndefined();
+      .toMatchObject({ valueNumeric: -320, fieldCategory: "asset" });
   });
 
-  it("emits nothing for a lease agreement — gross rent is not qualifying income", () => {
-    // monthlyRent is GROSS rent; rental income takes a vacancy haircut before
-    // it is income. Emitting it as a plain income fact would overstate an
-    // advisory figure, so rental keeps its own path (Schedule E).
-    expect(buildDocumentFacts("lease_agreement", { monthlyRent: 2_400 })).toEqual([]);
+  it("stores lease rent as source evidence without labeling it income", () => {
+    expect(buildDocumentFacts("lease_agreement", { monthlyRent: 2_400 })).toEqual([
+      expect.objectContaining({
+        fieldName: "monthly_rent",
+        fieldCategory: "property",
+        valueNumeric: 2_400,
+      }),
+    ]);
+  });
+
+  it("carries the source page, field confidence, and box into review facts", () => {
+    expect(buildDocumentFacts("pay_stub", PAY_STUB).find(f => f.fieldName === "gross_pay"))
+      .toMatchObject({
+        sourceFieldName: "grossPay",
+        pageNumber: 1,
+        confidence: 0.97,
+        boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+      });
   });
 
   it("emits nothing for a document type with no fact mapping", () => {

@@ -1,19 +1,16 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { isAuthenticated } from "../auth";
-import { extractTaxReturnData } from "../extractionService";
-import { recordCoarseExtraction } from "../services/documentConfidence";
 import { hasUserConsent } from "../consentGate";
-import { saveTaxInsightForDocument } from "../services/taxInsightService";
 import { logAudit } from "../auditLog";
 import { logFriction } from "../services/frictionLog";
-import { publicExtraction } from "./documents";
 import type { TaxInsight, User } from "@shared/schema";
+import { getDocumentProcessingBlockReason } from "../services/documentLineage";
 import {
-  documentProcessingBlockReason,
-  getDocumentProcessingBlockReason,
-  withDocumentWorkflowLock,
-} from "../services/documentLineage";
+  enqueueTaxPackageExtraction,
+  kickDocumentExtractionWorker,
+} from "../services/documentExtractionJobs";
+import { resolveDocumentBorrowerUserId } from "../services/documentBorrower";
 
 /**
  * Tax Return Insight — consumer-direct: the borrower processes their OWN
@@ -47,31 +44,26 @@ export function registerTaxInsightRoutes(app: Express, storage: IStorage) {
   app.post("/api/tax-insights/process", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as User;
-      const { documentId, documentYear } = req.body as {
+      const { documentId } = req.body as {
         documentId?: string;
-        documentYear?: string;
       };
 
       if (!documentId || typeof documentId !== "string") {
         return res.status(400).json({ error: "Missing required field: documentId" });
       }
-      const year =
-        typeof documentYear === "string" && /^\d{4}$/.test(documentYear)
-          ? documentYear
-          : undefined;
-
       const document = await storage.getDocument(documentId);
       if (!document) {
         return res.status(404).json({ error: "Document not found" });
       }
-      if (document.userId !== user.id) {
+      const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+      if (borrowerUserId !== user.id) {
         return res.status(403).json({ error: "Unauthorized" });
       }
       if (document.documentType !== "tax_return") {
         return res.status(400).json({ error: "Document is not a tax return" });
       }
 
-      if (!(await hasUserConsent("tax_document_use", user.id))) {
+      if (!(await hasUserConsent("tax_document_use", borrowerUserId))) {
         logFriction("consent_gate_blocked", {
           userId: user.id,
           detail: "tax_document_use",
@@ -98,70 +90,16 @@ export function registerTaxInsightRoutes(app: Express, storage: IStorage) {
         });
       }
 
-      const extractedData = await extractTaxReturnData(document.storagePath, year);
-
-      const persistence = await withDocumentWorkflowLock(
-        documentId,
-        async (currentDocument, isCurrentVersion) => {
-        const blockReason = documentProcessingBlockReason(currentDocument, isCurrentVersion);
-        if (blockReason) {
-          return { insight: null, blockReason };
-        }
-        // Same persistence contract as POST /api/documents/:id/extract: coarse
-        // confidence recording + lineage columns; AI never sets "verified" (MR-2).
-        const { humanReviewRequired } = await recordCoarseExtraction({
-          documentId,
-          documentType: document.documentType,
-          applicationId: document.applicationId,
-          confidence: extractedData.confidence,
-          extractedFields: extractedData.extractedFields,
-          fileSize: document.fileSize ?? undefined,
-        });
-        await storage.updateDocument(documentId, {
-          status: !humanReviewRequired ? "verifying" : "uploaded",
-          notes: JSON.stringify({
-            extractedAt: new Date().toISOString(),
-            extractedFields: extractedData.extractedFields,
-            confidence: extractedData.confidence,
-            humanReviewRequired,
-            warnings: extractedData.warnings,
-            modelId: extractedData.modelId,
-            promptVersion: extractedData.promptVersion,
-            responseHash: extractedData.rawResponseHash,
-          }),
-          extractionResponseHash: extractedData.rawResponseHash,
-          extractionRawEncrypted: extractedData.rawResponseEncrypted,
-          extractionRawIv: extractedData.rawResponseIv,
-          extractionRawKeyId: extractedData.rawResponseKeyId,
-        });
-
-        const persistedInsight = await saveTaxInsightForDocument(user.id, documentId, extractedData);
-        logAudit(req, "tax_insight.generated", "tax_insight", persistedInsight.id, {
-          documentId,
-          taxYear: persistedInsight.taxYear,
-          dscrCandidate: persistedInsight.dscrCandidate,
-          selfEmployed: persistedInsight.selfEmployed,
-          confidence: persistedInsight.confidence,
-        });
-        return { insight: persistedInsight, blockReason: null };
+      const job = await enqueueTaxPackageExtraction(documentId, user.id);
+      kickDocumentExtractionWorker();
+      logAudit(req, "tax_insight.queued", "document", documentId, {
+        jobId: job.id,
+        status: job.status,
       });
-      if (persistence.blockReason) {
-        return res.status(409).json({
-          error:
-            persistence.blockReason === "replaced"
-              ? "This tax return was replaced while extraction was running. The result was discarded."
-              : "This tax return was reviewed while extraction was running. The human decision was kept.",
-          code:
-            persistence.blockReason === "replaced"
-              ? "DOCUMENT_VERSION_REPLACED"
-              : "DOCUMENT_ALREADY_REVIEWED",
-        });
-      }
-      const insight = persistence.insight!;
-
-      res.json({
-        insight: publicInsight(insight),
-        extraction: publicExtraction(extractedData),
+      res.status(202).json({
+        documentId,
+        jobId: job.id,
+        status: job.status === "processing" ? "running" : job.status,
       });
     } catch (error) {
       console.error("Tax insight processing error:", error);
@@ -172,6 +110,9 @@ export function registerTaxInsightRoutes(app: Express, storage: IStorage) {
   app.get("/api/tax-insights/me", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as User;
+      if (!(await hasUserConsent("tax_document_use", user.id))) {
+        return res.json({ insights: [] });
+      }
       const insights = await storage.getTaxInsightsByUser(user.id);
       res.json({ insights: insights.map(publicInsight) });
     } catch (error) {

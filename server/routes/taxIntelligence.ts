@@ -12,12 +12,7 @@ import {
 import { isAdmin, isInternalStaffRole } from "@shared/roles";
 import { and, eq } from "drizzle-orm";
 import { hasUserConsent } from "../consentGate";
-import {
-  runTaxDocumentIntelligence,
-  getLatestTaxIntelligence,
-  TaxDocumentIntelligenceError,
-} from "../services/taxDocumentIntelligence";
-import { resolveAndPersistEntities } from "../services/borrowerEntityResolution";
+import { getLatestTaxIntelligence } from "../services/taxDocumentIntelligence";
 import { buildTaxReconciliation } from "../services/taxReconciliation";
 import {
   classifyAndPersistSituation,
@@ -30,6 +25,13 @@ import { logAudit } from "../auditLog";
 import { logFriction } from "../services/frictionLog";
 import { firstQueryValue } from "./queryParams";
 import { routeParam } from "../http/routeParams";
+import { getDocumentProcessingBlockReason } from "../services/documentLineage";
+import {
+  enqueueTaxPackageExtraction,
+  getTaxPackageExtractionJob,
+  kickDocumentExtractionWorker,
+} from "../services/documentExtractionJobs";
+import { resolveDocumentBorrowerUserId } from "../services/documentBorrower";
 
 /**
  * Tax Document Intelligence routes (UAL P2a — Situation Identification Engine).
@@ -61,22 +63,30 @@ async function staffCanAccessBorrower(
   borrowerUserId: string,
   applicationId: string | undefined,
   storage: IStorage,
+  options: { requireTaxDocumentConsent?: boolean } = {},
 ): Promise<{ allowed: boolean; reason?: string }> {
-  if (isAdmin(caller)) return { allowed: true };
   if (!isInternalStaffRole(caller.role)) return { allowed: false, reason: "Unauthorized" };
-  if (!applicationId) {
+  if (!isAdmin(caller) && !applicationId) {
     return {
       allowed: false,
       reason: "An applicationId is required for non-admin staff access",
     };
   }
-  const teamMembers = await storage.getDealTeamMembers(applicationId);
-  if (!teamMembers.some((m) => m.userId === caller.id)) {
-    return { allowed: false, reason: "Access denied" };
+  if (!isAdmin(caller)) {
+    const teamMembers = await storage.getDealTeamMembers(applicationId!);
+    if (!teamMembers.some((m) => m.userId === caller.id)) {
+      return { allowed: false, reason: "Access denied" };
+    }
+    const application = await storage.getLoanApplication(applicationId!);
+    if (!application || application.userId !== borrowerUserId) {
+      return { allowed: false, reason: "Access denied" };
+    }
   }
-  const application = await storage.getLoanApplication(applicationId);
-  if (!application || application.userId !== borrowerUserId) {
-    return { allowed: false, reason: "Access denied" };
+  if (
+    options.requireTaxDocumentConsent !== false &&
+    !(await hasUserConsent("tax_document_use", borrowerUserId))
+  ) {
+    return { allowed: false, reason: "Tax document authorization is no longer active" };
   }
   return { allowed: true };
 }
@@ -89,14 +99,15 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
       if (!document) {
         return res.status(404).json({ error: "Document not found" });
       }
-      if (document.userId !== user.id) {
+      const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+      if (borrowerUserId !== user.id) {
         return res.status(403).json({ error: "Unauthorized" });
       }
       if (document.documentType !== "tax_return") {
         return res.status(400).json({ error: "Document is not a tax return" });
       }
 
-      if (!(await hasUserConsent("tax_document_use", user.id))) {
+      if (!(await hasUserConsent("tax_document_use", borrowerUserId))) {
         logFriction("consent_gate_blocked", {
           userId: user.id,
           detail: "tax_document_use",
@@ -109,48 +120,34 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
         });
       }
 
-      const summary = await runTaxDocumentIntelligence(document);
-
-      // P2b/P2c: refresh the borrower's resolved entities and situation
-      // profile from the new extraction (non-fatal — both are derived views,
-      // recomputable from the persisted extraction).
-      let entityCount: number | undefined;
-      let situationProfileId: string | undefined;
-      if (summary.status === "completed") {
-        try {
-          const { entities } = await resolveAndPersistEntities(user.id);
-          entityCount = entities.length;
-        } catch (resolutionErr) {
-          console.warn("[TaxIntelligence] Entity resolution failed (non-fatal):", resolutionErr);
-        }
-        try {
-          const situation = await classifyAndPersistSituation(user.id);
-          situationProfileId = situation.id;
-        } catch (situationErr) {
-          console.warn("[TaxIntelligence] Situation classification failed (non-fatal):", situationErr);
-        }
-      }
-
-      logAudit(req, "tax_intelligence.run", "document", document.id, {
-        runId: summary.runId,
-        status: summary.status,
-        formCount: summary.formCount,
-        overallConfidence: summary.overallConfidence,
-        simulated: summary.simulated,
-        entityCount,
-      });
-
-      res
-        .status(summary.status === "failed" ? 502 : 200)
-        .json({ ...summary, entityCount, situationProfileId });
-    } catch (error) {
-      if (error instanceof TaxDocumentIntelligenceError) {
-        return res.status(error.status).json({
-          error: error.message,
-          code: error.code,
-          ...(error.runId ? { runId: error.runId } : {}),
+      const preflightBlock = await getDocumentProcessingBlockReason(document.id);
+      if (preflightBlock) {
+        return res.status(409).json({
+          error:
+            preflightBlock === "replaced"
+              ? "This tax return has been replaced. Process the current version instead."
+              : "This tax return already has a final human review.",
+          code:
+            preflightBlock === "replaced"
+              ? "DOCUMENT_VERSION_REPLACED"
+              : "DOCUMENT_ALREADY_REVIEWED",
         });
       }
+
+      const job = await enqueueTaxPackageExtraction(document.id, user.id);
+      kickDocumentExtractionWorker();
+
+      logAudit(req, "tax_intelligence.run", "document", document.id, {
+        jobId: job.id,
+        status: job.status,
+      });
+
+      res.status(202).json({
+        documentId: document.id,
+        jobId: job.id,
+        status: job.status === "processing" ? "running" : job.status,
+      });
+    } catch (error) {
       console.error("Tax intelligence run error:", error);
       res.status(500).json({ error: "Failed to process tax document" });
     }
@@ -163,11 +160,19 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
       if (!document) {
         return res.status(404).json({ error: "Document not found" });
       }
-      const isOwner = document.userId === user.id;
+      const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+      const isOwner = borrowerUserId === user.id;
+      if (isOwner && !(await hasUserConsent("tax_document_use", borrowerUserId))) {
+        return res.status(403).json({
+          error: "Tax document authorization is no longer active",
+          code: "CONSENT_REQUIRED",
+          consentType: "tax_document_use",
+        });
+      }
       if (!isOwner) {
         const access = await staffCanAccessBorrower(
           user,
-          document.userId,
+          borrowerUserId,
           document.applicationId ?? firstQueryValue(req.query.applicationId),
           storage,
         );
@@ -176,7 +181,18 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
         }
       }
 
-      const summary = await getLatestTaxIntelligence(document.id);
+      const [summary, job] = await Promise.all([
+        getLatestTaxIntelligence(document.id),
+        getTaxPackageExtractionJob(document.id),
+      ]);
+      if (job && job.status !== "completed") {
+        return res.json({
+          documentId: document.id,
+          jobId: job.id,
+          status: job.status === "pending" ? "queued" : job.status === "processing" ? "running" : job.status,
+          error: job.status === "failed" ? "We couldn't read this tax package automatically." : undefined,
+        });
+      }
       if (!summary) {
         return res.status(404).json({ error: "No extraction has been run for this document" });
       }
@@ -186,7 +202,7 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
         // access — leave a trail.
         logAudit(req, "tax_intelligence.viewed", "document", document.id, {
           runId: summary.runId,
-          borrowerId: document.userId,
+          borrowerId: borrowerUserId,
         });
       }
 
@@ -210,7 +226,9 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
         typeof req.query.userId === "string" && req.query.userId ? req.query.userId : user.id;
       const applicationId = firstQueryValue(req.query.applicationId);
       const isOwner = requestedUserId === user.id;
-      if (!isOwner) {
+      if (isOwner && !(await hasUserConsent("tax_document_use", requestedUserId))) {
+        return res.status(403).json({ error: "Tax document authorization is no longer active" });
+      } else if (!isOwner) {
         const access = await staffCanAccessBorrower(
           user,
           requestedUserId,
@@ -254,7 +272,9 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
         typeof req.query.userId === "string" && req.query.userId ? req.query.userId : user.id;
       const applicationId = firstQueryValue(req.query.applicationId);
       const isOwner = requestedUserId === user.id;
-      if (!isOwner) {
+      if (isOwner && !(await hasUserConsent("tax_document_use", requestedUserId))) {
+        return res.status(403).json({ error: "Tax document authorization is no longer active" });
+      } else if (!isOwner) {
         const access = await staffCanAccessBorrower(
           user,
           requestedUserId,
@@ -336,7 +356,9 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
           ? req.query.applicationId
           : undefined;
       const isOwner = requestedUserId === user.id;
-      if (!isOwner) {
+      if (isOwner && !(await hasUserConsent("tax_document_use", requestedUserId))) {
+        return res.status(403).json({ error: "Tax document authorization is no longer active" });
+      } else if (!isOwner) {
         const access = await staffCanAccessBorrower(user, requestedUserId, applicationId, storage);
         if (!access.allowed) {
           return res.status(403).json({ error: access.reason ?? "Unauthorized" });
@@ -441,7 +463,13 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
       if (!application) {
         return res.status(404).json({ error: "Application not found" });
       }
-      const access = await staffCanAccessBorrower(user, application.userId, application.id, storage);
+      const access = await staffCanAccessBorrower(
+        user,
+        application.userId,
+        application.id,
+        storage,
+        { requireTaxDocumentConsent: false },
+      );
       if (!access.allowed) {
         return res.status(403).json({ error: access.reason ?? "Unauthorized" });
       }

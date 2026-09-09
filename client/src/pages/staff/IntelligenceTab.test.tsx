@@ -39,6 +39,17 @@ function renderTab() {
     environment: "production",
     readyForLiveLoanLifecycle: false,
     counts: { live: 2, simulated: 4, disabled: 5, configuration_error: 0 },
+    documentExtractionQueue: {
+      pending: 1,
+      processing: 1,
+      completed: 8,
+      failed: 0,
+      cancelled: 0,
+      retryScheduled: 1,
+      staleLeases: 0,
+      oldestPendingAt: "2026-09-08T11:59:00.000Z",
+      lastCompletedAt: "2026-09-08T12:00:00.000Z",
+    },
     capabilities: [{
       id: "credit",
       label: "Mortgage credit report",
@@ -75,5 +86,7 @@ describe("IntelligenceTab", () => {
     expect(screen.getByText("External connections incomplete")).toBeTruthy();
     expect(screen.getByText("Mortgage credit report")).toBeTruthy();
     expect(screen.getByText("Last successful verification: not recorded")).toBeTruthy();
+    expect(screen.getByTestId("document-extraction-queue")).toBeTruthy();
+    expect(screen.getByText("Retry scheduled")).toBeTruthy();
   });
 });

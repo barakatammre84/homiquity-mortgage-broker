@@ -67,6 +67,10 @@ export interface StageDerivationInputs {
     recommendation: string | null;
     /** True when the dual-AUS LPA leg produced findings for this casefile. */
     lpaAssessed: boolean;
+    /** False when current borrower facts/evidence/policy no longer match the recorded run. */
+    inputsCurrent?: boolean;
+    staleReason?: string | null;
+    decisionPath?: "automated" | "manual_underwrite";
   };
   consents: {
     eDisclosure: boolean;
@@ -157,6 +161,10 @@ export function deriveSubmissionStages(inputs: StageDerivationInputs): Omit<Brok
     ausBlockers.push("No AUS run recorded — run DU / LPA before this file can go to a wholesale lender");
   } else if (!inputs.aus.recommendation) {
     ausBlockers.push("AUS casefile created but no recommendation captured — re-run DU / LPA to completion");
+  } else if (inputs.aus.inputsCurrent === false) {
+    ausBlockers.push(
+      `Recorded AUS findings are stale — ${inputs.aus.staleReason ?? "borrower facts, evidence, verification, or policy changed"} Re-run DU / LPA before packaging.`,
+    );
   }
   // Broker doctrine is dual AUS: flag DU-only casefiles (files run before
   // the LPA leg landed re-run through AUS to pick it up).
@@ -171,6 +179,9 @@ export function deriveSubmissionStages(inputs: StageDerivationInputs): Omit<Brok
     ausWarnings.push(
       `AUS recommendation is ${inputs.aus.recommendation.replace(/_/g, " ")} — not Approve/Eligible; lender placement is a manual broker decision`,
     );
+  }
+  if (inputs.aus.decisionPath === "manual_underwrite") {
+    ausWarnings.push("The local decision engine routed this file to manual underwriting; a licensed reviewer must document the placement decision.");
   }
   stages.push({
     key: "aus",
@@ -283,6 +294,16 @@ export async function evaluateBrokerSubmissionReadiness(applicationId: string): 
   const { evaluateDeliveryReadiness } = await import("./loanDeliveryReadiness");
   const delivery = await evaluateDeliveryReadiness(applicationId);
 
+  const persistedFindings = application.ausFindings as {
+    lpa?: unknown;
+    inputIntegrity?: { decisionPath?: "automated" | "manual_underwrite" };
+  } | null;
+  const ausFreshness = application.ausCasefileId
+    ? await import("./ausDecisionIntegrity").then(module =>
+        module.evaluateAusInputFreshness(applicationId, persistedFindings),
+      )
+    : { current: false, reason: null, currentFingerprint: null };
+
   // Income-analysis readiness (UAL P6): does this file need the income package,
   // and is it complete? A file needs it when the borrower has self-employment,
   // or the selected income path is non-agency (DSCR / bank-statement).
@@ -323,7 +344,10 @@ export async function evaluateBrokerSubmissionReadiness(applicationId: string): 
     aus: {
       casefileId: application.ausCasefileId ?? null,
       recommendation: application.ausRecommendation ?? null,
-      lpaAssessed: !!(application.ausFindings as { lpa?: unknown } | null)?.lpa,
+      lpaAssessed: !!persistedFindings?.lpa,
+      inputsCurrent: application.ausCasefileId ? ausFreshness.current : undefined,
+      staleReason: ausFreshness.reason,
+      decisionPath: persistedFindings?.inputIntegrity?.decisionPath,
     },
     consents: { eDisclosure, antiSteering },
     changeOfCircumstance: await (async () => {

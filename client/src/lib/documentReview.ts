@@ -32,6 +32,18 @@ export interface ParsedExtractionNotes {
   confidence: "high" | "medium" | "low" | null;
   humanReviewRequired: boolean | null;
   warnings: string[];
+  documentClassification: {
+    pageCount: number | null;
+    compatible: boolean;
+    mixedPacket: boolean;
+    minimumConfidence: number;
+    segments: Array<{
+      documentType: string;
+      pageStart: number;
+      pageEnd: number;
+      confidence: number;
+    }>;
+  } | null;
 }
 
 /**
@@ -65,6 +77,44 @@ export function parseExtractionNotes(notes: string | null | undefined): ParsedEx
   const extractedFields = Array.isArray(obj.extractedFields)
     ? obj.extractedFields.filter((f): f is string => typeof f === "string")
     : [];
+  const classificationObject =
+    typeof obj.documentClassification === "object" &&
+    obj.documentClassification !== null &&
+    !Array.isArray(obj.documentClassification)
+      ? obj.documentClassification as Record<string, unknown>
+      : null;
+  const classificationSegments = Array.isArray(classificationObject?.segments)
+    ? classificationObject.segments.flatMap((segment) => {
+        if (typeof segment !== "object" || segment === null || Array.isArray(segment)) return [];
+        const value = segment as Record<string, unknown>;
+        if (
+          typeof value.documentType !== "string" ||
+          typeof value.pageStart !== "number" ||
+          typeof value.pageEnd !== "number" ||
+          typeof value.confidence !== "number"
+        ) return [];
+        return [{
+          documentType: value.documentType,
+          pageStart: value.pageStart,
+          pageEnd: value.pageEnd,
+          confidence: value.confidence,
+        }];
+      })
+    : [];
+  const documentClassification = classificationObject &&
+    typeof classificationObject.compatible === "boolean" &&
+    typeof classificationObject.mixedPacket === "boolean" &&
+    typeof classificationObject.minimumConfidence === "number"
+      ? {
+          pageCount: typeof classificationObject.pageCount === "number"
+            ? classificationObject.pageCount
+            : null,
+          compatible: classificationObject.compatible,
+          mixedPacket: classificationObject.mixedPacket,
+          minimumConfidence: classificationObject.minimumConfidence,
+          segments: classificationSegments,
+        }
+      : null;
 
   // Require at least one extraction marker so an arbitrary JSON-shaped
   // description doesn't render as an extraction record.
@@ -83,6 +133,7 @@ export function parseExtractionNotes(notes: string | null | undefined): ParsedEx
     warnings: Array.isArray(obj.warnings)
       ? obj.warnings.filter((w): w is string => typeof w === "string")
       : [],
+    documentClassification,
   };
 }
 

@@ -40,9 +40,10 @@ interface DocumentViewerProps {
   documentId: string;
   fileName: string;
   mimeType: string | null;
+  requestedPage?: { pageNumber: number; requestId: number } | null;
 }
 
-export default function DocumentViewer({ documentId, fileName, mimeType }: DocumentViewerProps) {
+export default function DocumentViewer({ documentId, fileName, mimeType, requestedPage }: DocumentViewerProps) {
   const [content, setContent] = useState<ViewerContent>({ kind: "loading" });
   const [pageNum, setPageNum] = useState(1);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
@@ -95,6 +96,11 @@ export default function DocumentViewer({ documentId, fileName, mimeType }: Docum
       if (loadingTask) void loadingTask.destroy().catch(() => undefined);
     };
   }, [documentId, fileName, mimeType]);
+
+  useEffect(() => {
+    if (content.kind !== "pdf" || !requestedPage) return;
+    setPageNum(Math.min(content.numPages, Math.max(1, requestedPage.pageNumber)));
+  }, [content, requestedPage]);
 
   // Rasterize the current PDF page whenever page/zoom/document changes.
   useEffect(() => {

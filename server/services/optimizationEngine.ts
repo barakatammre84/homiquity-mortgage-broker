@@ -23,6 +23,7 @@ import { transitionState, getCurrentState } from "./borrowerStateMachine";
 import { buildBorrowerGraph } from "./borrowerGraph";
 import { sendNotificationEmail } from "./emailService";
 import crypto from "crypto";
+import type { DatabaseTransaction } from "./documentLineage";
 
 // ---------------------------------------------------------------------------
 // Extraction → readiness wiring (finding F-030)
@@ -148,19 +149,20 @@ export async function creditDocumentPresence(
   documentType: string,
   /** "uploaded" = the borrower's assertion; "verified" = a human confirmed it. */
   strength: "uploaded" | "verified",
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<{ fieldUpdated: string | null }> {
   // Aliases resolve first — drivers_license/passport/id all mean government_id.
   const fieldName = presenceFieldFor(documentType);
   if (!fieldName) return { fieldUpdated: null };
 
-  await initializeReadinessChecklist(userId);
+  await initializeReadinessChecklist(userId, undefined, transaction);
   try {
     await updateReadinessField(userId, fieldName, {
       verificationStatus: strength === "verified" ? "manually_verified" : "self_reported",
       sourceTable: "documents",
       sourceField: "documentPresence",
       sourceRecordId: documentId,
-    });
+    }, transaction);
     return { fieldUpdated: fieldName };
   } catch (err) {
     console.warn(`[Readiness] presence credit failed for ${fieldName}:`, err);
@@ -174,13 +176,14 @@ export async function wireExtractionToReadiness(
   documentType: string,
   /** The extraction RESULT (values + lineage), not its list of field names. */
   extracted: Record<string, any>,
-  confidence: string
+  confidence: string,
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<{ fieldsUpdated: string[]; skipped: string[] }> {
   if (confidence === "low") {
     return { fieldsUpdated: [], skipped: ["all - low confidence"] };
   }
 
-  await initializeReadinessChecklist(userId);
+  await initializeReadinessChecklist(userId, undefined, transaction);
 
   const mappings = DOCUMENT_FIELD_MAP[documentType];
   if (!mappings) {
@@ -206,7 +209,7 @@ export async function wireExtractionToReadiness(
         sourceTable: "documents",
         sourceField,
         sourceRecordId: documentId,
-      });
+      }, transaction);
       fieldsUpdated.push(fieldName);
     } catch (err) {
       skipped.push(`${fieldName}: update failed`);

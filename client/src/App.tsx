@@ -259,7 +259,12 @@ function Router() {
         {!isProduction && <Route path="/test-login"><BareLayout><TestLogin /></BareLayout></Route>}
         <Route path="/redeem-invite"><BareLayout><RedeemInvite /></BareLayout></Route>
         <Route path="/redeem-invite/:code"><BareLayout><RedeemInvite /></BareLayout></Route>
-        <Route path="/apply"><Gated><BareLayout><PreApproval /></BareLayout></Gated></Route>
+        {/* PreApproval owns its complete page shell: public navigation on the
+            introduction, focused application chrome after the borrower starts,
+            and one skip-link/main landmark in both states. Wrapping it in
+            BareLayout created a second <main id="main"> and a second skip link,
+            which made the public header unreliable at the application door. */}
+        <Route path="/apply"><Gated><PreApproval /></Gated></Route>
         <Route path="/apply/:token">
           {(params) => <Gated><BareLayout><ApplyInvite /></BareLayout></Gated>}
         </Route>

@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db";
 import {
   loanApplications,
@@ -17,7 +17,7 @@ import {
   submitToLPA,
 } from "../services/ausSubmission";
 import { validateMISMOCompleteness, evaluateGseSubmissionReadiness } from "../services/mismoValidation";
-import { computeCasefileDti } from "../services/ausSubmission";
+import { AUS_INPUT_FINGERPRINT_VERSION, buildAusSubmissionContext } from "../services/ausDecisionIntegrity";
 
 /**
  * AUS orchestration routes: Plaid asset webhook ingestion and GSE (Fannie DU)
@@ -160,31 +160,6 @@ export function registerAusRoutes(app: Express) {
           .where(eq(users.id, application.userId))
           .limit(1);
 
-        // Latest validated verification reports (relief layers).
-        const latestReport = (reportType: string) =>
-          db
-            .select()
-            .from(verificationReports)
-            .where(
-              and(
-                eq(verificationReports.applicationId, applicationId),
-                eq(verificationReports.reportType, reportType),
-                eq(verificationReports.status, "completed"),
-              ),
-            )
-            .orderBy(desc(verificationReports.completedAt))
-            .limit(1);
-        const [[voa], [voie]] = await Promise.all([latestReport("voa"), latestReport("voie")]);
-
-        const purchasePrice = application.purchasePrice ? Number(application.purchasePrice) : 0;
-        const downPayment = application.downPayment ? Number(application.downPayment) : 0;
-        const loanAmount = Math.max(0, purchasePrice - downPayment);
-        if (loanAmount <= 0 || purchasePrice <= 0) {
-          return res.status(422).json({
-            error: "Application is missing purchase price / down payment — cannot build a DU casefile.",
-          });
-        }
-
         // Completeness gate: refuse to hand DU a casefile that is missing
         // required URLA fields (SSN, DOB, citizenship, address, employment,
         // declarations, HMDA) or carries critical compliance errors (ARM,
@@ -199,57 +174,43 @@ export function registerAusRoutes(app: Express) {
           return res.status(gate.status).json(gate.body);
         }
 
-        const monthlyIncome = application.annualIncome ? Number(application.annualIncome) / 12 : null;
-
-        // B3-6-02 (Debt-to-Income Ratios) read with B3-6-03 (Monthly Housing Expense for the
-        // Subject Property): the qualifying ratio is TOTAL monthly obligations INCLUDING the
-        // proposed housing payment. This sent recurring debts alone, which understates every
-        // purchase casefile — on a file with $750 of debts, $6,000 income and a $2,250 payment
-        // it reported 12.5% where the real ratio is 50%, the difference between clearing DU's
-        // ceiling and hitting it.
-        //
-        // A2-2-04 makes that a warranty problem, not a cosmetic one: the DU limited waiver holds
-        // only where "all data pertaining to the mortgage loan is complete, accurate, and not
-        // fraudulent", and it expressly does not relieve the lender of "the identification and
-        // inclusion of a borrower's liabilities in the DTI".
-        //
-        // Uses the same projection the decision engine uses (decisionEngine.ts), so the casefile
-        // and the decision cannot disagree — B3-2-01 requires the delivered data to match the
-        // final DU submission.
-        let proposedHousingPayment: number | null = null;
-        try {
-          const { computePaymentProjection } = await import("../services/loanEstimate");
-          proposedHousingPayment = (await computePaymentProjection(applicationId)).estimatedMonthlyTotal;
-        } catch (projErr) {
-          // Pricing inputs missing/unpriceable. Fall through to a null DTI rather than a partial
-          // one: an absent ratio is honest and DU asks for it, while a knowingly understated one
-          // buys an Approve/Eligible the file has not earned.
-          console.error("[aus] payment projection unavailable; submitting DTI as null:", projErr);
+        // One calculation path produces the casefile: the deterministic engine
+        // supplies its current income, debts, qualifying PITIA and policy
+        // fingerprint. If that engine cannot make a coherent casefile, do not
+        // manufacture a partial DU result from application summary fields.
+        const context = await buildAusSubmissionContext(applicationId);
+        if (!context.casefileInput || !context.inputFingerprint) {
+          return res.status(422).json({
+            error: context.decisionPath === "manual_underwrite"
+              ? "This file is outside the automated decision matrix and needs manual underwriting."
+              : "Current underwriting inputs are incomplete.",
+            code: context.decisionPath,
+            blockers: context.blockers,
+            decision: context.decision,
+          });
         }
-        const dti = computeCasefileDti({
-          monthlyIncome,
-          monthlyDebts: application.monthlyDebts != null ? Number(application.monthlyDebts) : null,
-          proposedHousingPayment,
-        });
-
-        const casefileInput = {
-          applicationId,
-          loanAmount,
-          propertyValue: purchasePrice,
-          creditScore: application.creditScore,
-          dti,
-          voaReportId: voa?.voaReportId ?? null,
-          voieReportId: voie?.voieReportId ?? null,
-          auditCopyToken: voa?.auditCopyToken ?? null,
-        };
+        const casefileInput = context.casefileInput;
+        const loanAmount = casefileInput.loanAmount;
+        const purchasePrice = casefileInput.propertyValue;
 
         // Dual AUS: DU and LPA run on the same casefile inputs so lender
         // selection can follow whichever engine reads the file better. DU
         // stays the headline recommendation; LPA rides along in ausFindings.
-        const [findings, lpaFindings] = await Promise.all([
+        const [rawFindings, lpaFindings] = await Promise.all([
           submitToDU(casefileInput),
           submitToLPA(casefileInput),
         ]);
+        const findings = {
+          ...rawFindings,
+          inputIntegrity: {
+            version: AUS_INPUT_FINGERPRINT_VERSION,
+            inputFingerprint: context.inputFingerprint,
+            evidenceFingerprint: context.evidenceFingerprint,
+            decisionInputsFingerprint: context.decision.inputsFingerprint,
+            policyFingerprint: context.decision.resolvedPolicy?.fingerprint ?? null,
+            decisionPath: context.decisionPath,
+          },
+        };
 
         // Persist findings onto the application…
         await db
@@ -267,8 +228,8 @@ export function registerAusRoutes(app: Express) {
 
         // …and mark the consumed reports GSE-eligible/ineligible per findings.
         const reliefByReportId: Array<[string | undefined, boolean]> = [
-          [voa?.id, findings.day1Certainty.assets.relief],
-          [voie?.id, findings.day1Certainty.income.relief || findings.day1Certainty.employment.relief],
+          [context.verificationReportIds.voa ?? undefined, findings.day1Certainty.assets.relief],
+          [context.verificationReportIds.voie ?? undefined, findings.day1Certainty.income.relief || findings.day1Certainty.employment.relief],
         ];
         for (const [reportId, relief] of reliefByReportId) {
           if (reportId) {

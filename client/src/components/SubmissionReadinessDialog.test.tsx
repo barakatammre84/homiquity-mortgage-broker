@@ -247,6 +247,21 @@ describe("SubmissionReadinessDialog — DU / LPA findings panel (B3-2-11)", () =
     expect(screen.getByTestId("aus-findings-recommendation").textContent).toBe("Refer with Caution");
   });
 
+  it("marks historical findings stale when readiness detects changed inputs", async () => {
+    renderDialog({
+      readinessOver: {
+        stages: [{
+          ...AUS_STAGE,
+          status: "blocked",
+          blockers: ["Recorded AUS findings are stale — income evidence changed. Re-run DU / LPA before packaging."],
+        }],
+      },
+    });
+    const user = await openDialog();
+    await user.click(await screen.findByTestId("aus-findings-toggle"));
+    expect(screen.getByTestId("aus-findings-stale").textContent).toMatch(/rerun required/i);
+  });
+
   it("shows no findings toggle before any AUS run (no casefile on the row)", async () => {
     renderDialog({
       readinessOver: { stages: [AUS_STAGE] },

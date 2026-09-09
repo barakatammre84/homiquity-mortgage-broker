@@ -34,6 +34,7 @@ import {
   EXTRACTION_MODEL_TAX_PACKAGE,
   EXTRACTION_PROMPT_VERSION,
   SIMULATED_MODEL_ID,
+  extractionSimulationEnabled,
   type ExtractionLineage,
 } from "./extractionCore";
 import { validateExtraction, lineageFor, rawLineage, VALIDATION_FAILED_WARNING } from "./extractionValidation";
@@ -457,7 +458,7 @@ export async function classifyTaxDocument(
 ): Promise<TaxFormClassificationResult> {
   const model = EXTRACTION_MODEL_TAX_PACKAGE;
   if (!anthropic) {
-    if (process.env.EXTRACTION_SIMULATE === "true") {
+    if (extractionSimulationEnabled()) {
       const sim = buildSimulatedTaxScenario(filePath);
       return { classification: sim.classification, lineage: simulatedLineage(), simulated: true };
     }
@@ -517,7 +518,7 @@ export async function extractTaxFormInstanceFields(
 ): Promise<TaxFormInstanceExtraction> {
   const model = EXTRACTION_MODEL_TAX_PACKAGE;
   if (!anthropic) {
-    if (process.env.EXTRACTION_SIMULATE === "true") {
+    if (extractionSimulationEnabled()) {
       const sim = buildSimulatedTaxScenario(filePath);
       const match = sim.instances.find((i) => matchesSimInstance(i, instance));
       if (match) {

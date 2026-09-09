@@ -179,22 +179,31 @@ else
     [ -z "$DB_URL" ] && DB_REASON="no database — run: bash scripts/local-db.sh up"
   fi
 
-  boot() { # <port> <node_env> <logfile>
-    NODE_ENV="$2" PORT="$1" DATABASE_URL="$DB_URL" \
-    DEV_TEST_PASSWORD="${DEV_TEST_PASSWORD:-test1234}" RATE_LIMIT_RELAXED=true \
-    SESSION_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')" \
-    PII_HASH_SALT="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')" \
-    CREDIT_ENCRYPTION_KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))')" \
-    node dist/index.js > "$3" 2>&1 &
-    echo $! > "/tmp/preflight-$1.pid"
+  boot() { # <port> <node_env> <logfile> [deterministic-extraction]
+    local port="$1" node_env="$2" logfile="$3" profile="${4:-}"
+    (
+      export NODE_ENV="$node_env" PORT="$port" DATABASE_URL="$DB_URL"
+      export DEV_TEST_PASSWORD="${DEV_TEST_PASSWORD:-test1234}" RATE_LIMIT_RELAXED=true
+      export SESSION_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')"
+      export PII_HASH_SALT="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')"
+      export CREDIT_ENCRYPTION_KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))')"
+      if [ "$profile" = "deterministic-extraction" ]; then
+        # The HTTP suite verifies routing, consent, persistence, and queue behavior.
+        # Give only that development server deterministic model output so the lane
+        # never depends on private object storage or a live model credential.
+        export EXTRACTION_SIMULATE=true ANTHROPIC_API_KEY="" CLAUDE_API_KEY=""
+      fi
+      exec node dist/index.js
+    ) > "$logfile" 2>&1 &
+    echo $! > "/tmp/preflight-$port.pid"
     local code=000
     for _ in $(seq 1 45); do
-      code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$1/api/health" 2>/dev/null || true)"
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/api/health" 2>/dev/null || true)"
       [ "${code:-000}" = "200" ] && return 0
-      kill -0 "$(cat "/tmp/preflight-$1.pid")" 2>/dev/null || break
+      kill -0 "$(cat "/tmp/preflight-$port.pid")" 2>/dev/null || break
       sleep 1
     done
-    cat "$3"
+    cat "$logfile"
     return 1
   }
   stop() { kill "$(cat "/tmp/preflight-$1.pid" 2>/dev/null)" 2>/dev/null; rm -f "/tmp/preflight-$1.pid"; }
@@ -215,7 +224,7 @@ else
     # gets a fresh process on purpose — the auth limiter is in-memory and a
     # second pass inside 15 minutes 429s.
     integration() {
-      boot "$INT_PORT" development /tmp/preflight-integration.log || { stop "$INT_PORT"; return 1; }
+      boot "$INT_PORT" development /tmp/preflight-integration.log deterministic-extraction || { stop "$INT_PORT"; return 1; }
       TEST_BASE_URL="http://localhost:$INT_PORT" DATABASE_URL="$DB_URL" \
         DEV_TEST_PASSWORD="${DEV_TEST_PASSWORD:-test1234}" pnpm test:integration
       local r=$?; stop "$INT_PORT"; return $r

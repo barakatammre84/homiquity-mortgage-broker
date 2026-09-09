@@ -18,6 +18,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
 import { ObjectStorageService } from "./integrations/object_storage";
+import type { DocumentTypeTaxonomy } from "@shared/schema/documents";
 
 // Model lineage, persisted with every extraction so a past result can be traced
 // to the exact model + prompt that produced it. Bump EXTRACTION_PROMPT_VERSION
@@ -35,9 +36,24 @@ export const EXTRACTION_MODEL_SINGLE_DOC = "claude-sonnet-5";
 export const EXTRACTION_MODEL_TAX_PACKAGE = "claude-opus-4-8";
 /** @deprecated Use the task-specific constants above; retained for back-compat. */
 export const EXTRACTION_MODEL_ID = EXTRACTION_MODEL_TAX_PACKAGE;
-export const EXTRACTION_PROMPT_VERSION = "2026-07-v3";
+export const EXTRACTION_PROMPT_VERSION = "2026-09-v5";
 /** Lineage marker for deterministic simulated extractions (I10: unmistakable). */
 export const SIMULATED_MODEL_ID = "simulated";
+
+/**
+ * Demonstration extraction is a local/test aid only. A production process
+ * must fail closed before a plausible sample value can enter the normal
+ * borrower-fact persistence path.
+ */
+export function extractionSimulationEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.EXTRACTION_SIMULATE !== "true") return false;
+  if (env.NODE_ENV === "production") {
+    throw new Error("EXTRACTION_SIMULATE cannot be enabled in production");
+  }
+  return true;
+}
 
 // Captured at import time (tests rely on this): construct the client only when
 // a key exists — the Anthropic SDK throws at construction with no API key.
@@ -56,6 +72,38 @@ export interface ExtractionLineage {
   rawResponseEncrypted?: string;
   rawResponseIv?: string;
   rawResponseKeyId?: string;
+  /** Source location and field-specific model confidence for staff review. */
+  fieldEvidence?: Record<string, ExtractedFieldEvidence>;
+  /** Page count observed by the extractor when the source is paginated. */
+  pageCount?: number;
+  /**
+   * Independent page classification returned alongside a simple-document
+   * extraction. The upload dropdown is a routing hint from the borrower; it is
+   * never evidence that the bytes are actually that kind of document.
+   */
+  documentClassification?: DocumentClassification;
+}
+
+export interface DocumentPageClassification {
+  /** 1-indexed source page. */
+  pageNumber: number;
+  documentType: DocumentTypeTaxonomy;
+  /** Model confidence from 0 to 1 for this page's type. */
+  confidence: number;
+}
+
+export interface DocumentClassification {
+  pageCount: number;
+  pages: DocumentPageClassification[];
+}
+
+export interface ExtractedFieldEvidence {
+  /** 1-indexed source page. Images are page 1. */
+  pageNumber: number;
+  /** Field-specific model confidence from 0 to 1. */
+  confidence: number;
+  /** Normalized page coordinates, when the model can locate the value. */
+  boundingBox?: { x: number; y: number; width: number; height: number };
 }
 
 export interface ExtractedTaxReturnData extends ExtractionLineage {
@@ -249,4 +297,3 @@ export async function generateExtractionText(
 // confidence, and a structurally invalid payload degrades to a low-confidence
 // empty extraction instead of flowing downstream.
 // ---------------------------------------------------------------------------
-

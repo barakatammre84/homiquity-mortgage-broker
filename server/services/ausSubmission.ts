@@ -163,6 +163,8 @@ export interface DuCasefileInput {
   voaReportId: string | null;
   voieReportId: string | null;
   auditCopyToken: string | null;
+  decisionPath?: "automated" | "manual_underwrite";
+  manualUnderwriteReasons?: string[];
 }
 
 export interface DuFindings {
@@ -177,6 +179,15 @@ export interface DuFindings {
     employment: { relief: boolean; reportId: string | null; reason: string };
   };
   messages: Array<{ code: string; severity: "info" | "condition" | "risk"; text: string }>;
+  decisionPath: "automated" | "manual_underwrite";
+  inputIntegrity?: {
+    version: string;
+    inputFingerprint: string;
+    evidenceFingerprint: string;
+    decisionInputsFingerprint: string;
+    policyFingerprint: string | null;
+    decisionPath: "automated" | "manual_underwrite";
+  };
 }
 
 export async function submitToDU(input: DuCasefileInput): Promise<DuFindings> {
@@ -193,6 +204,14 @@ export async function submitToDU(input: DuCasefileInput): Promise<DuFindings> {
 
   // Recommendation logic mirroring DU's headline gates (simplified).
   let recommendation: DuFindings["recommendation"] = "approve_eligible";
+  if (input.decisionPath === "manual_underwrite") {
+    recommendation = "refer_with_caution";
+    messages.push({
+      code: "HMQ-MANUAL-001",
+      severity: "condition",
+      text: input.manualUnderwriteReasons?.[0] ?? "File is outside the automated underwriting scope and requires manual underwriting.",
+    });
+  }
   if (input.creditScore === null || input.creditScore < 620) {
     recommendation = "refer";
     messages.push({ code: "DU-3001", severity: "risk", text: "Credit score below conventional minimum (620) or unavailable." });
@@ -224,6 +243,7 @@ export async function submitToDU(input: DuCasefileInput): Promise<DuFindings> {
       employment: d1c(input.voieReportId, "Employment"),
     },
     messages: messages.length ? messages : [{ code: "DU-0001", severity: "info", text: "Casefile underwritten with no adverse findings." }],
+    decisionPath: input.decisionPath ?? "automated",
   };
 
   return await withTimeout(Promise.resolve(findings), "DU Messages API");
@@ -247,6 +267,7 @@ export interface LpaFindings {
   purchaseEligibility: "eligible" | "ineligible";
   riskAssessment: { dti: number | null; ltv: number; creditScore: number | null };
   messages: Array<{ code: string; severity: "info" | "condition" | "risk"; text: string }>;
+  decisionPath: "automated" | "manual_underwrite";
 }
 
 export async function submitToLPA(input: DuCasefileInput): Promise<LpaFindings> {
@@ -268,6 +289,15 @@ export async function submitToLPA(input: DuCasefileInput): Promise<LpaFindings> 
   let riskClass: LpaFindings["riskClass"] = "accept";
   let purchaseEligibility: LpaFindings["purchaseEligibility"] = "eligible";
 
+  if (input.decisionPath === "manual_underwrite") {
+    riskClass = "caution";
+    messages.push({
+      code: "HMQ-MANUAL-001",
+      severity: "condition",
+      text: input.manualUnderwriteReasons?.[0] ?? "File is outside the automated underwriting scope and requires manual underwriting.",
+    });
+  }
+
   if (input.creditScore === null || input.creditScore < 620) {
     riskClass = "caution";
     messages.push({ code: "LPA-SIM-101", severity: "risk", text: "Credit score below conventional minimum (620) or unavailable." });
@@ -288,6 +318,7 @@ export async function submitToLPA(input: DuCasefileInput): Promise<LpaFindings> 
     purchaseEligibility,
     riskAssessment: { dti: input.dti, ltv: Number(ltv.toFixed(4)), creditScore: input.creditScore },
     messages: messages.length ? messages : [{ code: "LPA-SIM-001", severity: "info", text: "Assessment completed with no adverse findings." }],
+    decisionPath: input.decisionPath ?? "automated",
   };
 
   return await withTimeout(Promise.resolve(findings), "LPA assessment");

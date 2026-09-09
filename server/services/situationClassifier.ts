@@ -16,6 +16,7 @@ import {
 } from "./taxDocumentIntelligence";
 import { resolveBusinessEntities, type ResolvedEntity } from "./borrowerEntityResolution";
 import { runTieOuts, type TieOutCheck } from "./taxReconciliation";
+import type { DatabaseTransaction } from "./documentLineage";
 
 /**
  * Situation classifier (UAL P2c) — deterministic rules over the resolved
@@ -359,8 +360,9 @@ export function situationInputsFingerprint(input: SituationClassifierInput): str
 export async function classifyAndPersistSituation(
   userId: string,
   applicationId?: string,
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<SituationProfileRow> {
-  const instances = await getLatestInstancesForUser(userId, applicationId);
+  const instances = await getLatestInstancesForUser(userId, applicationId, transaction);
   const entities = resolveBusinessEntities(instances);
   const checks = runTieOuts(instances);
   // UAL P7: join the borrower's declared routing preference from their most
@@ -368,7 +370,7 @@ export async function classifyAndPersistSituation(
   const applicationScope = applicationId
     ? eq(loanApplications.id, applicationId)
     : eq(loanApplications.userId, userId);
-  const [latestApplication] = await db
+  const [latestApplication] = await transaction
     .select({ avoidsInterestFinancing: loanApplications.avoidsInterestFinancing })
     .from(loanApplications)
     .where(applicationScope)
@@ -385,7 +387,7 @@ export async function classifyAndPersistSituation(
   const profileScope = applicationId
     ? and(eq(situationProfiles.userId, userId), eq(situationProfiles.applicationId, applicationId))
     : and(eq(situationProfiles.userId, userId), isNull(situationProfiles.applicationId));
-  const [latest] = await db
+  const [latest] = await transaction
     .select()
     .from(situationProfiles)
     .where(profileScope)
@@ -396,7 +398,7 @@ export async function classifyAndPersistSituation(
   }
 
   const profile = classifySituation(input);
-  const [row] = await db
+  const [row] = await transaction
     .insert(situationProfiles)
     .values({
       userId,
