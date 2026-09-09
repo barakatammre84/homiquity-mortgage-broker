@@ -163,12 +163,13 @@ Fields to extract:
 ${fieldLines}
 
 Rules:
-- Every field you return must be {"value": <value>, "confidence": <0.0-1.0>}.
+- Every field you return must be {"value": <value>, "confidence": <0.0-1.0>, "pageNumber": <1-indexed page in the complete uploaded file>, "boundingBox": {"x": <0-1>, "y": <0-1>, "width": <0-1>, "height": <0-1>}}. Omit boundingBox only when the value is readable but its exact box cannot be located.
+- pageNumber must be inside the target form's page range. A value without a source page is not evidence and will be discarded.
 - If a field is not present on the form or is unreadable, OMIT it or return {"value": null, "confidence": <low>}. NEVER estimate, compute, or carry a value from a different form or year.
 - Numbers must be plain (no currency symbols, no thousands separators). Parentheses on the form mean a negative number.
 
 Return ONLY valid JSON:
-{"taxYear": ${instance.taxYear ?? "<year or null>"}, "entityName": ${instance.entityName ? `"${instance.entityName}"` : "<name or null>"}, "fields": {"<fieldName>": {"value": 12345, "confidence": 0.97}}, "warnings": []}`;
+{"taxYear": ${instance.taxYear ?? "<year or null>"}, "entityName": ${instance.entityName ? `"${instance.entityName}"` : "<name or null>"}, "fields": {"<fieldName>": {"value": 12345, "confidence": 0.97, "pageNumber": ${instance.pageStart ?? 1}, "boundingBox": {"x": 0.1, "y": 0.2, "width": 0.2, "height": 0.03}}}, "warnings": []}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +438,15 @@ export function buildSimulatedTaxScenario(filePath: string): {
     },
   ];
 
+  // The deterministic scenario exercises the same evidence contract as a
+  // provider response. Its values all point to the first page of their own
+  // form instance; real responses may provide a more precise page and box.
+  for (const instance of instances) {
+    for (const field of Object.values(instance.extraction.fields)) {
+      field.pageNumber = instance.meta.pageStart ?? 1;
+    }
+  }
+
   return {
     classification: {
       pageCount: 25,
@@ -567,10 +577,17 @@ export async function extractTaxFormInstanceFields(
     // value unreadable" — that surfaces as a count, never as a number.
     const fields: Record<string, ExtractedFieldValue> = {};
     let unreadable = 0;
+    let missingEvidence = 0;
     for (const [name, fv] of Object.entries(validated.fields as Record<string, ExtractedFieldValue | undefined>)) {
       if (!fv) continue;
       if (fv.value === null) {
         unreadable += 1;
+        continue;
+      }
+      const pageStart = instance.pageStart ?? 1;
+      const pageEnd = instance.pageEnd ?? pageStart;
+      if (!fv.pageNumber || fv.pageNumber < pageStart || fv.pageNumber > pageEnd) {
+        missingEvidence += 1;
         continue;
       }
       fields[name] = fv;
@@ -578,6 +595,9 @@ export async function extractTaxFormInstanceFields(
     const warnings = [...(validated.warnings ?? [])];
     if (unreadable > 0) {
       warnings.push(`${unreadable} field(s) visible but unreadable - omitted, manual review may be needed`);
+    }
+    if (missingEvidence > 0) {
+      warnings.push(`${missingEvidence} field(s) had no valid source page - omitted, manual review required`);
     }
 
     return {

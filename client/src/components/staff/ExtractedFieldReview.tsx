@@ -57,7 +57,7 @@ export function ExtractedFieldReview({
 }: {
   documentId: string;
   canReview: boolean;
-  onOpenSourcePage?: (pageNumber: number) => void;
+  onOpenSourcePage?: (pageNumber: number, boundingBox?: unknown, fieldLabel?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -161,7 +161,11 @@ export function ExtractedFieldReview({
                       variant="ghost"
                       size="sm"
                       className="touch-target h-7 px-2 text-xs sm:h-7"
-                      onClick={() => onOpenSourcePage?.(field.pageNumber!)}
+                      onClick={() => onOpenSourcePage?.(
+                        field.pageNumber!,
+                        field.boundingBox,
+                        cleanLabel(field.fieldName),
+                      )}
                     >
                       Page {field.pageNumber}
                     </Button>

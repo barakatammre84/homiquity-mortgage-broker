@@ -97,6 +97,17 @@ const PAY_STUB = {
   rawResponseEncrypted: "ciphertext",
   rawResponseIv: "iv",
   rawResponseKeyId: "key-1",
+  fieldEvidence: {
+    employeeName: { pageNumber: 1, confidence: 0.98 },
+    employerName: { pageNumber: 1, confidence: 0.98 },
+    payPeriodStartDate: { pageNumber: 1, confidence: 0.97 },
+    payPeriodEndDate: { pageNumber: 1, confidence: 0.97 },
+    grossPay: { pageNumber: 1, confidence: 0.96 },
+    netPay: { pageNumber: 1, confidence: 0.95 },
+    ytdGross: { pageNumber: 1, confidence: 0.96 },
+    ytdNetPay: { pageNumber: 1, confidence: 0.95 },
+    ytdTaxes: { pageNumber: 1, confidence: 0.94 },
+  },
   documentClassification: {
     pageCount: 1,
     pages: [{ pageNumber: 1, documentType: "paystub" as const, confidence: 0.98 }],

@@ -18,7 +18,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { computeHash, encryptSensitiveData } from "./services/encryptionService";
-import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedBankStatementData, type ExtractedLeaseData, type DocumentClassification, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
+import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedW2Data, type ExtractedBankStatementData, type ExtractedLeaseData, type DocumentClassification, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
 import { DOCUMENT_TYPE_TAXONOMY, type DocumentTypeTaxonomy } from "@shared/schema/documents";
 
 // Model lineage, persisted with every extraction so a past result can be traced
@@ -104,7 +104,35 @@ const documentClassificationSchema: z.ZodType<DocumentClassification> = z.object
   }
 });
 
-export const taxReturnSchema = z.object({
+function valueAtPath(value: Record<string, unknown>, pathName: string): unknown {
+  return pathName.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+}
+
+function requireSourceEvidence<T extends z.ZodRawShape>(
+  schema: z.ZodObject<T>,
+  fieldPaths: readonly string[],
+) {
+  return schema.superRefine((value, context) => {
+    const record = value as Record<string, unknown>;
+    const evidence = record.fieldEvidence as Record<string, unknown> | undefined;
+    for (const fieldPath of fieldPaths) {
+      const fieldValue = valueAtPath(record, fieldPath);
+      if (fieldValue === undefined || fieldValue === null || fieldValue === "") continue;
+      if (!evidence?.[fieldPath]) {
+        context.addIssue({
+          code: "custom",
+          path: ["fieldEvidence", fieldPath],
+          message: `Source page evidence is required for ${fieldPath}`,
+        });
+      }
+    }
+  });
+}
+
+export const taxReturnSchema = requireSourceEvidence(z.object({
   documentYear: z.string().trim().regex(/^\d{4}$/).optional().catch(undefined),
   taxpayerName: shortText,
   w2Wages: money,
@@ -132,7 +160,12 @@ export const taxReturnSchema = z.object({
   warnings: warningsList,
   fieldEvidence: fieldEvidenceSchema,
   pageCount,
-});
+}), [
+  "taxpayerName", "w2Wages", "grossIncome", "adjustedGrossIncome", "taxableIncome", "filingStatus",
+  "scheduleC.businessIncome", "scheduleC.businessExpenses", "scheduleC.netProfitLoss",
+  "scheduleD.capitalGains", "scheduleE.netRentalIncomeLoss", "scheduleE.grossRents",
+  "scheduleE.totalDepreciation", "scheduleE.mortgageInterest", "scheduleE.propertyCount",
+]);
 
 /**
  * Test seam: parse + schema-validate a raw tax-return model response.
@@ -142,7 +175,7 @@ export function validateTaxReturnResponse(rawText: string) {
   return validateExtraction(taxReturnSchema, rawText, "Tax return");
 }
 
-export const payStubSchema = z.object({
+export const payStubSchema = requireSourceEvidence(z.object({
   employeeName: shortText,
   employerName: shortText,
   payPeriodStartDate: isoDate,
@@ -163,9 +196,47 @@ export const payStubSchema = z.object({
   fieldEvidence: fieldEvidenceSchema,
   pageCount,
   documentClassification: documentClassificationSchema,
-});
+}), [
+  "employeeName", "employerName", "payPeriodStartDate", "payPeriodEndDate", "grossPay", "netPay",
+  "ytdGross", "ytdNetPay", "ytdTaxes", "deductions.federal", "deductions.fica", "deductions.other",
+]);
 
-export const bankStatementSchema = z.object({
+export const w2Schema = requireSourceEvidence(z.object({
+  employeeName: shortText,
+  employerName: shortText,
+  taxYear: z.string().trim().regex(/^\d{4}$/).optional().catch(undefined),
+  // PII minimization: keep only the final four EIN digits even if a provider
+  // returns the full value against instructions.
+  employerEinLast4: z.string().trim().max(50)
+    .transform((value) => value.replace(/\D/g, "").slice(-4) || undefined)
+    .optional().catch(undefined),
+  wagesTipsOtherCompensation: money,
+  federalIncomeTaxWithheld: money,
+  socialSecurityWages: money,
+  socialSecurityTaxWithheld: money,
+  medicareWagesAndTips: money,
+  medicareTaxWithheld: money,
+  stateWagesTips: money,
+  stateCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional().catch(undefined),
+  confidence: confidenceLevel,
+  extractedFields: extractedFieldsList,
+  warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
+  documentClassification: documentClassificationSchema,
+}), [
+  "employeeName", "employerName", "taxYear", "employerEinLast4",
+  "wagesTipsOtherCompensation", "federalIncomeTaxWithheld", "socialSecurityWages",
+  "socialSecurityTaxWithheld", "medicareWagesAndTips", "medicareTaxWithheld",
+  "stateWagesTips", "stateCode",
+]);
+
+/** Test and calibration seam for the same untrusted W-2 response path. */
+export function validateW2Response(rawText: string) {
+  return validateExtraction(w2Schema, rawText, "W-2");
+}
+
+export const bankStatementSchema = requireSourceEvidence(z.object({
   accountType: shortText,
   // PII minimization: whatever the model returns, only the last 4 digits are kept.
   accountNumber: z.string().trim().max(50)
@@ -189,9 +260,12 @@ export const bankStatementSchema = z.object({
   fieldEvidence: fieldEvidenceSchema,
   pageCount,
   documentClassification: documentClassificationSchema,
-});
+}), [
+  "accountType", "accountNumber", "statementPeriod.start", "statementPeriod.end", "openingBalance",
+  "closingBalance", "totalDeposits", "totalWithdrawals", "averageDailyBalance",
+]);
 
-export const leaseSchema = z.object({
+export const leaseSchema = requireSourceEvidence(z.object({
   monthlyRent: money,
   tenantName: shortText,
   landlordName: shortText,
@@ -205,7 +279,10 @@ export const leaseSchema = z.object({
   fieldEvidence: fieldEvidenceSchema,
   pageCount,
   documentClassification: documentClassificationSchema,
-});
+}), [
+  "monthlyRent", "tenantName", "landlordName", "propertyAddress", "leaseStartDate", "leaseEndDate",
+  "securityDeposit",
+]);
 
 /** Test seam for the page-classification boundary on simple documents. */
 export function validateDocumentClassification(value: unknown) {
@@ -284,6 +361,30 @@ export function checkPayStubConsistency(data: ExtractedPayStubData): void {
   }
   if (data.grossPay !== undefined && data.ytdGross !== undefined && data.grossPay > data.ytdGross) {
     capConfidence(data, "medium", "Consistency check: period gross exceeds YTD gross");
+  }
+}
+
+export function checkW2Consistency(data: ExtractedW2Data): void {
+  if (
+    data.federalIncomeTaxWithheld !== undefined &&
+    data.wagesTipsOtherCompensation !== undefined &&
+    data.federalIncomeTaxWithheld > data.wagesTipsOtherCompensation
+  ) {
+    capConfidence(data, "medium", "Consistency check: federal withholding exceeds Box 1 wages");
+  }
+  if (
+    data.socialSecurityTaxWithheld !== undefined &&
+    data.socialSecurityWages !== undefined &&
+    data.socialSecurityTaxWithheld > data.socialSecurityWages
+  ) {
+    capConfidence(data, "medium", "Consistency check: Social Security withholding exceeds Box 3 wages");
+  }
+  if (
+    data.medicareTaxWithheld !== undefined &&
+    data.medicareWagesAndTips !== undefined &&
+    data.medicareTaxWithheld > data.medicareWagesAndTips
+  ) {
+    capConfidence(data, "medium", "Consistency check: Medicare withholding exceeds Box 5 wages");
   }
 }
 

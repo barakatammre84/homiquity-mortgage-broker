@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   applicationProperties,
@@ -13,6 +13,7 @@ import {
   documents,
   loanApplications,
   loanConditions,
+  logicalDocuments,
   teamMessages,
   users,
   type Document,
@@ -613,6 +614,15 @@ export async function reviewCurrentDocument(input: ReviewCurrentDocumentInput) {
         .where(eq(documents.id, document.id))
         .returning();
       reviewedDocument = updated;
+      await transaction.update(logicalDocuments).set({
+        status: input.status === DOCUMENT_STATUS.VERIFIED ? "accepted" : "rejected",
+        verifiedByUserId: input.actor.id,
+        verifiedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(logicalDocuments.sourceDocumentId, document.id),
+        ne(logicalDocuments.status, "rejected"),
+      ));
     }
 
     // Repair the borrower-facing projection on an idempotent retry as well.

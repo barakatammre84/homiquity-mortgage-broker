@@ -16,6 +16,7 @@
 export const EXTRACTABLE_DOCUMENT_TYPES = [
   "tax_return",
   "pay_stub",
+  "w2",
   "bank_statement",
   "lease_agreement",
 ] as const;

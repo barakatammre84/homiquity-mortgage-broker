@@ -91,6 +91,7 @@ interface LenderSubmissionRow {
   confirmationId: string | null;
   simulated: boolean;
   submittedAt: string;
+  ausFindingsHash?: string | null;
   /** Rollup of loan_conditions rows linked to this submission (lender-issued). */
   conditionStats?: { total: number; open: number; cleared: number };
   /**
@@ -525,6 +526,16 @@ export function SubmissionReadinessDialog({
                           submissionId={s.id}
                           conformance={s.readinessSnapshot?.xsdConformance}
                         />
+                        {s.ausFindingsHash && (
+                          <Button asChild variant="outline" size="sm" className="touch-target h-8 text-xs">
+                            <a
+                              href={`/api/loan-applications/${applicationId}/lender-submissions/${s.id}/aus-findings`}
+                              data-testid={`aus-artifact-download-${s.id}`}
+                            >
+                              Download final DU / LPA findings
+                            </a>
+                          </Button>
+                        )}
                         {/*
                           The control that hint points at. Without it the row was
                           read-only after submission and the funded figures (F-6)

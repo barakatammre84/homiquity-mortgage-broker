@@ -17,7 +17,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
-import { ObjectStorageService } from "./integrations/object_storage";
+import {
+  ObjectStorageService,
+  isLocalFallbackEnabled,
+  readLocalObject,
+} from "./integrations/object_storage";
 import type { DocumentTypeTaxonomy } from "@shared/schema/documents";
 
 // Model lineage, persisted with every extraction so a past result can be traced
@@ -36,7 +40,7 @@ export const EXTRACTION_MODEL_SINGLE_DOC = "claude-sonnet-5";
 export const EXTRACTION_MODEL_TAX_PACKAGE = "claude-opus-4-8";
 /** @deprecated Use the task-specific constants above; retained for back-compat. */
 export const EXTRACTION_MODEL_ID = EXTRACTION_MODEL_TAX_PACKAGE;
-export const EXTRACTION_PROMPT_VERSION = "2026-09-v5";
+export const EXTRACTION_PROMPT_VERSION = "2026-09-v7";
 /** Lineage marker for deterministic simulated extractions (I10: unmistakable). */
 export const SIMULATED_MODEL_ID = "simulated";
 
@@ -160,6 +164,34 @@ export interface ExtractedPayStubData extends ExtractionLineage {
   warnings?: string[];
 }
 
+/** Core Form W-2 fields used for wage-history review and source comparison. */
+export interface ExtractedW2Data extends ExtractionLineage {
+  employeeName?: string;
+  employerName?: string;
+  /** Calendar year printed on the form. */
+  taxYear?: string;
+  /** Employer EIN last four only; the full identifier is never retained. */
+  employerEinLast4?: string;
+  /** Box 1. */
+  wagesTipsOtherCompensation?: number;
+  /** Box 2. */
+  federalIncomeTaxWithheld?: number;
+  /** Box 3. */
+  socialSecurityWages?: number;
+  /** Box 4. */
+  socialSecurityTaxWithheld?: number;
+  /** Box 5. */
+  medicareWagesAndTips?: number;
+  /** Box 6. */
+  medicareTaxWithheld?: number;
+  /** Box 16; may differ from federal wages. */
+  stateWagesTips?: number;
+  stateCode?: string;
+  confidence: "high" | "medium" | "low";
+  extractedFields: string[];
+  warnings?: string[];
+}
+
 export interface ExtractedBankStatementData extends ExtractionLineage {
   accountType?: string;
   accountNumber?: string;
@@ -196,6 +228,7 @@ export interface ExtractedLeaseData extends ExtractionLineage {
 export type ExtractedDocumentData = 
   | ExtractedTaxReturnData 
   | ExtractedPayStubData 
+  | ExtractedW2Data
   | ExtractedBankStatementData
   | ExtractedLeaseData;
 
@@ -207,6 +240,9 @@ export async function fileToBase64(source: string | Buffer): Promise<string> {
     return source.toString("base64");
   }
   if (source.startsWith("/objects/")) {
+    if (isLocalFallbackEnabled()) {
+      return readLocalObject(source).toString("base64");
+    }
     const objectFile = await objectStorageService.getObjectEntityFile(source);
     const chunks: Buffer[] = [];
     const stream = objectFile.createReadStream();

@@ -47,13 +47,10 @@ import type { DatabaseTransaction } from "./documentLineage";
 // undefined/null/"" means "this document did not yield that fact" and the field
 // is skipped honestly rather than being recorded as document-extracted.
 //
-// `w2` and `government_id` are not in THIS map because no W-2 or ID extractor
-// exists — the only caller (POST /api/documents/:id/extract) rejects those
-// types outright. They are not dropped, though: both are REQUIRED readiness
-// fields, and they are satisfied by DOCUMENT_PRESENCE_FIELD below, which
-// credits presence on upload without needing a model to read the page. An
-// earlier pass deleted them from here and stopped, which left two required
-// fields with no writer at all — see that block's header.
+// `government_id` is not in THIS map because identity-field extraction remains
+// deliberately out of scope. W-2 now has a specialized extractor, but Box 1 is
+// wage history for a prior calendar year, not current qualifying income, so it
+// only strengthens employer and form-presence evidence here.
 //
 // `lease_agreement` has an extractor but no honest readiness target — rental
 // income is not a READINESS_FIELDS entry — so it is deliberately unmapped.
@@ -78,18 +75,9 @@ const PRESENT = () => null;
 
 const DOCUMENT_FIELD_MAP: Record<string, ReadinessMapping[]> = {
   tax_return: [
-    {
-      fieldName: "annual_income",
-      sourceField: "adjustedGrossIncome|grossIncome",
-      // AGI is the underwriting-preferred figure; gross income is the fallback.
-      resolve: d => d.adjustedGrossIncome ?? d.grossIncome,
-    },
-    {
-      fieldName: "income_sources",
-      sourceField: "w2Wages|scheduleC|scheduleE",
-      // A breakdown exists only when the return actually shows components.
-      resolve: d => d.w2Wages ?? d.scheduleC?.netProfitLoss ?? d.scheduleE?.netRentalIncomeLoss,
-    },
+    // A return proves that tax evidence is present. AGI, gross income and
+    // Schedule C/E lines are inputs to the cited financial workpapers; none is
+    // itself qualifying annual income or a complete income-source decision.
     { fieldName: "tax_returns", sourceField: "documentPresence", resolve: PRESENT },
   ],
   pay_stub: [
@@ -98,6 +86,10 @@ const DOCUMENT_FIELD_MAP: Record<string, ReadinessMapping[]> = {
     // YTD gross is the honest figure a stub carries.
     { fieldName: "employer_name", sourceField: "employerName", resolve: d => d.employerName },
     { fieldName: "pay_stubs", sourceField: "documentPresence", resolve: PRESENT },
+  ],
+  w2: [
+    { fieldName: "employer_name", sourceField: "employerName", resolve: d => d.employerName },
+    { fieldName: "w2_forms", sourceField: "documentPresence", resolve: PRESENT },
   ],
   bank_statement: [
     { fieldName: "total_assets", sourceField: "closingBalance", resolve: d => d.closingBalance },
@@ -200,6 +192,14 @@ export async function wireExtractionToReadiness(
 
     if (!hasData) {
       skipped.push(`${fieldName}: not present in the extracted ${documentType}`);
+      continue;
+    }
+    const evidence = (extracted.fieldEvidence ?? {}) as Record<string, unknown>;
+    const hasSourceEvidence = isPresenceRow || sourceField
+      .split("|")
+      .some((field) => evidence[field] !== undefined);
+    if (!hasSourceEvidence) {
+      skipped.push(`${fieldName}: source page evidence was not supplied`);
       continue;
     }
 

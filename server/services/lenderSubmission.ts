@@ -112,6 +112,47 @@ export interface LenderPackage {
   validation: { valid: boolean; errors: string[] };
 }
 
+export interface AusFindingsArtifact {
+  findings: Record<string, unknown>;
+  hash: string;
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
+    );
+  }
+  return value;
+}
+
+/** Build a deterministic, tamper-evident copy of the current DU/LPA findings. */
+export function buildAusFindingsArtifact(findings: unknown): AusFindingsArtifact {
+  if (!findings || typeof findings !== "object" || Array.isArray(findings)) {
+    throw new SubmissionBlockedError(
+      "Current DU / LPA findings are missing — re-run underwriting before packaging.",
+      ["Run DU / LPA again and review the final findings before lender submission."],
+    );
+  }
+  const record = findings as Record<string, unknown>;
+  const integrity = record.inputIntegrity as Record<string, unknown> | undefined;
+  if (!record.recommendation || !record.lpa || !integrity?.inputFingerprint) {
+    throw new SubmissionBlockedError(
+      "Current DU / LPA findings are incomplete — re-run underwriting before packaging.",
+      ["Run both DU and LPA so the package contains current input lineage and both findings reports."],
+    );
+  }
+  const canonical = canonicalJsonValue(record) as Record<string, unknown>;
+  return {
+    findings: canonical,
+    hash: createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
+  };
+}
+
 /**
  * Assembles the MISMO 3.4 XML package for a wholesale submission and hashes
  * it for tamper-evident audit (the package is persisted as an immutable
@@ -187,7 +228,9 @@ export async function submitToWholesaleLender(
   // would receive and validate it structurally before allowing submission.
   // A readiness-gate pass doesn't guarantee the export itself is well-formed
   // (different check — see L6 for the fuller XSD-validation slice).
-  const mismoData = await storage.getMISMOLoanData(applicationId);
+  const mismoData = await storage.getMISMOLoanData(applicationId, {
+    sensitiveAccess: { actorUserId: submittedBy, purpose: "lender_submission" },
+  });
   if (!mismoData) {
     throw new SubmissionBlockedError(
       "Application data not found — cannot assemble the lender package.",
@@ -255,13 +298,18 @@ export async function submitToWholesaleLender(
     throw error;
   });
 
+  // Freeze the exact dual-AUS findings that passed the freshness gate above.
+  // loan_applications.ausFindings is a mutable working copy; the lender row is
+  // the package-of-record and therefore carries its own canonical hash.
+  const application = await storage.getLoanApplication(applicationId);
+  const ausArtifact = buildAusFindingsArtifact(application?.ausFindings);
+
   const ack = await submitToLenderPortal(lender, applicationId);
 
   // Snapshot what this file is expected to earn, from the comp plan elected on
   // the application (Reg Z §1026.36(d)(2) election) and the loan amount as
   // submitted. Snapshotted rather than derived on read: a later plan edit must
   // not rewrite what we believed we were owed on a loan already in flight.
-  const application = await storage.getLoanApplication(applicationId);
   const compensation = resolveCompensation(
     application?.loCompensationModel,
     application?.loCompensationBps,
@@ -288,6 +336,9 @@ export async function submitToWholesaleLender(
     incomePackageJson: incomePkg.package as unknown as Record<string, unknown>,
     incomePackageHash: incomePkg.hash,
     incomePackageGeneratedAt: incomePkg.generatedAt,
+    ausFindingsJson: ausArtifact.findings,
+    ausFindingsHash: ausArtifact.hash,
+    ausFindingsGeneratedAt: application?.ausSubmittedAt ?? submittedAt,
     submittedBy,
   });
 
@@ -295,7 +346,7 @@ export async function submitToWholesaleLender(
     applicationId,
     activityType: "note",
     title: `Submitted to ${lender.lenderName}`,
-    description: `Wholesale submission ${ack.confirmationId}${ack.simulated ? " (simulated — no broker agreement live)" : ""} — MISMO package ${pkg.hash.slice(0, 12)}, income package ${incomePkg.hash.slice(0, 12)}`,
+    description: `Wholesale submission ${ack.confirmationId}${ack.simulated ? " (simulated — no broker agreement live)" : ""} — MISMO package ${pkg.hash.slice(0, 12)}, income package ${incomePkg.hash.slice(0, 12)}, AUS findings ${ausArtifact.hash.slice(0, 12)}`,
     performedBy: submittedBy,
   });
 

@@ -40,14 +40,91 @@ interface DocumentViewerProps {
   documentId: string;
   fileName: string;
   mimeType: string | null;
-  requestedPage?: { pageNumber: number; requestId: number } | null;
+  requestedPage?: {
+    pageNumber: number;
+    requestId: number;
+    boundingBox?: unknown;
+    fieldLabel?: string;
+  } | null;
+}
+
+interface NormalizedBoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function normalizeEvidenceBox(value: unknown): NormalizedBoundingBox | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  const numbers = [candidate.x, candidate.y, candidate.width, candidate.height];
+  if (!numbers.every((item) => typeof item === "number" && Number.isFinite(item))) return null;
+  const box = candidate as unknown as NormalizedBoundingBox;
+  if (
+    box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 ||
+    box.x > 1 || box.y > 1 || box.x + box.width > 1.001 || box.y + box.height > 1.001
+  ) return null;
+  return box;
+}
+
+function EvidenceOverlay({ box, label }: { box: NormalizedBoundingBox; label?: string }) {
+  return (
+    <div
+      className="pointer-events-none absolute rounded-sm border-2 border-flare bg-flare/15 ring-2 ring-background"
+      style={{
+        left: `${box.x * 100}%`,
+        top: `${box.y * 100}%`,
+        width: `${box.width * 100}%`,
+        height: `${box.height * 100}%`,
+      }}
+      role="note"
+      aria-label={label ? `Source location for ${label}` : "Extracted value source location"}
+      data-testid="viewer-evidence-overlay"
+    />
+  );
 }
 
 export default function DocumentViewer({ documentId, fileName, mimeType, requestedPage }: DocumentViewerProps) {
   const [content, setContent] = useState<ViewerContent>({ kind: "loading" });
+  const [normalizedSource, setNormalizedSource] = useState<{
+    pageNumber: number;
+    objectUrl: string;
+  } | null>(null);
   const [pageNum, setPageNum] = useState(1);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const evidenceBox = requestedPage?.pageNumber === pageNum
+    ? normalizeEvidenceBox(requestedPage.boundingBox)
+    : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setNormalizedSource(null);
+    if (!requestedPage) return;
+
+    void (async () => {
+      try {
+        const response = await apiRequest(
+          "GET",
+          `/api/documents/${documentId}/pages/${requestedPage.pageNumber}/image`,
+        );
+        const buffer = await response.arrayBuffer();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: "image/png" }));
+        setNormalizedSource({ pageNumber: requestedPage.pageNumber, objectUrl });
+      } catch {
+        // Documents created before page materialization still use the safe
+        // client-side PDF/image renderer below.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [documentId, requestedPage?.pageNumber, requestedPage?.requestId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,24 +299,39 @@ export default function DocumentViewer({ documentId, fileName, mimeType, request
 
         {content.kind === "image" && (
           <div className="max-h-[560px] overflow-auto rounded-md border" data-testid="viewer-image">
-            <img
-              src={content.objectUrl}
-              alt={`Preview of ${fileName}`}
-              className="max-w-full"
-            />
+            <div className="relative inline-block max-w-full">
+              <img
+                src={normalizedSource?.pageNumber === pageNum ? normalizedSource.objectUrl : content.objectUrl}
+                alt={`Preview of ${fileName}`}
+                className="block max-w-full"
+              />
+              {evidenceBox && <EvidenceOverlay box={evidenceBox} label={requestedPage?.fieldLabel} />}
+            </div>
           </div>
         )}
 
         {content.kind === "pdf" && (
           <div className="space-y-3" data-testid="viewer-pdf">
             <div className="max-h-[560px] overflow-auto rounded-md border bg-muted/30">
-              <canvas
-                ref={canvasRef}
-                role="img"
-                aria-label={`Preview of ${fileName}, page ${pageNum} of ${content.numPages}`}
-                className="mx-auto block"
-                data-testid="viewer-pdf-canvas"
-              />
+              <div className="relative mx-auto w-fit">
+                {normalizedSource?.pageNumber === pageNum ? (
+                  <img
+                    src={normalizedSource.objectUrl}
+                    alt={`Normalized preview of ${fileName}, page ${pageNum} of ${content.numPages}`}
+                    className="block max-w-full"
+                    data-testid="viewer-normalized-page"
+                  />
+                ) : (
+                  <canvas
+                    ref={canvasRef}
+                    role="img"
+                    aria-label={`Preview of ${fileName}, page ${pageNum} of ${content.numPages}`}
+                    className="block"
+                    data-testid="viewer-pdf-canvas"
+                  />
+                )}
+                {evidenceBox && <EvidenceOverlay box={evidenceBox} label={requestedPage?.fieldLabel} />}
+              </div>
             </div>
             {content.numPages > 1 && (
               <div className="flex items-center justify-center gap-2">

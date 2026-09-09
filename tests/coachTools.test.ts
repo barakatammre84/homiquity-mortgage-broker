@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const loadFileTruth = vi.fn();
+const createTask = vi.fn();
+const emitEvent = vi.fn();
+
 vi.mock("../server/services/coachProfileSync", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../server/services/coachProfileSync")>();
   return { ...actual, syncCoachIntakeToApplication: vi.fn() };
@@ -8,7 +12,23 @@ vi.mock("../server/services/coachProfileSync", async (importOriginal) => {
 // The DPA lookup tool reads the seed-verified directory through the storage
 // singleton; mock it so these tests need no database.
 vi.mock("../server/storage", () => ({
-  storage: { getDpaPrograms: vi.fn() },
+  storage: {
+    getDpaPrograms: vi.fn(),
+    getTasksByApplication: vi.fn(),
+    getDealTeamMembers: vi.fn(),
+  },
+}));
+
+vi.mock("../server/services/coachFileTruth", () => ({
+  loadFileTruth: (...args: unknown[]) => loadFileTruth(...args),
+}));
+
+vi.mock("../server/services/taskEngine", () => ({
+  taskEngine: { createTask: (...args: unknown[]) => createTask(...args) },
+}));
+
+vi.mock("../server/services/analyticsEventPipeline", () => ({
+  emitEvent: (...args: unknown[]) => emitEvent(...args),
 }));
 
 import {
@@ -29,6 +49,7 @@ function makeCtx(
     userId: "user-1",
     userRole: "active_buyer",
     conversationId: "conv-1",
+    turnId: "turn-1",
     workableApplicationId: null,
     emit: (e) => events.push(e),
     state: {},
@@ -51,6 +72,8 @@ describe("COACH_TOOLS definition stability (prompt-cache contract)", () => {
       "get_loan_status",
       "get_document_checklist",
       "get_borrower_tasks",
+      // Appended 2026-08-20 — explicit, auditable human assistance.
+      "request_human_help",
     ]);
   });
 
@@ -294,5 +317,72 @@ describe("executeCoachTool: lookup_dpa_programs (renter-incubation adjudication 
     const result = await executeCoachTool(ctx, "lookup_dpa_programs", {});
     expect(result.isError).toBe(true);
     expect(result.content).toContain("do not answer from memory");
+  });
+});
+
+describe("executeCoachTool: request_human_help", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadFileTruth.mockResolvedValue({ application: { id: "app-1" } });
+    vi.mocked(storage.getTasksByApplication).mockResolvedValue([]);
+    vi.mocked(storage.getDealTeamMembers).mockResolvedValue([
+      { teamRole: "loan_officer", isActive: true, userId: "lo-1" } as never,
+    ]);
+    createTask.mockResolvedValue({ id: "task-1" });
+    emitEvent.mockResolvedValue(undefined);
+  });
+
+  it("creates an owned, redacted follow-up and records the handoff", async () => {
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const result = await executeCoachTool(ctx, "request_human_help", { topic: "complex_income" });
+
+    expect(result.isError).toBeUndefined();
+    expect(ctx.state.humanHelpRequest).toEqual({ taskId: "task-1", alreadyOpen: false });
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        applicationId: "app-1",
+        assignedToUserId: "lo-1",
+        ownerRole: "LO",
+        priority: "high",
+      }),
+      "user-1",
+      "SYSTEM",
+      {
+        source: "homi_handoff",
+        conversationId: "conv-1",
+        turnId: "turn-1",
+        topic: "complex_income",
+      },
+    );
+    expect(emitEvent).toHaveBeenCalledWith(
+      "borrower",
+      "homi_human_help_requested",
+      expect.objectContaining({ entityId: "task-1", textValue: "complex_income" }),
+    );
+  });
+
+  it("rejects free-text handoff content so borrower data cannot enter task metadata", async () => {
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const result = await executeCoachTool(ctx, "request_human_help", {
+      topic: "other",
+      summary: "My tax ID is sensitive",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(createTask).not.toHaveBeenCalled();
+    expect(loadFileTruth).not.toHaveBeenCalled();
+  });
+
+  it("reuses an active Homi handoff instead of creating a duplicate", async () => {
+    vi.mocked(storage.getTasksByApplication).mockResolvedValue([
+      { id: "task-existing", status: "OPEN", triggerMetadata: { source: "homi_handoff" } } as never,
+    ]);
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const result = await executeCoachTool(ctx, "request_human_help", { topic: "loan_options" });
+
+    expect(result.isError).toBeUndefined();
+    expect(ctx.state.humanHelpRequest).toEqual({ taskId: "task-existing", alreadyOpen: true });
+    expect(createTask).not.toHaveBeenCalled();
+    expect(emitEvent).not.toHaveBeenCalled();
   });
 });

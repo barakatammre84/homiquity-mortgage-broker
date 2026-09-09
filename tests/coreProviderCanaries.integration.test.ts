@@ -1,0 +1,81 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const userId = randomUUID();
+
+beforeAll(async () => {
+  const url = new URL(process.env.DATABASE_URL!);
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error("Core canary fixtures require a local test database");
+  }
+  await pool.query(
+    `INSERT INTO users (id,email,role) VALUES ($1,$2,'admin')`,
+    [userId, `core-canary-${userId}@example.test`],
+  );
+});
+
+afterAll(async () => {
+  await pool.query(`DELETE FROM core_provider_canary_runs WHERE triggered_by_user_id=$1`, [userId]);
+  await pool.query(`DELETE FROM users WHERE id=$1`, [userId]);
+  await pool.end();
+});
+
+describe.sequential("core provider canary ledger", () => {
+  it("persists a successful redacted synthetic check", async () => {
+    const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
+    const result = await runCoreProviderCanary("homi", userId, async () => undefined);
+
+    expect(result).toMatchObject({
+      capabilityId: "homi",
+      provider: "Anthropic Claude",
+      operation: "text_response",
+      environment: "non_production",
+      status: "success",
+      failureClass: null,
+    });
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+
+    const saved = await pool.query(
+      `SELECT capability_id,provider,operation,status,failure_class
+         FROM core_provider_canary_runs WHERE id=$1`,
+      [result.id],
+    );
+    expect(saved.rows[0]).toEqual({
+      capability_id: "homi",
+      provider: "Anthropic Claude",
+      operation: "text_response",
+      status: "success",
+      failure_class: null,
+    });
+  });
+
+  it("retains the failure class while preserving the last success", async () => {
+    const { getCoreCanaryProof, runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
+    const failed = await runCoreProviderCanary("homi", userId, async () => {
+      throw new Error("provider response containing details that must not be stored");
+    });
+    expect(failed).toMatchObject({ status: "failure", failureClass: "unknown" });
+
+    const proof = await getCoreCanaryProof();
+    expect(proof.homi?.latestAttempt?.id).toBe(failed.id);
+    expect(proof.homi?.latestAttempt?.status).toBe("failure");
+    expect(proof.homi?.lastSuccess?.status).toBe("success");
+
+    const serialized = JSON.stringify(proof.homi);
+    expect(serialized).not.toContain("provider response containing details");
+  });
+
+  it("records a bounded timeout instead of leaving the operations screen hanging", async () => {
+    const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
+    const result = await runCoreProviderCanary(
+      "homi",
+      userId,
+      () => new Promise<void>(() => undefined),
+      5,
+    );
+
+    expect(result).toMatchObject({ status: "failure", failureClass: "timeout" });
+  });
+});

@@ -18,6 +18,7 @@ import { logAudit } from "../auditLog";
 import { pickActiveLoanApplication, pickWorkableLoanApplication } from "@shared/schema";
 import type { CoachConversation, User } from "@shared/schema";
 import { z } from "zod";
+import { emitEvent } from "../services/analyticsEventPipeline";
 
 /**
  * The only values `documents.notes.confidence` may take. Anything a legacy row
@@ -33,6 +34,56 @@ const messageSchema = z.object({
   propertyPrice: z.number().optional(),
   propertyAddress: z.string().optional(),
 });
+
+function normalizedQuestion(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function isRepeatedQuestion(
+  message: string,
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  const normalized = normalizedQuestion(message);
+  if (normalized.length < 8) return false;
+  return history.some((item) =>
+    item.role === "user" && normalizedQuestion(item.content) === normalized
+  );
+}
+
+async function recordHomiOutcome(input: {
+  userId: string;
+  userRole: string;
+  applicationId: string | null;
+  conversationId: string;
+  repeatedQuestion: boolean;
+  completionBefore: number | null;
+  completionAfter: number | null;
+  startedAt: number;
+  result: CoachTurnResult;
+}) {
+  const completionDelta = input.completionBefore !== null && input.completionAfter !== null
+    ? input.completionAfter - input.completionBefore
+    : null;
+  await emitEvent("borrower", "homi_turn_completed", {
+    applicationId: input.applicationId ?? undefined,
+    userId: input.userId,
+    actorId: input.userId,
+    actorRole: input.userRole,
+    entityType: "coach_conversation",
+    entityId: input.conversationId,
+    numericValue: Date.now() - input.startedAt,
+    source: "homi",
+    payload: {
+      repeatedQuestion: input.repeatedQuestion,
+      completionDelta,
+      degraded: input.result.degraded,
+      lintReplaced: input.result.lintReplaced,
+      modelCalls: input.result.usage.modelCalls,
+      toolCalls: input.result.toolCalls,
+      humanHandoff: input.result.toolCalls.includes("request_human_help"),
+    },
+  });
+}
 
 async function buildVerifiedContext(userId: string, user: User, propertyContext?: { price: number; address: string } | null): Promise<VerifiedUserContext> {
   try {
@@ -344,6 +395,7 @@ export function registerCoachRoutes(app: Express) {
     userMessageId: string;
     remaining: number;
     verifiedContext: VerifiedUserContext;
+    repeatedQuestion: boolean;
   }
 
   // Shared pre-flight for both message endpoints: validate, enforce the daily
@@ -407,6 +459,7 @@ export function registerCoachRoutes(app: Express) {
       role: m.role,
       content: m.content,
     }));
+    const repeatedQuestion = isRepeatedQuestion(message, history);
 
     const userMsg = await storage.createCoachMessage({
       conversationId: conversation.id,
@@ -456,6 +509,7 @@ export function registerCoachRoutes(app: Express) {
       userMessageId: userMsg.id,
       remaining: Math.max(0, DAILY_COACH_MESSAGE_LIMIT - todayCount - 1),
       verifiedContext,
+      repeatedQuestion,
     };
   }
 
@@ -547,6 +601,7 @@ export function registerCoachRoutes(app: Express) {
   //   error {code, message, retryable}
   app.post("/api/coach/message/stream", isAuthenticated, async (req, res) => {
     let streaming = false;
+    const turnStartedAt = Date.now();
     try {
       // Input-side sensitive-data guard: runs BEFORE prepareCoachTurn so a
       // pasted SSN/DOB is never persisted, never enters model context, and
@@ -595,6 +650,7 @@ export function registerCoachRoutes(app: Express) {
 
       writeSse(res, "meta", {
         conversationId: prep.conversation.id,
+        turnId: prep.userMessageId,
         userMessageId: prep.userMessageId,
         remaining: prep.remaining,
         ...(isCoachConfigured() ? {} : { degraded: true }),
@@ -610,6 +666,7 @@ export function registerCoachRoutes(app: Express) {
         userId: prep.user.id,
         userRole: prep.user.role,
         conversationId: prep.conversation.id,
+        turnId: prep.userMessageId,
         userMessage: prep.message,
         history: prep.history,
         existingProfile: prep.conversation.financialProfile ?? undefined,
@@ -619,6 +676,18 @@ export function registerCoachRoutes(app: Express) {
       });
 
       const assistantMsg = await persistAssistantTurn(prep.conversation, prep.verifiedContext, result);
+
+      await recordHomiOutcome({
+        userId: prep.user.id,
+        userRole: prep.user.role,
+        applicationId: prep.verifiedContext.workableApplicationId ?? null,
+        conversationId: prep.conversation.id,
+        repeatedQuestion: prep.repeatedQuestion,
+        completionBefore: prep.verifiedContext.previousCompletionPercentage ?? null,
+        completionAfter: result.state.profile?.completionPercentage ?? prep.verifiedContext.completionPercentage ?? null,
+        startedAt: turnStartedAt,
+        result,
+      });
 
       writeSse(res, "done", {
         messageId: assistantMsg.id,
@@ -648,6 +717,7 @@ export function registerCoachRoutes(app: Express) {
   // so older clients keep working and the new client can fall back to it when
   // an intermediary buffers SSE.
   app.post("/api/coach/message", isAuthenticated, async (req, res) => {
+    const turnStartedAt = Date.now();
     try {
       // Same input-side sensitive-data guard as the streaming variant.
       const rawMessage = typeof req.body?.message === "string" ? req.body.message : "";
@@ -698,6 +768,7 @@ export function registerCoachRoutes(app: Express) {
         userId: prep.user.id,
         userRole: prep.user.role,
         conversationId: prep.conversation.id,
+        turnId: prep.userMessageId,
         userMessage: prep.message,
         history: prep.history,
         existingProfile: prep.conversation.financialProfile ?? undefined,
@@ -707,6 +778,17 @@ export function registerCoachRoutes(app: Express) {
       });
 
       const assistantMsg = await persistAssistantTurn(prep.conversation, prep.verifiedContext, result);
+      await recordHomiOutcome({
+        userId: prep.user.id,
+        userRole: prep.user.role,
+        applicationId: prep.verifiedContext.workableApplicationId ?? null,
+        conversationId: prep.conversation.id,
+        repeatedQuestion: prep.repeatedQuestion,
+        completionBefore: prep.verifiedContext.previousCompletionPercentage ?? null,
+        completionAfter: result.state.profile?.completionPercentage ?? prep.verifiedContext.completionPercentage ?? null,
+        startedAt: turnStartedAt,
+        result,
+      });
       const state = result.state;
       const existingIntake = getLatestIntakeFromConversation(prep.conversation, { intake: state.intake });
 

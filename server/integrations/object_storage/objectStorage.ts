@@ -255,6 +255,79 @@ export class ObjectStorageService {
   }
 
   /**
+   * Complete a private write/read/delete round trip with synthetic bytes.
+   * The object is never registered as a borrower document and is removed in a
+   * finally block. This proves bucket access without retaining a payload or
+   * exposing the configured bucket name through an API response.
+   */
+  async verifyPrivateStorageRoundTrip(): Promise<void> {
+    const privateDir = this.getPrivateObjectDir();
+    const { bucketName, objectName: privatePrefix } = parseObjectPath(privateDir);
+    const canaryId = randomUUID();
+    const objectName = `${privatePrefix.replace(/\/$/, "")}/canaries/${canaryId}.txt`;
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const payload = Buffer.from(`homiquity-storage-canary:${canaryId}`, "utf8");
+
+    try {
+      await file.save(payload, {
+        contentType: "text/plain",
+        resumable: false,
+        validation: "crc32c",
+        preconditionOpts: { ifGenerationMatch: 0 },
+        metadata: { cacheControl: "private, no-store" },
+      });
+      const [downloaded] = await file.download({ validation: "crc32c" });
+      if (!downloaded.equals(payload)) {
+        throw new Error("Private object storage canary returned different bytes");
+      }
+    } finally {
+      await file.delete({ ignoreNotFound: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Store a normalized page produced by the server. The flat UUID path keeps
+   * it compatible with the existing private `/objects/:id` resolver. Derived
+   * pages inherit the borrower's private ACL and are never made public.
+   */
+  async savePrivateDerivedObject(
+    bytes: Buffer,
+    contentType: string,
+    ownerUserId: string,
+  ): Promise<string> {
+    const privateDir = this.getPrivateObjectDir();
+    const { bucketName, objectName: privatePrefix } = parseObjectPath(privateDir);
+    const objectId = randomUUID();
+    const objectName = `${privatePrefix.replace(/\/$/, "")}/${objectId}`;
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    try {
+      await file.save(bytes, {
+        contentType,
+        resumable: false,
+        validation: "crc32c",
+        preconditionOpts: { ifGenerationMatch: 0 },
+        metadata: { cacheControl: "private, max-age=3600" },
+      });
+      await setObjectAclPolicy(file, { owner: ownerUserId, visibility: "private" });
+      return `/objects/${objectId}`;
+    } catch (error) {
+      await file.delete({ ignoreNotFound: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Best-effort cleanup used when page metadata cannot be committed. */
+  async deleteObjectEntity(objectPath: string): Promise<void> {
+    if (!objectPath.startsWith("/objects/")) return;
+    try {
+      const file = await this.getObjectEntityFile(objectPath);
+      await file.delete({ ignoreNotFound: true });
+    } catch (error) {
+      if (!(error instanceof ObjectNotFoundError)) throw error;
+    }
+  }
+
+  /**
    * Verify a client-supplied /objects/ path before we trust it as a document:
    *  - the object must actually exist (you can't register a file you never
    *    uploaded), and

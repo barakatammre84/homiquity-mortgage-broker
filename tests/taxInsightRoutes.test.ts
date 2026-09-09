@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import PDFDocument from "pdfkit";
 import { apiPost, apiGet } from "./setup";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
@@ -32,6 +33,57 @@ async function waitForTaxPackage(documentId: string, cookie: string) {
   throw new Error("Timed out waiting for durable tax package processing");
 }
 
+async function syntheticTaxReturn(): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const pdf = new PDFDocument({ size: "LETTER", margin: 72 });
+    pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
+    pdf.on("error", reject);
+    pdf.on("end", () => resolve(Buffer.concat(chunks)));
+    for (let pageNumber = 1; pageNumber <= 25; pageNumber++) {
+      if (pageNumber > 1) pdf.addPage();
+      pdf.fontSize(18).text("FORM 1040 — SYNTHETIC INTEGRATION FIXTURE");
+      pdf.fontSize(12).text(`Tax year 2025 · source page ${pageNumber} of 25`);
+    }
+    pdf.end();
+  });
+}
+
+async function uploadTaxReturn(cookie: string, prefix: string) {
+  const bytes = await syntheticTaxReturn();
+  const fileName = `${prefix}-${Date.now()}.pdf`;
+  const target = await apiPost(
+    "/api/uploads/request-url",
+    { name: fileName, size: bytes.length, contentType: "application/pdf" },
+    { headers: { Cookie: cookie } },
+  );
+  expect(target.status).toBe(200);
+  const stored = await fetch(`${BASE_URL}${target.body.uploadURL}`, {
+    method: "PUT",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/pdf",
+      ...(target.body.uploadHeaders ?? {}),
+    },
+    body: bytes,
+  });
+  expect(stored.status).toBe(200);
+
+  const registered = await apiPost(
+    "/api/documents/upload",
+    {
+      objectPath: target.body.objectPath,
+      fileName,
+      fileSize: bytes.length,
+      mimeType: "application/pdf",
+      documentType: "tax_return",
+    },
+    { headers: { Cookie: cookie } },
+  );
+  expect(registered.status).toBeLessThan(300);
+  return registered.body.id as string;
+}
+
 /**
  * Tax Return Insight routes. The preflight and CI integration servers run with
  * EXTRACTION_SIMULATE=true and blank model credentials so extraction is
@@ -48,22 +100,11 @@ describe("Tax insight routes", () => {
     renterCookie = await loginCookie("renter@test.com", TEST_PASSWORD);
     expect(renterCookie).toBeTruthy();
 
-    // Register an application-less tax-return document. Object storage is
-    // unconfigured in local dev, so registration trusts the supplied path
-    // (dev-only behavior) and simulated extraction never reads the file.
-    const reg = await apiPost(
-      "/api/documents/upload",
-      {
-        objectPath: `/objects/test-tax-insight-${Date.now()}.pdf`,
-        fileName: "test-tax-return-2025.pdf",
-        fileSize: 123456,
-        mimeType: "application/pdf",
-        documentType: "tax_return",
-      },
-      { headers: { Cookie: renterCookie } },
-    );
-    expect(reg.status).toBeLessThan(300);
-    documentId = reg.body?.id;
+    // Register a real application-less tax-return object. Page normalization
+    // deliberately reads the original bytes even when model extraction is
+    // simulated, so the journey must exercise the same upload contract as the
+    // browser instead of inventing an object path that does not exist.
+    documentId = await uploadTaxReturn(renterCookie, "test-tax-insight");
     expect(documentId).toBeTruthy();
   });
 
@@ -237,21 +278,7 @@ describe("Tax insight routes", () => {
 describe("Tax consent revocation", () => {
   let renterCookie: string;
 
-  const registerTaxDoc = async () => {
-    const reg = await apiPost(
-      "/api/documents/upload",
-      {
-        objectPath: `/objects/test-tax-revoke-${Date.now()}.pdf`,
-        fileName: "test-tax-return-2025.pdf",
-        fileSize: 123456,
-        mimeType: "application/pdf",
-        documentType: "tax_return",
-      },
-      { headers: { Cookie: renterCookie } },
-    );
-    expect(reg.status).toBeLessThan(300);
-    return reg.body.id as string;
-  };
+  const registerTaxDoc = async () => uploadTaxReturn(renterCookie, "test-tax-revoke");
 
   beforeAll(async () => {
     renterCookie = await loginCookie("renter@test.com", TEST_PASSWORD);

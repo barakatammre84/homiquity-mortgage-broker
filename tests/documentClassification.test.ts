@@ -53,6 +53,10 @@ describe("simple document page classification", () => {
       compatible: true,
       mixedPacket: false,
     });
+    expect(assessDocumentClassification("w2", {
+      pageCount: 1,
+      pages: [{ pageNumber: 1, documentType: "w2", confidence: 0.99 }],
+    })).toMatchObject({ compatible: true, mixedPacket: false });
 
     expect(assessDocumentClassification("bank_statement", paystub)).toMatchObject({
       compatible: false,

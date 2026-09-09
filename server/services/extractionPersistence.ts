@@ -109,7 +109,7 @@ export async function applyExtractionToDocument(params: {
     const persist = async (): Promise<ApplyExtractionResult> => {
 
     const coarseConfidence = coarseConfidenceToNumeric(extracted.confidence);
-    const classification = ["pay_stub", "bank_statement", "lease_agreement"].includes(documentType)
+    const classification = ["pay_stub", "w2", "bank_statement", "lease_agreement"].includes(documentType)
       ? assessDocumentClassification(documentType, extracted.documentClassification)
       : null;
     let classificationWarning = classification?.warning ?? null;
@@ -136,7 +136,7 @@ export async function applyExtractionToDocument(params: {
       extracted.warnings = [...new Set([...(extracted.warnings ?? []), classificationWarning])];
     }
     const fieldConfidences = (extracted.extractedFields ?? []).map((fieldName) => {
-      const confidence = extracted.fieldEvidence?.[fieldName]?.confidence ?? coarseConfidence;
+      const confidence = extracted.fieldEvidence?.[fieldName]?.confidence ?? 0;
       return { fieldName, value: null, confidence, needsReview: confidence < 0.7 };
     });
     const observedConfidence = fieldConfidences.length > 0

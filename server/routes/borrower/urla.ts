@@ -113,45 +113,6 @@ export function registerUrlaRoutes(
     }
   });
 
-  /**
-   * Audited full-SSN reveal. Everything else in the API returns the masked
-   * form; this endpoint exists for the narrow staff workflows that genuinely
-   * need the full value (credit pulls, GSE casefile fixes). Owner borrowers
-   * may read their own. Every call writes an audit entry.
-   */
-  app.get("/api/urla/:applicationId/ssn", isAuthenticated, async (req, res) => {
-    try {
-      const user = req.user as User;
-      const { applicationId } = routeParams(req);
-      const seq = Math.max(parseInt(String(req.query.borrowerSequenceNumber ?? "1"), 10) || 1, 1);
-
-      const application = await storage.getLoanApplicationWithAccess(applicationId, user.id, user.role);
-      if (!application) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-
-      const isOwner = application.userId === user.id;
-      const allowedStaff = ["admin", "underwriter", "processor"];
-      if (!isOwner && !allowedStaff.includes(user.role)) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-
-      const ssn = await storage.getDecryptedUrlaSsn(applicationId, seq);
-      if (!ssn) {
-        return res.status(404).json({ error: "No SSN on file" });
-      }
-
-      await logAudit(req, "urla.ssn_reveal", "loan_application", applicationId, {
-        borrowerSequenceNumber: seq,
-        role: user.role,
-      });
-      res.json({ ssn });
-    } catch (error) {
-      console.error("SSN reveal error:", error);
-      res.status(500).json({ error: "Failed to retrieve SSN" });
-    }
-  });
-
   app.post("/api/urla/:applicationId/employment", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as User;

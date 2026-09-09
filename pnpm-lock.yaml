@@ -26,6 +26,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.5.1)
+      '@napi-rs/canvas':
+        specifier: 1.0.2
+        version: 1.0.2
       '@neondatabase/serverless':
         specifier: ^1.1.0
         version: 1.1.0
@@ -4300,7 +4303,6 @@ snapshots:
       '@napi-rs/canvas-linux-x64-musl': 1.0.2
       '@napi-rs/canvas-win32-arm64-msvc': 1.0.2
       '@napi-rs/canvas-win32-x64-msvc': 1.0.2
-    optional: true
 
   '@neondatabase/serverless@1.1.0': {}
 

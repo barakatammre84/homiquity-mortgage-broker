@@ -48,6 +48,12 @@ find_pg_bin() {
 have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
 
 PG_BIN="$(find_pg_bin || true)"
+PSQL_BIN=""
+if [ -n "$PG_BIN" ] && [ -x "$PG_BIN/psql" ]; then
+  PSQL_BIN="$PG_BIN/psql"
+elif command -v psql >/dev/null 2>&1; then
+  PSQL_BIN="$(command -v psql)"
+fi
 
 # Running initdb/postgres as root is refused by Postgres itself, so on a root
 # container we drop to the `postgres` account. On a normal dev machine this is a
@@ -118,15 +124,19 @@ EOF
 fi
 
 export PGPASSWORD=postgres
-psql -h 127.0.0.1 -p "$PORT" -U postgres -tc "SELECT 1" >/dev/null 2>&1 || {
+if [ -z "$PSQL_BIN" ]; then
+  echo "local-db: psql was not found; install the PostgreSQL client tools" >&2
+  exit 1
+fi
+"$PSQL_BIN" -h 127.0.0.1 -p "$PORT" -U postgres -tc "SELECT 1" >/dev/null 2>&1 || {
   echo "local-db: cluster is up ($started) but not answering on port $PORT" >&2; exit 1; }
 
 if [ "$CMD" = "reset" ]; then
   log "dropping $DB"
-  psql -h 127.0.0.1 -p "$PORT" -U postgres -c "DROP DATABASE IF EXISTS ${DB}" >/dev/null 2>&1
+  "$PSQL_BIN" -h 127.0.0.1 -p "$PORT" -U postgres -c "DROP DATABASE IF EXISTS ${DB}" >/dev/null 2>&1
 fi
-psql -h 127.0.0.1 -p "$PORT" -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB}'" 2>/dev/null | grep -q 1 \
-  || psql -h 127.0.0.1 -p "$PORT" -U postgres -c "CREATE DATABASE ${DB}" >/dev/null
+"$PSQL_BIN" -h 127.0.0.1 -p "$PORT" -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB}'" 2>/dev/null | grep -q 1 \
+  || "$PSQL_BIN" -h 127.0.0.1 -p "$PORT" -U postgres -c "CREATE DATABASE ${DB}" >/dev/null
 
 if [ "$CMD" = "url" ]; then url_for; exit 0; fi
 

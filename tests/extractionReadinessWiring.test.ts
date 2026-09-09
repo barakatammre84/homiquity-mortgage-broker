@@ -42,6 +42,7 @@ const PAY_STUB = {
   ytdGross: 50_400,
   confidence: "high" as const,
   extractedFields: ["employerName", "grossPay", "ytdGross"],
+  fieldEvidence: { employerName: { pageNumber: 1, confidence: 0.99 } },
 };
 
 const BANK_STATEMENT = {
@@ -51,6 +52,11 @@ const BANK_STATEMENT = {
   closingBalance: 22_500,
   confidence: "high" as const,
   extractedFields: ["accountType", "accountNumber", "closingBalance"],
+  fieldEvidence: {
+    accountType: { pageNumber: 1, confidence: 0.99 },
+    accountNumber: { pageNumber: 1, confidence: 0.99 },
+    closingBalance: { pageNumber: 1, confidence: 0.99 },
+  },
 };
 
 const TAX_RETURN = {
@@ -88,15 +94,12 @@ describe("F-030 — extracted VALUES reach the readiness checklist", () => {
     expect(result.skipped).toEqual([]);
   });
 
-  it("records income from a tax return, preferring AGI", async () => {
+  it("credits tax-return presence without treating AGI as qualifying income", async () => {
     const result = await wireExtractionToReadiness("u1", "d3", "tax_return", TAX_RETURN, "high");
 
-    expect(result.fieldsUpdated).toContain("annual_income");
-    expect(result.fieldsUpdated).toContain("income_sources");
-
-    const agiCall = updateReadinessField.mock.calls.find((c: any[]) => c[1] === "annual_income");
-    expect((agiCall as any)[2].sourceField).toMatch(/adjustedGrossIncome/);
-    expect((agiCall as any)[2].verificationStatus).toBe("document_extracted");
+    expect(result.fieldsUpdated).toEqual(["tax_returns"]);
+    expect(result.fieldsUpdated).not.toContain("annual_income");
+    expect(result.fieldsUpdated).not.toContain("income_sources");
   });
 
   it("marks every extracted row as tier-1 document lineage tied to the document", async () => {
@@ -129,6 +132,19 @@ describe("F-030 — the wiring stays honest about what it did NOT learn", () => 
     expect(result.fieldsUpdated).not.toContain("annual_income");
   });
 
+  it("uses a W-2 for employer and form history without treating Box 1 as current qualifying income", async () => {
+    const result = await wireExtractionToReadiness("u1", "d-w2", "w2", {
+      employerName: "Acme Corp",
+      wagesTipsOtherCompensation: 85_000,
+      fieldEvidence: {
+        employerName: { pageNumber: 1, confidence: 0.99 },
+        wagesTipsOtherCompensation: { pageNumber: 1, confidence: 0.99 },
+      },
+    }, "high");
+    expect(result.fieldsUpdated).toEqual(["employer_name", "w2_forms"]);
+    expect(result.fieldsUpdated).not.toContain("annual_income");
+  });
+
   it("writes nothing at all on low confidence", async () => {
     const result = await wireExtractionToReadiness("u1", "d6", "pay_stub", PAY_STUB, "low");
     expect(result.fieldsUpdated).toEqual([]);
@@ -157,10 +173,8 @@ describe("F-030 — the field map only names fields the extractors actually emit
 // ---------------------------------------------------------------------------
 // Document presence → readiness, independent of extraction.
 //
-// The gap these pin: `w2_forms` and `government_id` are seeded REQUIRED
-// (weight 1.5 and 1.0) but no W-2 or ID extractor exists, so before this there
-// was no automated writer for either. The readiness score could never reach
-// 100% and the borrower kept being asked for documents already uploaded.
+// `government_id` still has no field extractor, while every required document
+// row must remain satisfiable from presence even if parsing is unavailable.
 // ---------------------------------------------------------------------------
 const { creditDocumentPresence, presenceFieldFor } = await import(
   "../server/services/optimizationEngine"
@@ -215,4 +229,3 @@ describe("document presence credit — the trust ladder is honest", () => {
     expect(result.fieldUpdated).toBeNull();
   });
 });
-

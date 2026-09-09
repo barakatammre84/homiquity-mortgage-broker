@@ -34,6 +34,10 @@ export default defineConfig({
     // The root-cause fix is still preferable where it is cheap: statusVocabulary went
     // 41s -> 1.4s by reading the tree once instead of once per test.
     testTimeout: 45000,
+    // Keep component collection reliable on the shared development host. A
+    // wide default fork burst can exhaust worker startup resources and cause
+    // Vitest to omit files even though each file passes in isolation.
+    maxWorkers: 4,
     include: ["client/src/**/*.test.{ts,tsx}"],
   },
   resolve: {

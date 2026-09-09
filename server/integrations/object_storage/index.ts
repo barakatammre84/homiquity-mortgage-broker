@@ -25,7 +25,9 @@ export {
   createLocalUpload,
   localObjectExists,
   sha256LocalObject,
+  readLocalObject,
   writeLocalObject,
+  writeLocalDerivedObject,
+  deleteLocalObject,
   streamLocalObject,
 } from "./localObjectStorage";
-

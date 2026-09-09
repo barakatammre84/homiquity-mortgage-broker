@@ -32,6 +32,23 @@ const modelResponse = (overrides: Record<string, unknown> = {}) =>
     confidence: "high",
     extractedFields: ["w2Wages", "grossIncome", "scheduleE"],
     warnings: [],
+    fieldEvidence: {
+      taxpayerName: { pageNumber: 1, confidence: 0.99 },
+      w2Wages: { pageNumber: 1, confidence: 0.99 },
+      grossIncome: { pageNumber: 1, confidence: 0.99 },
+      adjustedGrossIncome: { pageNumber: 1, confidence: 0.99 },
+      taxableIncome: { pageNumber: 1, confidence: 0.99 },
+      filingStatus: { pageNumber: 1, confidence: 0.99 },
+      "scheduleC.businessIncome": { pageNumber: 3, confidence: 0.98 },
+      "scheduleC.businessExpenses": { pageNumber: 3, confidence: 0.98 },
+      "scheduleC.netProfitLoss": { pageNumber: 3, confidence: 0.98 },
+      "scheduleE.netRentalIncomeLoss": { pageNumber: 5, confidence: 0.97 },
+      "scheduleE.grossRents": { pageNumber: 5, confidence: 0.97 },
+      "scheduleE.totalDepreciation": { pageNumber: 5, confidence: 0.97 },
+      "scheduleE.mortgageInterest": { pageNumber: 5, confidence: 0.97 },
+      "scheduleE.propertyCount": { pageNumber: 5, confidence: 0.97 },
+    },
+    pageCount: 6,
     ...overrides,
   });
 

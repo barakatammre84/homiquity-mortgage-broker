@@ -96,4 +96,83 @@ describe("getCoreCapabilityReport", () => {
     expect(capability(report, "object_storage").state).toBe("live");
     expect(capability(report, "plaid_verification").state).toBe("live");
   });
+
+  it("distinguishes current, failed, stale, and missing operational proof", () => {
+    const now = new Date("2026-09-09T12:00:00.000Z");
+    const report = getCoreCapabilityReport(
+      {
+        NODE_ENV: "production",
+        RAILWAY_GIT_COMMIT_SHA: "commit-a",
+        ANTHROPIC_API_KEY: "configured",
+        PRIVATE_OBJECT_DIR: "/bucket/private",
+      },
+      now,
+      {
+        homi: {
+          latestAttempt: {
+            status: "success",
+            completedAt: "2026-09-09T11:30:00.000Z",
+            environment: "production",
+            commitSha: "commit-a",
+          },
+          lastSuccess: { completedAt: "2026-09-09T11:30:00.000Z", environment: "production", commitSha: "commit-a" },
+        },
+        document_extraction: {
+          latestAttempt: { status: "failure", completedAt: "2026-09-09T11:45:00.000Z", environment: "production", commitSha: "commit-a" },
+          lastSuccess: { completedAt: "2026-09-09T09:00:00.000Z", environment: "production", commitSha: "commit-a" },
+        },
+        object_storage: {
+          latestAttempt: { status: "success", completedAt: "2026-09-07T11:30:00.000Z", environment: "production", commitSha: "commit-a" },
+          lastSuccess: { completedAt: "2026-09-07T11:30:00.000Z", environment: "production", commitSha: "commit-a" },
+        },
+      },
+    );
+
+    expect(capability(report, "homi")).toMatchObject({
+      verificationState: "current",
+      lastSuccessfulVerificationAt: "2026-09-09T11:30:00.000Z",
+    });
+    expect(capability(report, "document_extraction")).toMatchObject({
+      verificationState: "failed",
+      lastVerificationAttemptAt: "2026-09-09T11:45:00.000Z",
+      lastSuccessfulVerificationAt: "2026-09-09T09:00:00.000Z",
+    });
+    expect(capability(report, "object_storage").verificationState).toBe("stale");
+    expect(capability(report, "plaid_verification").verificationState).toBe("not_recorded");
+    expect(capability(report, "underwriting_engine").verificationState).toBe("not_required");
+  });
+
+  it("does not reuse a canary from another environment or production build", () => {
+    const now = new Date("2026-09-09T12:00:00.000Z");
+    const report = getCoreCapabilityReport(
+      {
+        NODE_ENV: "production",
+        RAILWAY_GIT_COMMIT_SHA: "current-commit",
+        ANTHROPIC_API_KEY: "configured",
+      },
+      now,
+      {
+        homi: {
+          latestAttempt: {
+            status: "success",
+            completedAt: "2026-09-09T11:59:00.000Z",
+            environment: "non_production",
+            commitSha: "current-commit",
+          },
+          lastSuccess: null,
+        },
+        document_extraction: {
+          latestAttempt: {
+            status: "success",
+            completedAt: "2026-09-09T11:59:00.000Z",
+            environment: "production",
+            commitSha: "prior-commit",
+          },
+          lastSuccess: null,
+        },
+      },
+    );
+    expect(capability(report, "homi").verificationState).toBe("stale");
+    expect(capability(report, "document_extraction").verificationState).toBe("stale");
+  });
 });

@@ -45,6 +45,7 @@ describe("Homi provider fallback", () => {
       userId: "user-1",
       userRole: "aspiring_owner",
       conversationId: "conversation-1",
+      turnId: "turn-1",
       userMessage: "What should I prepare?",
       history: [],
       verifiedContext: { hasApplication: false, completionPercentage: 0 } as never,

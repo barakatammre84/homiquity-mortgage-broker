@@ -260,6 +260,37 @@ describe("MISMO export vs. the official schema (known-violations baseline)", () 
     expect(result.valid).toBe(true);
   });
 
+  it.skipIf(!xmllintInstalled)("multi-borrower export validates clean against the official schema", () => {
+    const dto = baseDto();
+    dto.allPersonalInfo = [
+      { ...dto.personalInfo!, borrowerSequenceNumber: 1 },
+      {
+        borrowerSequenceNumber: 2,
+        firstName: "Sam",
+        lastName: "Secondary",
+        ssn: "444-55-6666",
+        email: "sam@example.com",
+      } as any,
+    ];
+    dto.employment = [
+      ...dto.employment.map((row) => ({ ...row, borrowerSequenceNumber: 1 })),
+      {
+        borrowerSequenceNumber: 2,
+        employerName: "Secondary Employer",
+        employmentType: "employed",
+        startDate: "2021-01-01",
+      } as any,
+    ];
+    dto.allDeclarations = [
+      { ...dto.declarations!, borrowerSequenceNumber: 1 },
+      { ...dto.declarations!, borrowerSequenceNumber: 2 },
+    ];
+
+    const result = validateMismoExport(generateMISMO34XML(dto));
+    expect(extractOffendingElements(result.errors)).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   // B3-6-05, Debts Paid by Others → LiabilityExclusionIndicator (MISMO_3_0.xsd
   // line 9748). Validated against the official schema, not just grepped for:
   // the LIABILITY_DETAIL content model is an ordered sequence, so a correct

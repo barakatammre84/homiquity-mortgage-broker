@@ -44,6 +44,7 @@ import {
   type ComparisonRow,
 } from "@/lib/documentReview";
 import { ExtractedFieldReview } from "@/components/staff/ExtractedFieldReview";
+import { DocumentPacketReview } from "@/components/staff/DocumentPacketReview";
 
 const GROUP_ORDER: DocumentReviewGroup[] = ["needs_review", "other", "verified", "rejected"];
 const GROUP_LABELS: Record<DocumentReviewGroup, string> = {
@@ -81,7 +82,7 @@ interface DocumentReviewPanelProps {
   canReview: boolean;
   selectedDocumentId: string | null;
   onSelectDocument: (id: string) => void;
-  onOpenSourcePage?: (pageNumber: number) => void;
+  onOpenSourcePage?: (pageNumber: number, boundingBox?: unknown, fieldLabel?: string) => void;
 }
 
 export function DocumentReviewPanel({
@@ -222,6 +223,9 @@ export function DocumentReviewPanel({
                   </p>
                 )}
               </div>
+            )}
+            {parsed.documentClassification && (
+              <DocumentPacketReview documentId={doc.id} canReview={canReview && isPending} />
             )}
             {parsed.extractedFields.length > 0 && (
               <p className="text-xs text-muted-foreground">

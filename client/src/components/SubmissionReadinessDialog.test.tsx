@@ -121,6 +121,25 @@ beforeEach(() => {
 });
 
 describe("SubmissionReadinessDialog — the lender identifier contract (F-0818-09)", () => {
+  it("offers the immutable final DU / LPA artifact when the submission has a retained hash", async () => {
+    renderDialog({
+      submissions: [{
+        id: "sub-1",
+        lenderId: "uwm",
+        status: "submitted",
+        confirmationId: "CONF-8F3A2B",
+        simulated: true,
+        ausFindingsHash: "a".repeat(64),
+        submittedAt: new Date("2026-08-18T12:00:00Z").toISOString(),
+      }],
+    });
+    await openDialog();
+    const link = await screen.findByTestId("aus-artifact-download-sub-1");
+    expect(link.getAttribute("href")).toBe(
+      `/api/loan-applications/${APP_ID}/lender-submissions/sub-1/aus-findings`,
+    );
+  });
+
   it("shows the lender's NAME in an existing submission row, not the raw business key", async () => {
     // The helper looks a submission's lenderId up in the catalog. Matching it
     // against the uuid `id` never hits, so the row degrades to the slug.

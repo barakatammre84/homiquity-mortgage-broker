@@ -227,10 +227,9 @@ describe("extractable-type gate (UI mirror of the /extract support list)", () =>
   // The verify-role gate mirror is covered by tests/documentStatus.test.ts
   // (shared/documentStatus.ts owns DOCUMENT_REVIEW_ROLES).
   it("matches the /extract supported-type list", () => {
-    for (const t of ["tax_return", "pay_stub", "bank_statement", "lease_agreement"]) {
+    for (const t of ["tax_return", "pay_stub", "w2", "bank_statement", "lease_agreement"]) {
       expect(isExtractableDocumentType(t)).toBe(true);
     }
-    expect(isExtractableDocumentType("w2")).toBe(false);
     expect(isExtractableDocumentType(null)).toBe(false);
   });
 });

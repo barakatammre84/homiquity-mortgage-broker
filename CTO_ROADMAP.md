@@ -69,13 +69,13 @@ underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Built · Proven internally** | Record production provider canaries and prove that guidance reduces incomplete work, repeated questions or time to a useful human response. |
+| Guide the borrower with Homi | **Built · Proven internally** | Run the production canaries and prove from the new outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
-| Collect and correct evidence | **Built · Proven internally** | Production upload → restart → download → replacement, with access control, on a pilot file. |
+| Collect and correct evidence | **Built · Proven internally** | Run production upload → restart → page/box review → correction → download on a pilot file; calibrate accuracy with the protected labeled set. |
 | Review complicated income | **Built · Proven internally** | A licensed reviewer reproduces the mixed-income calculation, approves it from a real client's accepted evidence and reconciles it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
-| Deliver to a lender | **Built** | One approved lender accepts the package and completes an acknowledgement/correction exchange. |
+| Deliver to a lender | **Built · XSD proven internally** | One approved lender accepts the multi-borrower MISMO, income and final AUS artifacts and completes an acknowledgement/correction exchange. |
 | Close, fund and service | **Built** | One real closing, funding record, borrower update sequence and post-close handoff. |
 
 ## Core intelligence build order
@@ -84,15 +84,16 @@ underwriter and closer also remain unproven.
    restart recovery and staff-visible failures are built and proven locally for ordinary documents
    and consented multi-form tax packages. Document status, confidence, extracted facts and
    readiness commit atomically, demonstration extraction fails closed in production, and
-   tax-consent cleanup preserves unrelated work. Record provider canaries and run one controlled
-   production interruption/recovery proof.
-2. **Finish the page-level evidence model:** ordinary uploads now classify every page independently,
-   block mislabeled and mixed packets, retain field page/box evidence and support field-by-field
-   review. Build automatic physical page splitting, rendered evidence boxes and a human-graded
-   accuracy set before extraction can be treated as hands-off.
-3. **Finish decision delivery:** underwriting, AUS and pre-approval letters now carry input/policy
-   fingerprints, stale output is blocked, and out-of-scope files take an explicit manual-underwrite
-   path. Deliver co-borrowers and retain final findings artifacts before receiver certification.
+   tax-consent cleanup preserves unrelated work, and the canary ledger is built. Execute the
+   canaries and one controlled production interruption/recovery proof.
+2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
+   link logical documents, retain field-level source pages and support field and boundary review.
+   Run a representative 100-page tax packet, populate the protected labeled set and set review
+   thresholds from measured errors before treating extraction as hands-off.
+3. **Prove decision delivery:** underwriting, AUS and pre-approval letters carry input/policy
+   fingerprints; stale output is blocked; out-of-scope files take a manual-underwrite path; and the
+   multi-borrower MISMO plus final dual-AUS artifact passes the committed XSD. Retain provider-native
+   findings and reproduce the package through the live path before receiver certification.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.
 5. **Prove Homi in production:** the mortgage scenario and prompt-attack regression suite is built;

@@ -1,6 +1,7 @@
 import { storage } from "../../storage";
 import {
   extractPayStubData,
+  extractW2Data,
   extractBankStatementData,
   extractLeaseData,
   extractTaxReturnData,
@@ -55,6 +56,7 @@ export interface AutopilotDocumentParams {
   documentId: string;
   documentType: string;
   storagePath: string;
+  mimeType?: string | null;
   fileSize?: number | null;
   triggeredBy: string;
   beforePersist?: (transaction: DatabaseTransaction) => Promise<void>;
@@ -82,19 +84,29 @@ const prettyDocType = (t: string): string =>
 async function extractByType(
   documentType: string,
   storagePath: string,
+  mimeType: string | null | undefined,
   app: LoanApplication,
 ): Promise<ExtractionOutcome | null> {
   const highlights: string[] = [];
   switch (documentType) {
     case "pay_stub": {
-      const e = await extractPayStubData(storagePath);
+      const e = await extractPayStubData(storagePath, mimeType ?? undefined);
       if (e.employerName) highlights.push(`Employer: ${e.employerName}`);
       if (e.grossPay != null) highlights.push(`Gross pay (period): ${usd(e.grossPay)}`);
       if (e.ytdGross != null) highlights.push(`YTD gross: ${usd(e.ytdGross)}`);
       return { extracted: e, highlights };
     }
+    case "w2": {
+      const e = await extractW2Data(storagePath, mimeType ?? undefined);
+      if (e.employerName) highlights.push(`Employer: ${e.employerName}`);
+      if (e.taxYear) highlights.push(`Tax year: ${e.taxYear}`);
+      if (e.wagesTipsOtherCompensation != null) {
+        highlights.push(`W-2 Box 1 wages: ${usd(e.wagesTipsOtherCompensation)}`);
+      }
+      return { extracted: e, highlights };
+    }
     case "tax_return": {
-      const e = await extractTaxReturnData(storagePath);
+      const e = await extractTaxReturnData(storagePath, undefined, mimeType ?? undefined);
       if (e.taxpayerName) highlights.push(`Taxpayer: ${e.taxpayerName}`);
       const observedAnnual = e.w2Wages ?? e.grossIncome ?? e.adjustedGrossIncome;
       if (observedAnnual != null) {
@@ -112,13 +124,13 @@ async function extractByType(
       return { extracted: e, highlights };
     }
     case "bank_statement": {
-      const e = await extractBankStatementData(storagePath);
+      const e = await extractBankStatementData(storagePath, mimeType ?? undefined);
       if (e.closingBalance != null) highlights.push(`Closing balance: ${usd(e.closingBalance)}`);
       if (e.totalDeposits != null) highlights.push(`Total deposits: ${usd(e.totalDeposits)}`);
       return { extracted: e, highlights };
     }
     case "lease_agreement": {
-      const e = await extractLeaseData(storagePath);
+      const e = await extractLeaseData(storagePath, mimeType ?? undefined);
       return { extracted: e, highlights };
     }
     default:
@@ -223,6 +235,7 @@ export async function runAutopilotForDocument(
     documentId,
     documentType,
     storagePath,
+    mimeType,
     fileSize,
     triggeredBy,
     beforePersist,
@@ -256,7 +269,7 @@ export async function runAutopilotForDocument(
     // 1. PERCEIVE (+ 2. RECONCILE narration) ---------------------------------
     let outcome: ExtractionOutcome | null = null;
     try {
-      outcome = await extractByType(documentType, storagePath, application);
+      outcome = await extractByType(documentType, storagePath, mimeType, application);
     } catch (err) {
       console.error(`[Autopilot] Extraction failed for ${documentId}:`, err);
       await publishCurrentStatus(applicationId);

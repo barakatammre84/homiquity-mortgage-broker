@@ -4,6 +4,13 @@ export type CoreCapabilityState =
   | "disabled"
   | "configuration_error";
 
+export type CoreCapabilityVerificationState =
+  | "current"
+  | "stale"
+  | "failed"
+  | "not_recorded"
+  | "not_required";
+
 export interface CoreCapabilityStatus {
   id:
     | "homi"
@@ -21,9 +28,75 @@ export interface CoreCapabilityStatus {
   provider: string;
   state: CoreCapabilityState;
   criticalForLiveLoan: boolean;
+  verificationRequired: boolean;
+  verificationState: CoreCapabilityVerificationState;
+  lastVerificationAttemptAt: string | null;
   lastSuccessfulVerificationAt: string | null;
   detail: string;
   nextAction: string | null;
+}
+
+export interface CoreCapabilityCanaryProof {
+  latestAttempt: {
+    status: "success" | "failure" | "configuration_error";
+    completedAt: string;
+    environment?: string;
+    commitSha?: string | null;
+  } | null;
+  lastSuccess: { completedAt: string; environment?: string; commitSha?: string | null } | null;
+}
+
+export type CoreCapabilityCanaryProofMap = Partial<Record<string, CoreCapabilityCanaryProof>>;
+
+const CANARY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function verificationFor(
+  required: boolean,
+  proof: CoreCapabilityCanaryProof | undefined,
+  now: Date,
+  expectedEnvironment: "production" | "non_production",
+  expectedCommit: string | null,
+): Pick<CoreCapabilityStatus, "verificationRequired" | "verificationState" | "lastVerificationAttemptAt" | "lastSuccessfulVerificationAt"> {
+  if (!required) {
+    return {
+      verificationRequired: false,
+      verificationState: "not_required",
+      lastVerificationAttemptAt: null,
+      lastSuccessfulVerificationAt: null,
+    };
+  }
+  const latestAttemptAt = proof?.latestAttempt?.completedAt ?? null;
+  const lastSuccessAt = proof?.lastSuccess?.completedAt ?? null;
+  if (!proof?.latestAttempt) {
+    return {
+      verificationRequired: true,
+      verificationState: "not_recorded",
+      lastVerificationAttemptAt: null,
+      lastSuccessfulVerificationAt: lastSuccessAt,
+    };
+  }
+  if (proof.latestAttempt.status !== "success") {
+    return {
+      verificationRequired: true,
+      verificationState: "failed",
+      lastVerificationAttemptAt: latestAttemptAt,
+      lastSuccessfulVerificationAt: lastSuccessAt,
+    };
+  }
+  const wrongEnvironment = proof.latestAttempt.environment !== undefined &&
+    proof.latestAttempt.environment !== expectedEnvironment;
+  const wrongProductionBuild = expectedEnvironment === "production" &&
+    (!expectedCommit || proof.latestAttempt.commitSha !== expectedCommit);
+  const age = now.getTime() - new Date(proof.latestAttempt.completedAt).getTime();
+  return {
+    verificationRequired: true,
+    verificationState:
+      !wrongEnvironment && !wrongProductionBuild && age >= 0 && age <= CANARY_MAX_AGE_MS
+        ? "current"
+        : "stale",
+    lastVerificationAttemptAt: latestAttemptAt,
+    lastSuccessfulVerificationAt: lastSuccessAt,
+  };
 }
 
 export interface CoreCapabilityReport {
@@ -57,8 +130,10 @@ function validServiceAccountJson(value: string | undefined): boolean {
 export function getCoreCapabilityReport(
   env: NodeJS.ProcessEnv = process.env,
   now: Date = new Date(),
+  canaryProof: CoreCapabilityCanaryProofMap = {},
 ): CoreCapabilityReport {
   const production = env.NODE_ENV === "production";
+  const reportEnvironment = production ? "production" : "non_production";
   const anthropicCoach = has(env, "ANTHROPIC_API_KEY");
   const anthropicExtraction =
     has(env, "AI_INTEGRATIONS_ANTHROPIC_API_KEY") || anthropicCoach;
@@ -76,7 +151,11 @@ export function getCoreCapabilityReport(
   const duKey = has(env, "FANNIE_DU_API_KEY");
   const lpaKey = has(env, "FREDDIE_LPA_API_KEY");
 
-  const capabilities: CoreCapabilityStatus[] = [
+  type CapabilityConfig = Omit<
+    CoreCapabilityStatus,
+    "verificationRequired" | "verificationState" | "lastVerificationAttemptAt"
+  >;
+  const configuredCapabilities: CapabilityConfig[] = [
     {
       id: "homi",
       label: "Homi guidance",
@@ -167,7 +246,7 @@ export function getCoreCapabilityReport(
       criticalForLiveLoan: true,
       lastSuccessfulVerificationAt: null,
       detail: "Deterministic rules, evidence gates, input and policy fingerprints, stale-output blocking, decision snapshots, and a manual-underwrite path are implemented.",
-      nextAction: "Retain final AUS findings, deliver co-borrowers, and prove the selected live AUS path before lender handoff.",
+      nextAction: "Run the selected live AUS path and retain its provider-native signed findings before lender handoff.",
     },
     {
       id: "financial_analysis",
@@ -207,7 +286,7 @@ export function getCoreCapabilityReport(
       detail: duKey
         ? "A DU key is present, but the live adapter is intentionally unimplemented and will refuse the call."
         : "The current result is a clearly labeled deterministic DU-shaped simulation.",
-      nextAction: "Complete Fannie technology-provider onboarding and retain the final findings artifact.",
+      nextAction: "Complete Fannie technology-provider onboarding and retain the provider-native findings beside Homiquity's hashed package artifact.",
     },
     {
       id: "lpa",
@@ -243,6 +322,28 @@ export function getCoreCapabilityReport(
     },
   ];
 
+  const canaryRequired = new Set<CoreCapabilityStatus["id"]>([
+    "homi",
+    "document_extraction",
+    "object_storage",
+    "plaid_verification",
+    "credit",
+    "du",
+    "lpa",
+    "pricing",
+    "lender_delivery",
+  ]);
+  const capabilities: CoreCapabilityStatus[] = configuredCapabilities.map((capability) => ({
+    ...capability,
+    ...verificationFor(
+      canaryRequired.has(capability.id),
+      canaryProof[capability.id],
+      now,
+      reportEnvironment,
+      env.RAILWAY_GIT_COMMIT_SHA ?? null,
+    ),
+  }));
+
   const counts: Record<CoreCapabilityState, number> = {
     live: 0,
     simulated: 0,
@@ -253,10 +354,13 @@ export function getCoreCapabilityReport(
 
   return {
     generatedAt: now.toISOString(),
-    environment: production ? "production" : "non_production",
+    environment: reportEnvironment,
     readyForLiveLoanLifecycle: capabilities
       .filter((capability) => capability.criticalForLiveLoan)
-      .every((capability) => capability.state === "live"),
+      .every((capability) =>
+        capability.state === "live" &&
+        (!capability.verificationRequired || capability.verificationState === "current")
+      ),
     counts,
     capabilities,
   };

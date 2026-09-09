@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { isAdmin } from "@shared/roles";
+import { z } from "zod";
 import { isAuthenticated, requireRole } from "../auth";
 import type { User } from "@shared/schema";
 import { storage } from "../storage";
@@ -8,6 +9,7 @@ import {
   getEventCounts,
   getRecentEvents,
   getAutomationMetrics,
+  getHomiOutcomeMetrics,
   getDomainInsights,
   emitBorrowerAction,
 } from "../services/analyticsEventPipeline";
@@ -33,20 +35,72 @@ import { firstQueryValue } from "./queryParams";
 import { routeParam, routeParams } from "../http/routeParams";
 import { getCoreCapabilityReport } from "../services/coreCapabilityStatus";
 import { getDocumentExtractionQueueSummary } from "../services/documentExtractionJobs";
+import {
+  CORE_CANARY_CAPABILITIES,
+  getCoreCanaryProof,
+  getRecentCoreProviderCanaries,
+  runCoreProviderCanary,
+} from "../services/coreProviderCanaries";
+import { logAudit } from "../auditLog";
 
 export function registerDataIntelligenceRoutes(app: Express) {
 
   app.get("/api/analytics/core-capabilities",
     requireRole("admin", "lo", "loa", "processor", "underwriter"),
-    async (_req, res) => {
+    async (req, res) => {
       try {
-        const documentExtractionQueue = await getDocumentExtractionQueueSummary();
-        res.json({ ...getCoreCapabilityReport(), documentExtractionQueue });
+        const [documentExtractionQueue, canaryProof] = await Promise.all([
+          getDocumentExtractionQueueSummary(),
+          getCoreCanaryProof(),
+        ]);
+        res.json({
+          ...getCoreCapabilityReport(process.env, new Date(), canaryProof),
+          documentExtractionQueue,
+          canRunProviderCanaries: isAdmin(req.user as User),
+        });
       } catch (error) {
         console.error("Core capability status error:", error);
         res.status(500).json({ error: "Failed to fetch core capability status" });
       }
     }
+  );
+
+  app.get("/api/admin/core-capabilities/canaries",
+    requireRole("admin"),
+    async (req, res) => {
+      try {
+        const requested = Number.parseInt(firstQueryValue(req.query.limit) ?? "30", 10);
+        const canaries = await getRecentCoreProviderCanaries(Number.isFinite(requested) ? requested : 30);
+        res.json({ canaries });
+      } catch (error) {
+        console.error("Core capability canary history error:", error);
+        res.status(500).json({ error: "Failed to fetch core capability canaries" });
+      }
+    },
+  );
+
+  app.post("/api/admin/core-capabilities/:capabilityId/canary",
+    requireRole("admin"),
+    async (req, res) => {
+      const parsed = z.enum(CORE_CANARY_CAPABILITIES).safeParse(routeParam(req, "capabilityId"));
+      if (!parsed.success) {
+        return res.status(400).json({ error: "This capability does not have a safe operational canary" });
+      }
+      try {
+        const user = req.user as User;
+        const canary = await runCoreProviderCanary(parsed.data, user.id);
+        await logAudit(req, "core_capability.canary_run", "core_capability", parsed.data, {
+          status: canary.status,
+          failureClass: canary.failureClass,
+          latencyMs: canary.latencyMs,
+          commitSha: canary.commitSha,
+        });
+        res.json(canary);
+      } catch (error) {
+        console.error("Core capability canary execution error:", error);
+        res.status(500).json({ error: "Failed to record the core capability canary" });
+      }
+    },
   );
 
   app.post("/api/analytics/event", isAuthenticated, async (req, res) => {
@@ -73,6 +127,19 @@ export function registerDataIntelligenceRoutes(app: Express) {
         res.status(500).json({ error: "Failed to fetch automation metrics" });
       }
     }
+  );
+
+  app.get("/api/analytics/homi-outcomes",
+    requireRole("admin", "lo", "loa", "processor", "underwriter"),
+    async (req, res) => {
+      try {
+        const daysBack = parseInt(firstQueryValue(req.query.days) ?? "") || 30;
+        res.json(await getHomiOutcomeMetrics(daysBack));
+      } catch (error) {
+        console.error("Homi outcome metrics error:", error);
+        res.status(500).json({ error: "Failed to build Homi outcome metrics" });
+      }
+    },
   );
 
   app.get("/api/analytics/domain/:domain",

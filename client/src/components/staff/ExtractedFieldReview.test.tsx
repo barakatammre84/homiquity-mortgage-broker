@@ -68,7 +68,11 @@ describe("ExtractedFieldReview", () => {
     expect(await screen.findByText("Closing Balance")).toBeTruthy();
     expect(screen.getByText("91%")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Page 2" }));
-    expect(onOpenSourcePage).toHaveBeenCalledWith(2);
+    expect(onOpenSourcePage).toHaveBeenCalledWith(
+      2,
+      { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+      "Closing Balance",
+    );
 
     const input = screen.getByLabelText("Closing Balance");
     await user.clear(input);

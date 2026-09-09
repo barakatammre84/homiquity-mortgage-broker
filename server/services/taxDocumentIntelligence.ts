@@ -286,8 +286,22 @@ export async function runTaxDocumentIntelligence(
       });
     }
     const classification = cls.classification;
-
-    const instances = classification.forms.slice(0, MAX_FORM_INSTANCES);
+    if (!classification.pageCount) {
+      return failRunWithClaim("Tax document classification did not return a page count");
+    }
+    const instances = classification.forms
+      .filter((instance) =>
+        instance.pageStart !== null &&
+        instance.pageStart !== undefined &&
+        instance.pageEnd !== null &&
+        instance.pageEnd !== undefined &&
+        instance.pageStart <= instance.pageEnd &&
+        instance.pageEnd <= classification.pageCount!,
+      )
+      .slice(0, MAX_FORM_INSTANCES);
+    if (instances.length === 0) {
+      return failRunWithClaim("Tax document classification found no form with a valid source-page range");
+    }
 
     // Pass 2 — per-instance field extraction (bounded concurrency).
     const extractions = await mapWithConcurrency(instances, EXTRACTION_CONCURRENCY, (instance) =>
@@ -356,7 +370,7 @@ export async function runTaxDocumentIntelligence(
               return {
                 logicalDocumentId: logicalDoc.id,
                 pageId: null,
-                pageNumber: instance.pageStart ?? null,
+                pageNumber: fv.pageNumber ?? null,
                 fieldName: name,
                 fieldCategory: taxFieldCategory(name, kind),
                 valueString: valueType === "string" ? String(fv.value) : null,
@@ -365,6 +379,7 @@ export async function runTaxDocumentIntelligence(
                 valueBoolean: valueType === "boolean" ? Boolean(fv.value) : null,
                 valueType,
                 confidence: fv.confidence.toFixed(4),
+                boundingBox: fv.boundingBox ?? null,
                 extractionMethod: extraction.simulated ? "simulated" : "claude",
                 modelVersion: extraction.lineage.modelId ?? null,
               };
@@ -609,6 +624,8 @@ async function loadRunForms(
       valueBoolean: extractedFields.valueBoolean,
       valueType: extractedFields.valueType,
       confidence: extractedFields.confidence,
+      pageNumber: extractedFields.pageNumber,
+      boundingBox: extractedFields.boundingBox,
     })
     .from(extractedFields)
     .where(inArray(extractedFields.logicalDocumentId, docs.map((d) => d.id)));
@@ -625,6 +642,10 @@ async function loadRunForms(
             ? Boolean(row.valueBoolean)
             : row.valueString,
       confidence: Number(row.confidence),
+      pageNumber: row.pageNumber ?? undefined,
+      boundingBox: row.boundingBox && typeof row.boundingBox === "object"
+        ? row.boundingBox as ExtractedFieldValue["boundingBox"]
+        : undefined,
     };
     fieldsByDoc.set(row.logicalDocumentId, bucket);
   }

@@ -4,9 +4,11 @@ import {
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractW2Data,
+  validateW2Response,
 } from "../server/extractionService";
 import type { ExtractedTaxReturnData } from "../server/extractionService";
-import { extractionSimulationEnabled } from "../server/extractionCore";
+import { extractionSimulationEnabled, getMimeType, mediaBlock } from "../server/extractionCore";
 
 /**
  * Unit tests for the tax-return cross-field consistency hardening. This runs in
@@ -92,16 +94,24 @@ describe("checkTaxReturnConsistency", () => {
 });
 
 describe("deterministic document extraction simulation", () => {
-  it("covers pay stubs, bank statements, and leases with labeled source evidence", async () => {
+  it("preserves the stored MIME type for extensionless private object paths", () => {
+    expect(getMimeType("/objects/9cbbff08-75ab-4ad2-9e32-bb664d05d70a", "image/png"))
+      .toBe("image/png");
+    expect(mediaBlock("image/png", "c3ludGhldGlj").type).toBe("image");
+    expect(mediaBlock("application/pdf", "c3ludGhldGlj").type).toBe("document");
+  });
+
+  it("covers pay stubs, W-2s, bank statements, and leases with labeled source evidence", async () => {
     const prior = process.env.EXTRACTION_SIMULATE;
     process.env.EXTRACTION_SIMULATE = "true";
     try {
-      const [payStub, bank, lease] = await Promise.all([
+      const [payStub, w2, bank, lease] = await Promise.all([
         extractPayStubData("/objects/demo-paystub"),
+        extractW2Data("/objects/demo-w2"),
         extractBankStatementData("/objects/demo-bank"),
         extractLeaseData(Buffer.from("synthetic lease"), "application/pdf"),
       ]);
-      for (const result of [payStub, bank, lease]) {
+      for (const result of [payStub, w2, bank, lease]) {
         expect(result.modelId).toBe("simulated");
         expect(result.confidence).toBe("medium");
         expect(result.extractedFields.length).toBeGreaterThan(0);
@@ -118,6 +128,7 @@ describe("deterministic document extraction simulation", () => {
       }
       await expect(extractPayStubData("/objects/demo-paystub"))
         .resolves.toEqual(payStub);
+      expect(w2.documentClassification?.pages[0]?.documentType).toBe("w2");
     } finally {
       process.env.EXTRACTION_SIMULATE = prior;
     }
@@ -134,6 +145,7 @@ describe("deterministic document extraction simulation", () => {
       );
       const attempts = await Promise.allSettled([
         extractPayStubData("/objects/production-paystub"),
+        extractW2Data("/objects/production-w2"),
         extractBankStatementData("/objects/production-bank"),
         extractLeaseData(Buffer.from("production lease"), "application/pdf"),
       ]);
@@ -149,5 +161,37 @@ describe("deterministic document extraction simulation", () => {
       if (priorSimulation === undefined) delete process.env.EXTRACTION_SIMULATE;
       else process.env.EXTRACTION_SIMULATE = priorSimulation;
     }
+  });
+
+  it("keeps only the last four EIN digits and requires page evidence for W-2 values", () => {
+    const base = {
+      employeeName: "Jane Roe",
+      employerName: "Acme LLC",
+      taxYear: "2025",
+      employerEinLast4: "12-3456789",
+      wagesTipsOtherCompensation: 85000,
+      confidence: "high",
+      extractedFields: ["employeeName", "employerName", "taxYear", "employerEinLast4", "wagesTipsOtherCompensation"],
+      fieldEvidence: {
+        employeeName: { pageNumber: 1, confidence: 0.98 },
+        employerName: { pageNumber: 1, confidence: 0.98 },
+        taxYear: { pageNumber: 1, confidence: 0.99 },
+        employerEinLast4: { pageNumber: 1, confidence: 0.97 },
+        wagesTipsOtherCompensation: { pageNumber: 1, confidence: 0.99 },
+      },
+      pageCount: 1,
+      documentClassification: {
+        pageCount: 1,
+        pages: [{ pageNumber: 1, documentType: "w2", confidence: 0.99 }],
+      },
+      employeeSsn: "111-22-3333",
+    };
+    const valid = validateW2Response(JSON.stringify(base));
+    expect(valid?.employerEinLast4).toBe("6789");
+    expect(valid).not.toHaveProperty("employeeSsn");
+
+    const missingEvidence = structuredClone(base);
+    delete (missingEvidence.fieldEvidence as Record<string, unknown>).wagesTipsOtherCompensation;
+    expect(validateW2Response(JSON.stringify(missingEvidence))).toBeNull();
   });
 });
