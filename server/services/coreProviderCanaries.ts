@@ -8,11 +8,18 @@ import {
   anthropic as extractionAnthropic,
   EXTRACTION_MODEL_SINGLE_DOC,
 } from "../extractionCore";
+import { extractPayStubData } from "../extractionDocuments";
+import {
+  financialAnalysisCanaryPasses,
+  underwritingCanaryPasses,
+} from "./coreEngineCanaries";
 
 export const CORE_CANARY_CAPABILITIES = [
   "homi",
   "document_extraction",
   "object_storage",
+  "financial_analysis",
+  "underwriting_engine",
 ] as const;
 
 export type CoreCanaryCapabilityId = (typeof CORE_CANARY_CAPABILITIES)[number];
@@ -25,6 +32,9 @@ export type CoreCanaryFailureClass =
   | "provider_unavailable"
   | "invalid_response"
   | "storage_round_trip"
+  | "extraction_invariant"
+  | "financial_invariant"
+  | "underwriting_invariant"
   | "unknown";
 
 export interface CoreCanaryResult {
@@ -70,8 +80,16 @@ const CANARY_DEFINITIONS: Record<
   { provider: string; operation: string }
 > = {
   homi: { provider: "Anthropic Claude", operation: "text_response" },
-  document_extraction: { provider: "Anthropic Claude vision", operation: "synthetic_pdf_read" },
+  document_extraction: { provider: "Anthropic Claude vision", operation: "synthetic_paystub_pipeline" },
   object_storage: { provider: "Google Cloud Storage", operation: "private_write_read_delete" },
+  financial_analysis: {
+    provider: "Homiquity financial analysis",
+    operation: "mixed_income_repeatability",
+  },
+  underwriting_engine: {
+    provider: "Homiquity policy engine",
+    operation: "synthetic_conventional_repeatability",
+  },
 };
 
 function responseText(response: { content: Array<{ type: string; text?: string }> }): string {
@@ -89,8 +107,20 @@ async function syntheticCanaryPdf(): Promise<Buffer> {
     pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
     pdf.on("error", reject);
     pdf.on("end", () => resolve(Buffer.concat(chunks)));
-    pdf.fontSize(20).text("HOMI DOCUMENT CANARY", { align: "center" });
-    pdf.moveDown(2).fontSize(16).text("Verification code: 7319", { align: "center" });
+    pdf.fontSize(20).text("SYNTHETIC PAY STATEMENT", { align: "center" });
+    pdf.moveDown().fontSize(11).text("Operational canary only — no borrower data", { align: "center" });
+    pdf.moveDown(2).fontSize(12);
+    pdf.text("Employee: Morgan Test");
+    pdf.text("Employer: Homiquity Canary Corporation");
+    pdf.text("Pay period: 2026-08-01 to 2026-08-15");
+    pdf.moveDown();
+    pdf.text("Gross pay: $3,000.00");
+    pdf.text("Net pay: $2,100.00");
+    pdf.text("Year-to-date gross: $15,000.00");
+    pdf.text("Year-to-date net: $10,500.00");
+    pdf.text("Year-to-date taxes: $4,500.00");
+    pdf.moveDown();
+    pdf.text("Verification code: 7319");
     pdf.end();
   });
 }
@@ -142,6 +172,26 @@ async function runExtractionCanary(): Promise<void> {
   if (responseText(response) !== "EXTRACTION_CANARY_OK_7319") {
     throw new CanaryExecutionError("invalid_response");
   }
+
+  const extracted = await extractPayStubData(pdf, "application/pdf");
+  const evidence = extracted.fieldEvidence?.grossPay;
+  const classification = extracted.documentClassification;
+  const valid =
+    extracted.modelId === EXTRACTION_MODEL_SINGLE_DOC &&
+    extracted.promptVersion !== undefined &&
+    /^[0-9a-f]{64}$/.test(extracted.rawResponseHash ?? "") &&
+    extracted.grossPay === 3_000 &&
+    extracted.netPay === 2_100 &&
+    extracted.ytdGross === 15_000 &&
+    extracted.ytdNetPay === 10_500 &&
+    extracted.ytdTaxes === 4_500 &&
+    evidence?.pageNumber === 1 &&
+    (evidence?.confidence ?? 0) > 0 &&
+    extracted.pageCount === 1 &&
+    classification?.pageCount === 1 &&
+    classification.pages[0]?.pageNumber === 1 &&
+    classification.pages[0]?.documentType === "paystub";
+  if (!valid) throw new CanaryExecutionError("extraction_invariant");
 }
 
 async function runObjectStorageCanary(): Promise<void> {
@@ -153,6 +203,18 @@ async function runObjectStorageCanary(): Promise<void> {
     await objectStorage.verifyPrivateStorageRoundTrip();
   } catch {
     throw new CanaryExecutionError("storage_round_trip");
+  }
+}
+
+async function runFinancialAnalysisCanary(): Promise<void> {
+  if (!financialAnalysisCanaryPasses()) {
+    throw new CanaryExecutionError("financial_invariant");
+  }
+}
+
+async function runUnderwritingCanary(): Promise<void> {
+  if (!await underwritingCanaryPasses()) {
+    throw new CanaryExecutionError("underwriting_invariant");
   }
 }
 
@@ -198,6 +260,8 @@ const DEFAULT_RUNNERS: Record<CoreCanaryCapabilityId, CanaryRunner> = {
   homi: runHomiCanary,
   document_extraction: runExtractionCanary,
   object_storage: runObjectStorageCanary,
+  financial_analysis: runFinancialAnalysisCanary,
+  underwriting_engine: runUnderwritingCanary,
 };
 
 function toResult(row: typeof coreProviderCanaryRuns.$inferSelect): CoreCanaryResult {
