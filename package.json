@@ -64,6 +64,7 @@
     "db:start": "docker start homiquity-db 2>/dev/null || docker run -d --name homiquity-db -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=homiquity -p 5432:5432 postgres:16",
     "db:seed": "tsx server/scripts/runSeed.ts",
     "coach:tools": "tsx scripts/coachToolTrigger.ts",
+    "benchmark:extraction": "tsx scripts/extraction-benchmark.ts",
     "handoff:facts": "node scripts/handoff-facts.cjs",
     "brand:assets": "node scripts/generate-brand-assets.mjs",
     "brand:og": "node scripts/generate-og-card.mjs"
@@ -73,6 +74,7 @@
     "@google-cloud/storage": "^8.0.1",
     "@hookform/resolvers": "^5.9.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@napi-rs/canvas": "1.0.2",
     "@neondatabase/serverless": "^1.1.0",
     "@radix-ui/react-accordion": "^1.2.20",
     "@radix-ui/react-avatar": "^1.2.6",

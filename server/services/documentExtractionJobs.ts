@@ -7,13 +7,14 @@ import {
   type Document,
   type DocumentExtractionJob,
 } from "@shared/schema";
-import type { ExtractedDocumentData } from "../extractionCore";
+import type { DocumentClassification, ExtractedDocumentData } from "../extractionCore";
 import { db } from "../db";
 import { storage } from "../storage";
 import {
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractW2Data,
 } from "../extractionService";
 import { applyExtractionToDocument } from "./extractionPersistence";
 import {
@@ -33,6 +34,7 @@ import {
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
   "pay_stub",
+  "w2",
   "bank_statement",
   "lease_agreement",
 ] as const;
@@ -423,9 +425,11 @@ async function failJob(job: DocumentExtractionJob, failure: ExtractionFailure): 
 async function extractStandard(document: Document): Promise<ExtractedDocumentData> {
   switch (document.documentType) {
     case "pay_stub":
-      return extractPayStubData(document.storagePath);
+      return extractPayStubData(document.storagePath, document.mimeType ?? undefined);
+    case "w2":
+      return extractW2Data(document.storagePath, document.mimeType ?? undefined);
     case "bank_statement":
-      return extractBankStatementData(document.storagePath);
+      return extractBankStatementData(document.storagePath, document.mimeType ?? undefined);
     case "lease_agreement":
       return extractLeaseData(document.storagePath, document.mimeType ?? undefined);
     default:
@@ -446,6 +450,16 @@ async function executeStandardJob(
   if (extractionFailure) {
     throw Object.assign(new Error("Standard extraction failed"), { extractionFailure });
   }
+  if (extracted.documentClassification) {
+    const { materializeDocumentPages } = await import("./documentPageMaterialization");
+    await materializeDocumentPages({
+      document,
+      borrowerUserId,
+      classification: extracted.documentClassification,
+      modelVersion: extracted.modelId ?? "unknown_extraction_model",
+      beforePersist: claimFence.lockForPersistence,
+    });
+  }
   const result = await applyExtractionToDocument({
     storage,
     userId: borrowerUserId,
@@ -457,6 +471,20 @@ async function executeStandardJob(
     beforePersist: claimFence.lockForPersistence,
   });
   if (result.skipReason) return "cancelled";
+  if (result.classificationBlocked) {
+    try {
+      const { extractMaterializedPacketSegments } = await import("./documentPageMaterialization");
+      await extractMaterializedPacketSegments({
+        documentId: document.id,
+        borrowerUserId,
+        beforePersist: claimFence.lockForPersistence,
+      });
+    } catch (packetError) {
+      // The source remains safely blocked and visible for review. A segment
+      // failure must not discard it or loop paid extraction retries.
+      console.warn(`[DocumentExtraction] Packet segment extraction failed for ${document.id}:`, packetError);
+    }
+  }
 
   if (
     document.applicationId &&
@@ -522,6 +550,56 @@ async function executeTaxPackageJob(
       } satisfies ExtractionFailure,
     });
   }
+  if (!summary.pageCount || summary.pageCount < 1) {
+    throw Object.assign(new Error("Tax package extraction did not return a reviewable page manifest"), {
+      extractionFailure: {
+        code: "tax_package_page_manifest_missing",
+        retryable: false,
+      } satisfies ExtractionFailure,
+    });
+  }
+
+  // Convert the richer per-form classification into exactly one conservative
+  // label per source page for the reviewer. Overlaps choose the most confident
+  // form; uncovered pages stay unknown rather than inheriting a nearby label.
+  const classification: DocumentClassification = {
+    pageCount: summary.pageCount,
+    pages: Array.from({ length: summary.pageCount }, (_, index) => {
+      const pageNumber = index + 1;
+      const candidates = summary.forms
+        .filter((form) =>
+          form.pageStart !== null &&
+          form.pageEnd !== null &&
+          pageNumber >= form.pageStart &&
+          pageNumber <= form.pageEnd,
+        )
+        .sort((left, right) => right.classificationConfidence - left.classificationConfidence);
+      const selected = candidates[0];
+      return {
+        pageNumber,
+        documentType: selected?.formType ?? "unknown",
+        confidence: selected?.classificationConfidence ?? 0,
+      };
+    }),
+  };
+  const {
+    linkTaxExtractionRunToMaterializedPages,
+    materializeDocumentPages,
+  } = await import("./documentPageMaterialization");
+  await materializeDocumentPages({
+    document,
+    borrowerUserId,
+    classification,
+    modelVersion: summary.modelId ?? "unknown_tax_extraction_model",
+    createLogicalDocuments: false,
+    beforePersist: claimFence.lockForPersistence,
+  });
+  await linkTaxExtractionRunToMaterializedPages({
+    documentId: document.id,
+    extractionRunId: summary.runId,
+    beforePersist: claimFence.lockForPersistence,
+  });
+
   // These projections are idempotent and run after the paid extraction. If a
   // projection fails, the next queue attempt reuses the completed run instead
   // of paying for another model pass.
@@ -580,6 +658,7 @@ async function executeJob(
       documentId: document.id,
       documentType: document.documentType,
       storagePath: document.storagePath,
+      mimeType: document.mimeType,
       fileSize: document.fileSize,
       triggeredBy: job.requestedByUserId,
       beforePersist: claimFence.lockForPersistence,

@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import { extractedFields, logicalDocuments } from "@shared/schema";
 import { db } from "../db";
 import { recordHumanReview } from "./documentConfidence";
@@ -53,7 +53,10 @@ export async function getDocumentFieldReview(
     .leftJoin(logicalDocuments, eq(extractedFields.logicalDocumentId, logicalDocuments.id))
     .where(or(
       eq(extractedFields.documentId, documentId),
-      eq(logicalDocuments.sourceDocumentId, documentId),
+      and(
+        eq(logicalDocuments.sourceDocumentId, documentId),
+        ne(logicalDocuments.status, "rejected"),
+      ),
     ));
 
   return rows
@@ -107,7 +110,10 @@ export async function reviewDocumentFields(input: {
       .leftJoin(logicalDocuments, eq(extractedFields.logicalDocumentId, logicalDocuments.id))
       .where(or(
         eq(extractedFields.documentId, input.documentId),
-        eq(logicalDocuments.sourceDocumentId, input.documentId),
+        and(
+          eq(logicalDocuments.sourceDocumentId, input.documentId),
+          ne(logicalDocuments.status, "rejected"),
+        ),
       ));
     const allowedIds = new Set(rows
       .filter(({ field }) => field.humanVerified !== true)

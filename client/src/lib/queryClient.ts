@@ -490,9 +490,9 @@ export const consentTemplateKeys = {
  * is the largest data-capture surface in the app, so it is the worst place to
  * leave an identity that only convention holds together.
  *
- * `/api/urla/:id/ssn` is deliberately NOT modelled: it serves the SSN vault and
- * no client surface reads it. A key factory for an endpoint nothing fetches is
- * an invitation to cache PII that never needed to be in the browser.
+ * Full taxpayer identifiers are never a browser resource. Delivery services
+ * decrypt them only inside the audited MISMO package path, so this key factory
+ * can safely represent every client-readable URLA endpoint.
  */
 export const urlaKeys = {
   /** Every URLA read — the prefix a URLA write should invalidate. */

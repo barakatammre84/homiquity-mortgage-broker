@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -50,12 +52,29 @@ interface OutcomeSegment {
   conversionRate: number;
 }
 
+interface HomiOutcomeMetrics {
+  daysBack: number;
+  turns: number;
+  groundedTurns: number;
+  repeatedQuestions: number;
+  repeatedQuestionRate: number;
+  completionImprovedTurns: number;
+  completionImprovementRate: number;
+  humanHelpRequests: number;
+  openHumanHelpRequests: number;
+  averageTurnResponseMs: number | null;
+  averageHumanHelpResolutionMinutes: number | null;
+  degradedTurns: number;
+  lintReplacedTurns: number;
+}
+
 type CoreCapabilityState = "live" | "simulated" | "disabled" | "configuration_error";
 
 interface CoreCapabilityReport {
   generatedAt: string;
   environment: "production" | "non_production";
   readyForLiveLoanLifecycle: boolean;
+  canRunProviderCanaries?: boolean;
   counts: Record<CoreCapabilityState, number>;
   documentExtractionQueue: {
     pending: number;
@@ -74,6 +93,9 @@ interface CoreCapabilityReport {
     provider: string;
     state: CoreCapabilityState;
     criticalForLiveLoan: boolean;
+    verificationRequired: boolean;
+    verificationState: "current" | "stale" | "failed" | "not_recorded" | "not_required";
+    lastVerificationAttemptAt: string | null;
     lastSuccessfulVerificationAt: string | null;
     detail: string;
     nextAction: string | null;
@@ -81,6 +103,7 @@ interface CoreCapabilityReport {
 }
 
 export default function IntelligenceTab() {
+  const queryClient = useQueryClient();
   const { data: funnel, isLoading: funnelLoading } = useQuery<FunnelData[]>({
     queryKey: ["/api/outcomes/funnel"],
   });
@@ -101,7 +124,19 @@ export default function IntelligenceTab() {
     queryKey: ["/api/analytics/core-capabilities"],
   });
 
-  const isLoading = funnelLoading || automationLoading || docLoading || segmentsLoading || coreCapabilitiesLoading;
+  const { data: homiOutcomes, isLoading: homiOutcomesLoading } = useQuery<HomiOutcomeMetrics>({
+    queryKey: ["/api/analytics/homi-outcomes"],
+  });
+
+  const canaryMutation = useMutation({
+    mutationFn: async (capabilityId: string) => {
+      const response = await apiRequest("POST", `/api/admin/core-capabilities/${capabilityId}/canary`, {});
+      return response.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/analytics/core-capabilities"] }),
+  });
+
+  const isLoading = funnelLoading || automationLoading || docLoading || segmentsLoading || coreCapabilitiesLoading || homiOutcomesLoading;
 
   if (isLoading) {
     return (
@@ -199,6 +234,10 @@ export default function IntelligenceTab() {
           <TabsTrigger value="systems" data-testid="tab-core-systems">
             <Activity className="h-4 w-4 mr-1" />
             Core Systems
+          </TabsTrigger>
+          <TabsTrigger value="homi" data-testid="tab-homi-outcomes">
+            <Brain className="h-4 w-4 mr-1" />
+            Homi Outcomes
           </TabsTrigger>
         </TabsList>
 
@@ -416,6 +455,67 @@ export default function IntelligenceTab() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="homi" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Homi borrower outcomes</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Measured work completion, repeated questions, response speed and accountable human follow-up over the last {homiOutcomes?.daysBack ?? 30} days.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {!homiOutcomes || homiOutcomes.turns === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No measured Homi turns yet. Results appear after borrowers use Homi on this build.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-muted-foreground">Completion improved</p>
+                      <p className="text-xl font-semibold">{homiOutcomes.completionImprovementRate.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">{homiOutcomes.completionImprovedTurns} of {homiOutcomes.turns} turns</p>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-muted-foreground">Repeated questions</p>
+                      <p className="text-xl font-semibold">{homiOutcomes.repeatedQuestionRate.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">Lower is better</p>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-muted-foreground">Average response</p>
+                      <p className="text-xl font-semibold">
+                        {homiOutcomes.averageTurnResponseMs === null ? "—" : `${(homiOutcomes.averageTurnResponseMs / 1000).toFixed(1)}s`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">End-to-end turn time</p>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-muted-foreground">Human follow-ups</p>
+                      <p className="text-xl font-semibold">{homiOutcomes.humanHelpRequests}</p>
+                      <p className="text-xs text-muted-foreground">{homiOutcomes.openHumanHelpRequests} currently open</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border p-3 text-sm">
+                      <p className="font-medium">Grounded file use</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {homiOutcomes.groundedTurns} turns used a server-truth or action tool. {homiOutcomes.degradedTurns} used labeled offline guidance.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border p-3 text-sm">
+                      <p className="font-medium">Human response accountability</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {homiOutcomes.averageHumanHelpResolutionMinutes === null
+                          ? "No Homi follow-up has been completed yet."
+                          : `Average follow-up resolution: ${homiOutcomes.averageHumanHelpResolutionMinutes} minutes.`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="systems" className="space-y-4 mt-4">
           <Card>
             <CardHeader>
@@ -509,19 +609,39 @@ export default function IntelligenceTab() {
                           <p className="font-medium">{capability.label}</p>
                           <p className="text-xs text-muted-foreground">{capability.provider}</p>
                         </div>
-                        <Badge
-                          variant={
-                            capability.state === "configuration_error"
-                              ? "destructive"
-                              : capability.state === "live"
-                                ? "default"
-                                : capability.state === "disabled"
-                                  ? "outline"
-                                  : "secondary"
-                          }
-                        >
-                          {capability.state.replace(/_/g, " ")}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {capability.verificationRequired && (
+                            <Badge
+                              variant={
+                                capability.verificationState === "current"
+                                  ? "default"
+                                  : capability.verificationState === "failed"
+                                    ? "destructive"
+                                    : "outline"
+                              }
+                              data-testid={`core-verification-${capability.id}`}
+                            >
+                              {capability.verificationState === "current"
+                                ? "Canary current"
+                                : capability.verificationState === "not_recorded"
+                                  ? "Canary not run"
+                                  : `Canary ${capability.verificationState}`}
+                            </Badge>
+                          )}
+                          <Badge
+                            variant={
+                              capability.state === "configuration_error"
+                                ? "destructive"
+                                : capability.state === "live"
+                                  ? "default"
+                                  : capability.state === "disabled"
+                                    ? "outline"
+                                    : "secondary"
+                            }
+                          >
+                            {capability.state.replace(/_/g, " ")}
+                          </Badge>
+                        </div>
                       </div>
                       <p className="mt-3 text-sm">{capability.detail}</p>
                       <div className="mt-2 text-xs text-muted-foreground">
@@ -530,6 +650,25 @@ export default function IntelligenceTab() {
                           ? new Date(capability.lastSuccessfulVerificationAt).toLocaleString()
                           : "not recorded"}
                       </div>
+                      {coreCapabilities.canRunProviderCanaries &&
+                        ["homi", "document_extraction", "object_storage"].includes(capability.id) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 touch-target"
+                            disabled={canaryMutation.isPending}
+                            onClick={() => canaryMutation.mutate(capability.id)}
+                            data-testid={`run-canary-${capability.id}`}
+                          >
+                            {canaryMutation.isPending && canaryMutation.variables === capability.id
+                              ? "Running check…"
+                              : "Run operational check"}
+                          </Button>
+                        )}
+                      {canaryMutation.isError && canaryMutation.variables === capability.id && (
+                        <p className="mt-2 text-xs text-destructive">The check could not be recorded. Try again or review server health.</p>
+                      )}
                       {capability.nextAction && (
                         <p className="mt-2 text-sm text-muted-foreground">
                           Next: {capability.nextAction}

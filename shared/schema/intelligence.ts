@@ -795,6 +795,40 @@ export type InsertDocumentConfidence = z.infer<typeof insertDocumentConfidenceSc
 export type DocumentConfidence = typeof documentConfidenceScores.$inferSelect;
 
 // ============================================================================
+// CORE PROVIDER CANARIES (redacted operational proof)
+//
+// Configuration answers whether an adapter could run. These append-only rows
+// answer whether a harmless, synthetic round trip actually succeeded in the
+// deployed environment. No request/response body or borrower identifier is
+// stored here; the ledger is intentionally safe to display to operations.
+// ============================================================================
+
+export const coreProviderCanaryRuns = pgTable("core_provider_canary_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  capabilityId: varchar("capability_id", { length: 50 }).notNull(),
+  provider: varchar("provider", { length: 100 }).notNull(),
+  operation: varchar("operation", { length: 100 }).notNull(),
+  environment: varchar("environment", { length: 30 }).notNull(),
+  status: varchar("status", { length: 30 }).notNull(),
+  latencyMs: integer("latency_ms").notNull(),
+  failureClass: varchar("failure_class", { length: 50 }),
+  commitSha: varchar("commit_sha", { length: 64 }),
+  triggeredByUserId: varchar("triggered_by_user_id").references(() => users.id),
+  completedAt: timestamp("completed_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_core_canary_capability_time").on(table.capabilityId, table.completedAt),
+  index("idx_core_canary_status_time").on(table.status, table.completedAt),
+]);
+
+export const insertCoreProviderCanaryRunSchema = createInsertSchema(coreProviderCanaryRuns).omit({
+  id: true,
+  completedAt: true,
+});
+
+export type InsertCoreProviderCanaryRun = z.infer<typeof insertCoreProviderCanaryRunSchema>;
+export type CoreProviderCanaryRun = typeof coreProviderCanaryRuns.$inferSelect;
+
+// ============================================================================
 // PREDICTIVE MODEL SNAPSHOTS (Stores computed predictions per borrower)
 // Refreshed periodically, consumed by dashboards and coaching
 // ============================================================================

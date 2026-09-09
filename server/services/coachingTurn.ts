@@ -66,6 +66,7 @@ export interface CoachTurnOptions {
   userId: string;
   userRole?: string | null;
   conversationId: string;
+  turnId: string;
   userMessage: string;
   /** Prior conversation (oldest→newest), EXCLUDING the new user message. */
   history: Array<{ role: string; content: string }>;
@@ -82,6 +83,8 @@ export interface CoachTurnResult {
   lintReplaced: boolean;
   degraded: boolean;
   usage: { inputTokens: number; outputTokens: number; modelCalls: number };
+  /** Redacted names only; used to measure grounding and real handoffs. */
+  toolCalls: string[];
 }
 
 function mapAnthropicError(err: unknown): CoachTurnError {
@@ -127,10 +130,12 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
       lintReplaced: false,
       degraded: true,
       usage: { inputTokens: 0, outputTokens: 0, modelCalls: 0 },
+      toolCalls: [],
     };
   }
 
   const state: CoachToolTurnState = {};
+  const usedToolCalls = new Set<string>();
   const deadline = Date.now() + TURN_BUDGET_MS;
 
   // The readiness panel is now SERVER-DERIVED and emitted before the model
@@ -158,6 +163,7 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
     userId: opts.userId,
     userRole: opts.userRole ?? "",
     conversationId: opts.conversationId,
+    turnId: opts.turnId,
     // Resolved from the session in the route, never from tool input.
     workableApplicationId: opts.verifiedContext.workableApplicationId ?? null,
     emit: guardedEmit,
@@ -260,6 +266,7 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
           lintReplaced: false,
           degraded: true,
           usage: { inputTokens: 0, outputTokens: 0, modelCalls: 0 },
+          toolCalls: [],
         };
       }
       throw mapped;
@@ -272,6 +279,7 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
     const toolUses = message.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
+    for (const toolUse of toolUses) usedToolCalls.add(toolUse.name);
 
     void logAiInteraction({
       userId: opts.userId,
@@ -365,6 +373,7 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
     lintReplaced,
     degraded: false,
     usage: { inputTokens: totalInput, outputTokens: totalOutput, modelCalls },
+    toolCalls: [...usedToolCalls],
   };
 }
 

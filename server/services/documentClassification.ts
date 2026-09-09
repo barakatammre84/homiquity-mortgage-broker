@@ -12,6 +12,7 @@ export interface DocumentClassificationSegment {
 
 const COMPATIBLE_PAGE_TYPES: Record<string, ReadonlySet<string>> = {
   pay_stub: new Set(["paystub"]),
+  w2: new Set(["w2"]),
   bank_statement: new Set(["bank_statement_checking", "bank_statement_savings"]),
   lease_agreement: new Set(["lease_agreement"]),
 };

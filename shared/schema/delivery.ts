@@ -152,6 +152,14 @@ export const lenderSubmissions = pgTable(
     incomePackageJson: jsonb("income_package_json"),
     incomePackageHash: varchar("income_package_hash", { length: 64 }),
     incomePackageGeneratedAt: timestamp("income_package_generated_at"),
+    /**
+     * Exact DU/LPA findings that were current when this package left
+     * Homiquity. The application row remains the live working copy; this trio
+     * is the final, tamper-evident submission artifact.
+     */
+    ausFindingsJson: jsonb("aus_findings_json"),
+    ausFindingsHash: varchar("aus_findings_hash", { length: 64 }),
+    ausFindingsGeneratedAt: timestamp("aus_findings_generated_at"),
     // -----------------------------------------------------------------
     // Broker compensation lifecycle (shared/compensationLedger.ts).
     //

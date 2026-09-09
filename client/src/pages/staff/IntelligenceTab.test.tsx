@@ -56,10 +56,28 @@ function renderTab() {
       provider: "No contracted bureau adapter",
       state: "disabled",
       criticalForLiveLoan: true,
+      verificationRequired: true,
+      verificationState: "not_recorded",
+      lastVerificationAttemptAt: null,
       lastSuccessfulVerificationAt: null,
       detail: "Production refuses fabricated bureau scores.",
       nextAction: "Contract a credit vendor.",
     }],
+  });
+  client.setQueryData(["/api/analytics/homi-outcomes"], {
+    daysBack: 30,
+    turns: 0,
+    groundedTurns: 0,
+    repeatedQuestions: 0,
+    repeatedQuestionRate: 0,
+    completionImprovedTurns: 0,
+    completionImprovementRate: 0,
+    humanHelpRequests: 0,
+    openHumanHelpRequests: 0,
+    averageTurnResponseMs: null,
+    averageHumanHelpResolutionMinutes: null,
+    degradedTurns: 0,
+    lintReplacedTurns: 0,
   });
 
   render(

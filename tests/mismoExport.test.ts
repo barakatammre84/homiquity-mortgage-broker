@@ -103,6 +103,63 @@ describe("EmploymentStatusType (Fix 6)", () => {
   });
 });
 
+describe("multi-borrower PARTY delivery", () => {
+  const partyBodies = (xml: string): string[] =>
+    [...xml.matchAll(/<PARTY>([\s\S]*?)<\/PARTY>/g)].map((match) => match[1]);
+
+  it("emits each borrower as a separate PARTY with their own data", () => {
+    const dto = baseDto({
+      employment: [
+        {
+          borrowerSequenceNumber: 1,
+          employerName: "Primary Employer",
+          employmentType: "employed",
+        } as any,
+        {
+          borrowerSequenceNumber: 2,
+          employerName: "Secondary Employer",
+          employmentType: "employed",
+        } as any,
+      ],
+    });
+    dto.personalInfo = {
+      borrowerSequenceNumber: 1,
+      firstName: "Jane",
+      lastName: "Primary",
+      ssn: "111-22-3333",
+    } as any;
+    dto.allPersonalInfo = [
+      dto.personalInfo!,
+      {
+        borrowerSequenceNumber: 2,
+        firstName: "Sam",
+        lastName: "Secondary",
+        ssn: "444-55-6666",
+      } as any,
+    ];
+    dto.allDeclarations = [
+      { borrowerSequenceNumber: 1, hasDeclaredBankruptcy: false } as any,
+      { borrowerSequenceNumber: 2, hasDeclaredBankruptcy: true } as any,
+    ];
+
+    const parties = partyBodies(generateMISMO34XML(dto));
+    expect(parties).toHaveLength(2);
+    expect(parties[0]).toContain("<FirstName>Jane</FirstName>");
+    expect(parties[0]).toContain("<BorrowerClassificationType>Primary</BorrowerClassificationType>");
+    expect(parties[0]).toContain("<FullName>Primary Employer</FullName>");
+    expect(parties[0]).not.toContain("Secondary Employer");
+    expect(parties[0]).toContain("<TaxpayerIdentifierValue>111223333</TaxpayerIdentifierValue>");
+    expect(parties[0]).toContain("<BankruptcyIndicator>false</BankruptcyIndicator>");
+
+    expect(parties[1]).toContain("<FirstName>Sam</FirstName>");
+    expect(parties[1]).toContain("<BorrowerClassificationType>Secondary</BorrowerClassificationType>");
+    expect(parties[1]).toContain("<FullName>Secondary Employer</FullName>");
+    expect(parties[1]).not.toContain("Primary Employer");
+    expect(parties[1]).toContain("<TaxpayerIdentifierValue>444556666</TaxpayerIdentifierValue>");
+    expect(parties[1]).toContain("<BankruptcyIndicator>true</BankruptcyIndicator>");
+  });
+});
+
 describe("NoteAmount / down payment handling (Fix 8)", () => {
   it("computes NoteAmount = price for a genuine $0 down payment", () => {
     const xml = generateMISMO34XML(baseDto({ application: { downPayment: "0", purchasePrice: "400000" } as any }));

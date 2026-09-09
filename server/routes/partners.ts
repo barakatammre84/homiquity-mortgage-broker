@@ -67,6 +67,18 @@ export function makePartnerSlug(name: string): string {
   return `${base}-${suffix}`;
 }
 
+/** Drizzle wraps node-postgres errors in DrizzleQueryError. */
+export function isUniqueConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; cause?: unknown };
+  if (candidate.code === "23505") return true;
+  return Boolean(
+    candidate.cause &&
+    typeof candidate.cause === "object" &&
+    (candidate.cause as { code?: unknown }).code === "23505",
+  );
+}
+
 // Waitlist partner_type → join-page persona preselect.
 const WAITLIST_PERSONA: Record<string, string> = {
   real_estate_agent: "realtor",
@@ -110,8 +122,8 @@ export function registerPartnerRoutes(app: Express, storage: IStorage) {
           lastName: rest.join(" ") || null,
           role: persona,
         });
-      } catch (dbError: any) {
-        if (dbError?.code === "23505") {
+      } catch (dbError: unknown) {
+        if (isUniqueConstraintError(dbError)) {
           return res.status(409).json({ error: "An account with this email already exists" });
         }
         throw dbError;
@@ -129,8 +141,8 @@ export function registerPartnerRoutes(app: Express, storage: IStorage) {
             partnerCompanyName: firmName,
           });
           slug = candidate;
-        } catch (dbError: any) {
-          if (dbError?.code === "23505" && attempt < 4) continue; // slug collision → retry
+        } catch (dbError: unknown) {
+          if (isUniqueConstraintError(dbError) && attempt < 4) continue; // slug collision → retry
           throw dbError;
         }
       }

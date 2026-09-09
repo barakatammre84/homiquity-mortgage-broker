@@ -9,7 +9,12 @@ describe("Homi evidence and context safety", () => {
     expect(STATIC_COACH_PROMPT).toMatch(/provisional until human review/i);
     expect(STATIC_COACH_PROMPT).toMatch(/qualifying income is the cited workpaper result/i);
     expect(STATIC_COACH_PROMPT).not.toMatch(/Tax returns are the GOLD STANDARD/i);
-    expect(COACH_PROMPT_VERSION).toBe("homi-2.6.0");
+    expect(COACH_PROMPT_VERSION).toBe("homi-2.7.0");
+  });
+
+  it("requires a confirmed task before claiming a human handoff", () => {
+    expect(STATIC_COACH_PROMPT).toMatch(/A handoff exists ONLY when this tool confirms/i);
+    expect(STATIC_COACH_PROMPT).toMatch(/Never invent a response time/i);
   });
 
   it("labels dynamic borrower strings as data and neutralizes a closing context tag", () => {

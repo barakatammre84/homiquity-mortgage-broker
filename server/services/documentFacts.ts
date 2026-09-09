@@ -23,8 +23,8 @@
 // ---------------------------------------------------------------------------
 
 import { db } from "../db";
-import { extractedFields } from "@shared/schema";
-import { eq, inArray, and, isNotNull } from "drizzle-orm";
+import { extractedFields, logicalDocuments } from "@shared/schema";
+import { eq, inArray, and, isNotNull, or } from "drizzle-orm";
 import { coarseConfidenceToNumeric } from "./documentConfidence";
 import { SIMULATED_MODEL_ID, type ExtractedFieldEvidence } from "../extractionCore";
 import type { DatabaseTransaction } from "./documentLineage";
@@ -93,6 +93,14 @@ export function buildDocumentFacts(
 ): DocumentFact[] {
   const facts: DocumentFact[] = [];
   const evidence = (extracted.fieldEvidence ?? {}) as Record<string, ExtractedFieldEvidence>;
+  const sourceEvidence = (fieldName: string): ExtractedFieldEvidence | null => {
+    const source = evidence[fieldName];
+    if (
+      !source || !Number.isInteger(source.pageNumber) || source.pageNumber < 1 ||
+      !Number.isFinite(source.confidence) || source.confidence < 0 || source.confidence > 1
+    ) return null;
+    return source;
+  };
   const add = (
     sourceFieldName: string,
     fieldName: string,
@@ -102,33 +110,37 @@ export function buildDocumentFacts(
   ) => {
     if (value === undefined || value === null || value === "") return;
     if (valueType === "currency" && (typeof value !== "number" || !Number.isFinite(value))) return;
-    const source = evidence[sourceFieldName];
+    const source = sourceEvidence(sourceFieldName);
+    // A model value without a source page is review material, not a fact.
+    if (!source) return;
     facts.push({
       sourceFieldName,
       fieldName,
       fieldCategory,
       valueType,
       ...(valueType === "currency" ? { valueNumeric: value as number } : { valueString: String(value) }),
-      pageNumber: source?.pageNumber,
-      boundingBox: source?.boundingBox,
-      confidence: source?.confidence,
+      pageNumber: source.pageNumber,
+      boundingBox: source.boundingBox,
+      confidence: source.confidence,
     });
   };
 
   if (documentType === "pay_stub") {
     const monthly = monthlyIncomeFromYtd(extracted.ytdGross, extracted.payPeriodEndDate);
-    if (monthly !== null) {
+    const ytdEvidence = sourceEvidence("ytdGross");
+    const periodEndEvidence = sourceEvidence("payPeriodEndDate");
+    if (monthly !== null && ytdEvidence && periodEndEvidence) {
       facts.push({
         fieldName: "monthly_income_ytd_avg",
         fieldCategory: "income",
         valueNumeric: monthly,
         valueType: "currency",
         sourceFieldName: "ytdGross",
-        pageNumber: evidence.ytdGross?.pageNumber,
-        boundingBox: evidence.ytdGross?.boundingBox,
+        pageNumber: ytdEvidence.pageNumber,
+        boundingBox: ytdEvidence.boundingBox,
         confidence: Math.min(
-          evidence.ytdGross?.confidence ?? coarseConfidenceToNumeric(extracted.confidence),
-          evidence.payPeriodEndDate?.confidence ?? coarseConfidenceToNumeric(extracted.confidence),
+          ytdEvidence.confidence,
+          periodEndEvidence.confidence,
         ),
       });
     }
@@ -144,6 +156,21 @@ export function buildDocumentFacts(
     add("deductions.federal", "federal_deduction", "income", extracted.deductions?.federal, "currency");
     add("deductions.fica", "fica_deduction", "income", extracted.deductions?.fica, "currency");
     add("deductions.other", "other_deductions", "income", extracted.deductions?.other, "currency");
+  }
+
+  if (documentType === "w2") {
+    add("employeeName", "employee_name", "identity", extracted.employeeName, "string");
+    add("employerName", "employer_name", "identity", extracted.employerName, "string");
+    add("taxYear", "tax_year", "income", extracted.taxYear, "string");
+    add("employerEinLast4", "employer_ein_last4", "identity", extracted.employerEinLast4, "string");
+    add("wagesTipsOtherCompensation", "w2_box_1_wages", "income", extracted.wagesTipsOtherCompensation, "currency");
+    add("federalIncomeTaxWithheld", "w2_box_2_federal_withholding", "income", extracted.federalIncomeTaxWithheld, "currency");
+    add("socialSecurityWages", "w2_box_3_social_security_wages", "income", extracted.socialSecurityWages, "currency");
+    add("socialSecurityTaxWithheld", "w2_box_4_social_security_withholding", "income", extracted.socialSecurityTaxWithheld, "currency");
+    add("medicareWagesAndTips", "w2_box_5_medicare_wages", "income", extracted.medicareWagesAndTips, "currency");
+    add("medicareTaxWithheld", "w2_box_6_medicare_withholding", "income", extracted.medicareTaxWithheld, "currency");
+    add("stateWagesTips", "w2_box_16_state_wages", "income", extracted.stateWagesTips, "currency");
+    add("stateCode", "w2_state_code", "income", extracted.stateCode, "string");
   }
 
   if (documentType === "bank_statement") {
@@ -252,30 +279,37 @@ export async function getFactsForDocuments(documentIds: string[]): Promise<Docum
   if (documentIds.length === 0) return [];
 
   const rows = await db
-    .select()
+    .select({ field: extractedFields, sourceDocumentId: logicalDocuments.sourceDocumentId })
     .from(extractedFields)
+    .leftJoin(logicalDocuments, eq(extractedFields.logicalDocumentId, logicalDocuments.id))
     .where(
-      and(
-        isNotNull(extractedFields.documentId),
-        inArray(extractedFields.documentId, documentIds),
+      or(
+        and(
+          isNotNull(extractedFields.documentId),
+          inArray(extractedFields.documentId, documentIds),
+        ),
+        and(
+          inArray(logicalDocuments.sourceDocumentId, documentIds),
+          eq(logicalDocuments.status, "accepted"),
+        ),
       ),
     );
 
-  return rows.map(r => ({
-    documentId: r.documentId as string,
-    fieldName: r.fieldName,
-    fieldCategory: r.fieldCategory,
+  return rows.map(({ field, sourceDocumentId }) => ({
+    documentId: (field.documentId ?? sourceDocumentId) as string,
+    fieldName: field.fieldName,
+    fieldCategory: field.fieldCategory,
     valueNumeric:
-      r.humanCorrectedValue !== null && ["currency", "number"].includes(r.valueType)
-        ? Number(r.humanCorrectedValue)
-        : r.valueNumeric !== null
-          ? Number(r.valueNumeric)
+      field.humanCorrectedValue !== null && ["currency", "number"].includes(field.valueType)
+        ? Number(field.humanCorrectedValue)
+        : field.valueNumeric !== null
+          ? Number(field.valueNumeric)
           : null,
     valueString:
-      r.humanCorrectedValue !== null && !["currency", "number"].includes(r.valueType)
-        ? r.humanCorrectedValue
-        : r.valueString,
-    humanVerified: !!r.humanVerified,
-    humanCorrectedValue: r.humanCorrectedValue,
+      field.humanCorrectedValue !== null && !["currency", "number"].includes(field.valueType)
+        ? field.humanCorrectedValue
+        : field.valueString,
+    humanVerified: !!field.humanVerified,
+    humanCorrectedValue: field.humanCorrectedValue,
   }));
 }

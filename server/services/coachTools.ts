@@ -15,6 +15,9 @@ import {
 import type { ChecklistItemDto, ChecklistStats } from "./documentChecklist";
 import type { BorrowerTaskView } from "@shared/borrowerTaskView";
 import type { User } from "@shared/schema";
+import { ACTIVE_TASK_STATUSES } from "@shared/schema";
+import { taskEngine } from "./taskEngine";
+import { emitEvent } from "./analyticsEventPipeline";
 
 // ---------------------------------------------------------------------------
 // Homi tool surface — Claude Sonnet 5 tool-use replaces the old
@@ -324,6 +327,7 @@ export interface CoachToolTurnState {
   documentChecklist?: DocumentRequirement[];
   borrowerPackage?: BorrowerPackage;
   suggestions?: string[];
+  humanHelpRequest?: { taskId: string; alreadyOpen: boolean };
   /** Writeback target resolved by record_intake (for ai_interactions linkage). */
   syncedApplicationId?: string | null;
 }
@@ -334,6 +338,8 @@ export interface CoachToolContext {
   /** Needed by the read tools' re-authorization (getLoanApplicationWithAccess). */
   userRole: string;
   conversationId: string;
+  /** Unique persisted user message for idempotent side effects this turn. */
+  turnId: string;
   /**
    * The file the read tools may read, resolved server-side from the session.
    * Null when the borrower has no workable file — the tools say so rather than
@@ -629,6 +635,29 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
         },
       },
       required: [],
+    },
+  },
+  {
+    name: "request_human_help",
+    description:
+      "Create a real follow-up for the borrower's loan officer. Call when the borrower explicitly asks to speak with a person or loan officer, asks for a call, or when a complex file question cannot be resolved safely from the available file truth. Do not merely promise that someone will contact them: call this tool. Choose only the topic; never send account numbers, tax identifiers, document text, or a free-form conversation summary.",
+    input_schema: {
+      type: "object" as const,
+      additionalProperties: false,
+      properties: {
+        topic: {
+          type: "string",
+          enum: [
+            "complex_income",
+            "document_question",
+            "application_status",
+            "loan_options",
+            "technical_help",
+            "other",
+          ],
+        },
+      },
+      required: ["topic"],
     },
   },
 ];
@@ -944,6 +973,92 @@ export async function executeCoachTool(
         ? `\n…and ${shown.length - MODEL_TASK_CAP} more.`
         : "";
       return { content: `${shown.length} open task(s):\n${rendered.join("\n")}${overflow}` };
+    }
+
+    case "request_human_help": {
+      const parsed = z.object({
+        topic: z.enum([
+          "complex_income",
+          "document_question",
+          "application_status",
+          "loan_options",
+          "technical_help",
+          "other",
+        ]),
+      }).strict().safeParse(input);
+      if (!parsed.success) {
+        return { content: `Invalid human-help request — ${zodIssueSummary(parsed.error)}.`, isError: true };
+      }
+      if (ctx.state.humanHelpRequest) {
+        return {
+          content:
+            "A human follow-up was already handled in this turn. Tell the borrower the request is active; do not create or promise another callback.",
+        };
+      }
+      const truth = await loadTruthForTool(ctx);
+      if (truth === "no_application") {
+        return {
+          content:
+            "There is no application in progress to route to a loan team. Tell the borrower to start an application or use the public contact option; do not promise a callback.",
+          isError: true,
+        };
+      }
+      if (truth === "unavailable") return FILE_TRUTH_UNAVAILABLE;
+
+      try {
+        const existingTasks = await storage.getTasksByApplication(ctx.workableApplicationId!);
+        const existing = existingTasks.find((task) => {
+          const metadata = task.triggerMetadata as Record<string, unknown> | null;
+          return ACTIVE_TASK_STATUSES.includes(task.status) && metadata?.source === "homi_handoff";
+        });
+        if (existing) {
+          ctx.state.humanHelpRequest = { taskId: existing.id, alreadyOpen: true };
+          return {
+            content:
+              "A human follow-up is already open with the loan team. Tell the borrower that the existing request is still active; do not create or promise a second callback.",
+          };
+        }
+
+        const team = await storage.getDealTeamMembers(ctx.workableApplicationId!);
+        const loanOfficer = team.find((member) => member.teamRole === "loan_officer" && member.isActive);
+        const task = await taskEngine.createTask({
+          applicationId: ctx.workableApplicationId!,
+          assignedToUserId: loanOfficer?.userId ?? null,
+          title: "Borrower requested human help through Homi",
+          description: `Topic: ${parsed.data.topic.replace(/_/g, " ")}`,
+          taskType: "follow_up",
+          taskTypeCode: "FOLLOW_UP",
+          ownerRole: "LO",
+          priority: parsed.data.topic === "complex_income" ? "high" : "normal",
+        }, ctx.userId, "SYSTEM", {
+          source: "homi_handoff",
+          conversationId: ctx.conversationId,
+          turnId: ctx.turnId,
+          topic: parsed.data.topic,
+        });
+        ctx.state.humanHelpRequest = { taskId: task.id, alreadyOpen: false };
+        await emitEvent("borrower", "homi_human_help_requested", {
+          applicationId: ctx.workableApplicationId!,
+          userId: ctx.userId,
+          actorId: ctx.userId,
+          actorRole: ctx.userRole,
+          entityType: "task",
+          entityId: task.id,
+          textValue: parsed.data.topic,
+          source: "homi",
+        });
+        return {
+          content:
+            "The human follow-up is now on the loan officer work queue. Tell the borrower the request was sent and that they can continue using their secure file while the team responds. Do not invent a response time.",
+        };
+      } catch (error) {
+        console.error("[Coach] Human handoff failed:", error);
+        return {
+          content:
+            "The human follow-up could not be placed on the loan team's queue. Say that clearly and direct the borrower to secure Messages; do not claim that anyone was notified.",
+          isError: true,
+        };
+      }
     }
 
     default:

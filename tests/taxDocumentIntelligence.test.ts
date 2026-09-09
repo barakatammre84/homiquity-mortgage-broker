@@ -91,8 +91,8 @@ describe("per-form field schemas", () => {
   it("coerces formatted money strings and keeps sign discipline", () => {
     const schema = buildFormFieldsSchema("schedule_c");
     const parsed = schema.parse({
-      grossReceipts: { value: "1,234.56", confidence: 0.9 },
-      netProfitOrLoss: { value: "-4,200", confidence: 0.85 },
+      grossReceipts: { value: "1,234.56", confidence: 0.9, pageNumber: 3 },
+      netProfitOrLoss: { value: "-4,200", confidence: 0.85, pageNumber: 3 },
     }) as Record<string, { value: unknown; confidence: number }>;
     expect(parsed.grossReceipts?.value).toBeCloseTo(1234.56);
     expect(parsed.netProfitOrLoss?.value).toBe(-4200);
@@ -102,7 +102,7 @@ describe("per-form field schemas", () => {
     const schema = buildFormFieldsSchema("schedule_c");
     const parsed = schema.parse({
       grossReceipts: { value: 9e12, confidence: 0.99 },
-      totalExpenses: { value: 50_000, confidence: 0.9 },
+      totalExpenses: { value: 50_000, confidence: 0.9, pageNumber: 1 },
     }) as Record<string, unknown>;
     expect(parsed.grossReceipts).toBeUndefined();
     expect(parsed.totalExpenses).toBeDefined();
@@ -111,7 +111,7 @@ describe("per-form field schemas", () => {
   it("reduces a full EIN to last-4 (PII minimization happens in the schema itself)", () => {
     const schema = buildFormFieldsSchema("schedule_k1");
     const parsed = schema.parse({
-      entityEinLast4: { value: "12-3456789", confidence: 0.9 },
+      entityEinLast4: { value: "12-3456789", confidence: 0.9, pageNumber: 1 },
     }) as Record<string, { value: unknown }>;
     expect(parsed.entityEinLast4?.value).toBe("6789");
   });
@@ -119,11 +119,11 @@ describe("per-form field schemas", () => {
   it("normalizes NAICS codes to 6 digits and drops malformed ones", () => {
     const schema = buildFormFieldsSchema("schedule_c");
     const good = schema.parse({
-      businessCodeNaics: { value: "54-1611", confidence: 0.9 },
+      businessCodeNaics: { value: "54-1611", confidence: 0.9, pageNumber: 1 },
     }) as Record<string, { value: unknown }>;
     expect(good.businessCodeNaics?.value).toBe("541611");
     const bad = schema.parse({
-      businessCodeNaics: { value: "consulting", confidence: 0.9 },
+      businessCodeNaics: { value: "consulting", confidence: 0.9, pageNumber: 1 },
     }) as Record<string, unknown>;
     expect(bad.businessCodeNaics).toBeUndefined();
   });
@@ -131,10 +131,20 @@ describe("per-form field schemas", () => {
   it("preserves an honest null value ('label seen, value unreadable')", () => {
     const schema = buildFormFieldsSchema("schedule_c");
     const parsed = schema.parse({
-      depletion: { value: null, confidence: 0.3 },
+      depletion: { value: null, confidence: 0.3, pageNumber: 2 },
     }) as Record<string, { value: unknown; confidence: number }>;
     expect(parsed.depletion?.value).toBeNull();
     expect(parsed.depletion?.confidence).toBe(0.3);
+  });
+
+  it("drops a readable value that has no source page", () => {
+    const schema = buildFormFieldsSchema("schedule_c");
+    const parsed = schema.parse({
+      grossReceipts: { value: 125000, confidence: 0.99 },
+      netProfitOrLoss: { value: 45000, confidence: 0.97, pageNumber: 2 },
+    }) as Record<string, unknown>;
+    expect(parsed.grossReceipts).toBeUndefined();
+    expect(parsed.netProfitOrLoss).toBeDefined();
   });
 
   it("catches a structurally broken fields object to {} in the response schema", () => {

@@ -78,11 +78,34 @@ export function sha256LocalObject(objectPath: string): string | null {
   return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
+/** Read private bytes for server-side extraction/page processing in dev. */
+export function readLocalObject(objectPath: string): Buffer {
+  const id = objectIdFromPath(objectPath);
+  if (!id) throw new Error("Invalid local object path");
+  const filePath = path.join(localDir(), id);
+  if (!fs.existsSync(filePath)) throw new Error("Local object not found");
+  return fs.readFileSync(filePath);
+}
+
 export function writeLocalObject(objectId: string, buf: Buffer): void {
   if (!OBJECT_ID_RE.test(objectId)) {
     throw new Error("Invalid object id");
   }
   fs.writeFileSync(path.join(localDir(), objectId), buf);
+}
+
+/** Store server-derived bytes in the same dev-only private object area. */
+export function writeLocalDerivedObject(buf: Buffer): string {
+  const objectId = randomUUID();
+  writeLocalObject(objectId, buf);
+  return `/objects/${objectId}`;
+}
+
+/** Remove a server-derived local object after a failed database commit. */
+export function deleteLocalObject(objectPath: string): void {
+  const id = objectIdFromPath(objectPath);
+  if (!id) return;
+  fs.rmSync(path.join(localDir(), id), { force: true });
 }
 
 /** Streams a stored object to the response, or 404s. Caller does auth first. */

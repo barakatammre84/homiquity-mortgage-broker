@@ -26,6 +26,7 @@ const PAY_STUB = {
   extractedFields: ["employerName", "grossPay", "ytdGross"],
   fieldEvidence: {
     employerName: { pageNumber: 1, confidence: 0.99 },
+    payPeriodEndDate: { pageNumber: 1, confidence: 0.98 },
     grossPay: {
       pageNumber: 1,
       confidence: 0.97,
@@ -43,6 +44,31 @@ const BANK_STATEMENT = {
   closingBalance: 22_500,
   confidence: "high" as const,
   extractedFields: ["accountType", "closingBalance"],
+  fieldEvidence: {
+    accountType: { pageNumber: 1, confidence: 0.96 },
+    accountNumber: { pageNumber: 1, confidence: 0.97 },
+    openingBalance: { pageNumber: 1, confidence: 0.95 },
+    closingBalance: { pageNumber: 1, confidence: 0.98 },
+  },
+};
+
+const W2 = {
+  employeeName: "Jane Roe",
+  employerName: "Acme Corp",
+  taxYear: "2025",
+  employerEinLast4: "6789",
+  wagesTipsOtherCompensation: 85_000,
+  federalIncomeTaxWithheld: 12_000,
+  confidence: "high" as const,
+  extractedFields: ["employeeName", "employerName", "taxYear", "employerEinLast4", "wagesTipsOtherCompensation", "federalIncomeTaxWithheld"],
+  fieldEvidence: {
+    employeeName: { pageNumber: 1, confidence: 0.98 },
+    employerName: { pageNumber: 1, confidence: 0.99 },
+    taxYear: { pageNumber: 1, confidence: 0.99 },
+    employerEinLast4: { pageNumber: 1, confidence: 0.97 },
+    wagesTipsOtherCompensation: { pageNumber: 1, confidence: 0.99 },
+    federalIncomeTaxWithheld: { pageNumber: 1, confidence: 0.98 },
+  },
 };
 
 describe("F-028 — monthly income from YTD gross", () => {
@@ -118,6 +144,18 @@ describe("F-028 — facts built from the real extraction shapes", () => {
     expect(facts.find(f => f.fieldName === "account_type")?.valueString).toBe("checking");
   });
 
+  it("turns a W-2 into reviewable Box 1 wage history with source evidence", () => {
+    const facts = buildDocumentFacts("w2", W2);
+    expect(facts.find(f => f.fieldName === "w2_box_1_wages")).toMatchObject({
+      fieldCategory: "income",
+      valueNumeric: 85_000,
+      pageNumber: 1,
+      confidence: 0.99,
+    });
+    expect(facts.find(f => f.fieldName === "employer_ein_last4")?.valueString).toBe("6789");
+    expect(facts.some(f => /ssn/i.test(f.fieldName))).toBe(false);
+  });
+
   it("emits no income fact when the stub cannot support one", () => {
     const undated = { ...PAY_STUB, payPeriodEndDate: undefined };
     const facts = buildDocumentFacts("pay_stub", undated);
@@ -134,7 +172,10 @@ describe("F-028 — facts built from the real extraction shapes", () => {
   });
 
   it("stores lease rent as source evidence without labeling it income", () => {
-    expect(buildDocumentFacts("lease_agreement", { monthlyRent: 2_400 })).toEqual([
+    expect(buildDocumentFacts("lease_agreement", {
+      monthlyRent: 2_400,
+      fieldEvidence: { monthlyRent: { pageNumber: 2, confidence: 0.96 } },
+    })).toEqual([
       expect.objectContaining({
         fieldName: "monthly_rent",
         fieldCategory: "property",
@@ -155,6 +196,13 @@ describe("F-028 — facts built from the real extraction shapes", () => {
 
   it("emits nothing for a document type with no fact mapping", () => {
     expect(buildDocumentFacts("government_id", { fullName: "Jane Roe" })).toEqual([]);
+  });
+
+  it("does not turn a model value without source evidence into a fact", () => {
+    expect(buildDocumentFacts("bank_statement", {
+      closingBalance: 125_000,
+      confidence: "high",
+    })).toEqual([]);
   });
 
   it("is deterministic", () => {

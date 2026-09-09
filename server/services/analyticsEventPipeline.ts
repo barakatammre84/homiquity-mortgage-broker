@@ -1,10 +1,11 @@
 import { db } from "../db";
 import {
   analyticsEvents,
+  tasks,
   type AnalyticsDomain,
   type InsertAnalyticsEvent,
 } from "@shared/schema";
-import { eq, and, gte, lte, sql, desc, count } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, count, inArray } from "drizzle-orm";
 import type { DatabaseTransaction } from "./documentLineage";
 
 export async function emitEvent(
@@ -199,6 +200,92 @@ export async function getAutomationMetrics(daysBack: number = 30): Promise<{
     byDomain,
   };
 }
+
+export interface HomiOutcomeMetrics {
+  daysBack: number;
+  turns: number;
+  groundedTurns: number;
+  repeatedQuestions: number;
+  repeatedQuestionRate: number;
+  completionImprovedTurns: number;
+  completionImprovementRate: number;
+  humanHelpRequests: number;
+  openHumanHelpRequests: number;
+  averageTurnResponseMs: number | null;
+  averageHumanHelpResolutionMinutes: number | null;
+  degradedTurns: number;
+  lintReplacedTurns: number;
+}
+
+/**
+ * Measure Homi on borrower work and accountable handoff behavior. Message
+ * text is never queried or returned; the events contain redacted booleans,
+ * tool names, timing and completion deltas only.
+ */
+export async function getHomiOutcomeMetrics(daysBack = 30): Promise<HomiOutcomeMetrics> {
+  const boundedDays = Math.min(365, Math.max(1, daysBack));
+  const since = sql`now() - (${boundedDays} * interval '1 day')`;
+  const [events, handoffTasks] = await Promise.all([
+    db.select({
+      eventName: analyticsEvents.eventName,
+      payload: analyticsEvents.payload,
+      numericValue: analyticsEvents.numericValue,
+    }).from(analyticsEvents).where(and(
+      eq(analyticsEvents.domain, "borrower"),
+      inArray(analyticsEvents.eventName, ["homi_turn_completed", "homi_human_help_requested"]),
+      gte(analyticsEvents.occurredAt, since),
+    )),
+    db.select({
+      status: tasks.status,
+      createdAt: tasks.createdAt,
+      completedAt: tasks.completedAt,
+    }).from(tasks).where(and(
+      gte(tasks.createdAt, since),
+      sql`${tasks.triggerMetadata}->>'source' = 'homi_handoff'`,
+    )),
+  ]);
+
+  const turnEvents = events.filter((event) => event.eventName === "homi_turn_completed");
+  const payloads = turnEvents.map((event) => (event.payload ?? {}) as Record<string, unknown>);
+  const repeatedQuestions = payloads.filter((payload) => payload.repeatedQuestion === true).length;
+  const completionImprovedTurns = payloads.filter(
+    (payload) => typeof payload.completionDelta === "number" && payload.completionDelta > 0,
+  ).length;
+  const groundedTurns = payloads.filter(
+    (payload) => Array.isArray(payload.toolCalls) && payload.toolCalls.length > 0,
+  ).length;
+  const responseTimes = turnEvents
+    .map((event) => event.numericValue === null ? null : Number(event.numericValue))
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value >= 0);
+  const resolvedDurations = handoffTasks
+    .filter((task) => task.createdAt && task.completedAt)
+    .map((task) => (task.completedAt!.getTime() - task.createdAt!.getTime()) / 60_000)
+    .filter((minutes) => Number.isFinite(minutes) && minutes >= 0);
+  const rate = (value: number, total: number) => total > 0
+    ? Math.round((value / total) * 10_000) / 100
+    : 0;
+  const average = (values: number[]) => values.length > 0
+    ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+    : null;
+
+  return {
+    daysBack: boundedDays,
+    turns: turnEvents.length,
+    groundedTurns,
+    repeatedQuestions,
+    repeatedQuestionRate: rate(repeatedQuestions, turnEvents.length),
+    completionImprovedTurns,
+    completionImprovementRate: rate(completionImprovedTurns, turnEvents.length),
+    humanHelpRequests: events.filter((event) => event.eventName === "homi_human_help_requested").length,
+    openHumanHelpRequests: handoffTasks.filter((task) => ACTIVE_TASK_STATUSES_FOR_METRICS.has(task.status)).length,
+    averageTurnResponseMs: average(responseTimes),
+    averageHumanHelpResolutionMinutes: average(resolvedDurations),
+    degradedTurns: payloads.filter((payload) => payload.degraded === true).length,
+    lintReplacedTurns: payloads.filter((payload) => payload.lintReplaced === true).length,
+  };
+}
+
+const ACTIVE_TASK_STATUSES_FOR_METRICS = new Set(["OPEN", "IN_PROGRESS", "BLOCKED"]);
 
 export async function getDomainInsights(domain: AnalyticsDomain, daysBack: number = 30): Promise<{
   eventCounts: Record<string, number>;

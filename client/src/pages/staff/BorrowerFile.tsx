@@ -110,6 +110,8 @@ export default function BorrowerFile() {
   const [sourcePageRequest, setSourcePageRequest] = useState<{
     pageNumber: number;
     requestId: number;
+    boundingBox?: unknown;
+    fieldLabel?: string;
   } | null>(null);
 
   const { data: appData, isLoading: appLoading } = useQuery<ApplicationData>({
@@ -618,9 +620,11 @@ export default function BorrowerFile() {
                         setSelectedDocumentId(documentId);
                         setSourcePageRequest(null);
                       }}
-                      onOpenSourcePage={(pageNumber) => setSourcePageRequest((current) => ({
+                      onOpenSourcePage={(pageNumber, boundingBox, fieldLabel) => setSourcePageRequest((current) => ({
                         pageNumber,
                         requestId: (current?.requestId ?? 0) + 1,
+                        boundingBox,
+                        fieldLabel,
                       }))}
                     />
                     {(() => {

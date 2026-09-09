@@ -51,7 +51,7 @@ export const COACH_MODEL = "claude-sonnet-5";
  * ai_interactions row instead of the full prompt text — the exact prompt is
  * reconstructable from git at this version. Bump on ANY prompt/tool change.
  */
-export const COACH_PROMPT_VERSION = "homi-2.6.0";
+export const COACH_PROMPT_VERSION = "homi-2.7.0";
 
 /**
  * Raised 2 → 4 on 2026-08-19, when the server-truth read tools landed.

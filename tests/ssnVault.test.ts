@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   isMaskedSsn,
@@ -10,6 +12,11 @@ import {
 } from "../server/services/ssnVault";
 
 describe("ssnVault", () => {
+  it("has no browser route that returns a decrypted SSN", () => {
+    const borrowerRoutes = readFileSync(join(process.cwd(), "server/routes/borrower/urla.ts"), "utf8");
+    expect(borrowerRoutes).not.toContain("/api/urla/:applicationId/ssn");
+  });
+
   describe("normalizeSsn", () => {
     it("canonicalizes 9 digits regardless of separators", () => {
       expect(normalizeSsn("123456789")).toBe("123-45-6789");

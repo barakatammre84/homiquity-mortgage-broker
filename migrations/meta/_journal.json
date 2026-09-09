@@ -498,6 +498,27 @@
       "when": 1788985228000,
       "tag": "0070_preapproval_letter_decision_fingerprints",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789063200000,
+      "tag": "0071_core_provider_canaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789066800000,
+      "tag": "0072_document_page_materialization",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789070400000,
+      "tag": "0073_final_aus_findings_artifact",
+      "breakpoints": true
     }
   ]
 }

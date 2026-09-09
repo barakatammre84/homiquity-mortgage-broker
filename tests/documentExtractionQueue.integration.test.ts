@@ -93,6 +93,17 @@ describe.sequential("document extraction restart recovery", () => {
         warnings: [],
         modelId: "claude-sonnet-5",
         promptVersion: "pay_stub/v3",
+        fieldEvidence: {
+          employeeName: { pageNumber: 1, confidence: 0.98 },
+          employerName: { pageNumber: 1, confidence: 0.98 },
+          payPeriodStartDate: { pageNumber: 1, confidence: 0.97 },
+          payPeriodEndDate: { pageNumber: 1, confidence: 0.97 },
+          grossPay: { pageNumber: 1, confidence: 0.96 },
+          netPay: { pageNumber: 1, confidence: 0.95 },
+          ytdGross: { pageNumber: 1, confidence: 0.96 },
+          ytdNetPay: { pageNumber: 1, confidence: 0.95 },
+          ytdTaxes: { pageNumber: 1, confidence: 0.94 },
+        },
         pageCount: 1,
         documentClassification: {
           pageCount: 1,
@@ -149,6 +160,12 @@ describe.sequential("document extraction restart recovery", () => {
         warnings: [],
         modelId: "claude-sonnet-5",
         promptVersion: "pay_stub/v3",
+        fieldEvidence: {
+          employerName: { pageNumber: 1, confidence: 0.98 },
+          payPeriodEndDate: { pageNumber: 1, confidence: 0.97 },
+          grossPay: { pageNumber: 1, confidence: 0.96 },
+          ytdGross: { pageNumber: 1, confidence: 0.96 },
+        },
         pageCount: 1,
         documentClassification: {
           pageCount: 1,

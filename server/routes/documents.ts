@@ -1,11 +1,13 @@
 import express, { type Express } from "express";
 import { isAdmin } from "@shared/roles";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import type { IStorage } from "../storage";
 import { isAuthenticated, requireRole } from "../auth";
 import {
   extractTaxReturnData,
   extractPayStubData,
+  extractW2Data,
   extractBankStatementData,
   extractLeaseData,
 } from "../extractionService";
@@ -27,7 +29,14 @@ import {
   writeLocalObject,
   streamLocalObject,
 } from "../integrations/object_storage";
-import { type Document, type User } from "@shared/schema";
+import {
+  DOCUMENT_TYPE_TAXONOMY,
+  documentPages,
+  documentUploads,
+  type Document,
+  type User,
+} from "@shared/schema";
+import { db } from "../db";
 import { toStaffDocumentView } from "@shared/borrowerDocumentView";
 import { canReviewDocuments, DOCUMENT_STATUS } from "@shared/documentStatus";
 import { logAudit } from "../auditLog";
@@ -109,6 +118,13 @@ const fieldReviewSchema = z.object({
     context.addIssue({ code: "custom", message: "Review at least one field" });
   }
 });
+
+const pageBoundaryCorrectionSchema = z.object({
+  corrections: z.array(z.object({
+    pageNumber: z.number().int().min(1).max(1000),
+    documentType: z.enum(DOCUMENT_TYPE_TAXONOMY),
+  }).strict()).min(1).max(1000),
+}).strict();
 
 export function registerDocumentRoutes(
   app: Express,
@@ -341,6 +357,126 @@ export function registerDocumentRoutes(
     }
   });
 
+  app.get("/api/documents/:id/pages", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as User;
+      const document = await storage.getDocument(routeParam(req, "id"));
+      if (!document) return res.status(404).json({ error: "Document not found" });
+      const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+      if (
+        borrowerUserId !== user.id &&
+        !(await hasActiveDocumentTeamAccess(user, document, storage))
+      ) return res.status(403).json({ error: "Unauthorized" });
+      if (
+        document.documentType === "tax_return" &&
+        borrowerUserId !== user.id &&
+        !(await hasUserConsent("tax_document_use", borrowerUserId))
+      ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
+
+      const { getDocumentPacketReview } = await import("../services/documentPageMaterialization");
+      const packet = await getDocumentPacketReview(document.id);
+      if (!packet) return res.status(404).json({ error: "Normalized pages are not available yet" });
+      res.json(packet);
+    } catch (error) {
+      console.error("Document page manifest error:", error);
+      res.status(500).json({ error: "Failed to load normalized document pages" });
+    }
+  });
+
+  app.get("/api/documents/:id/pages/:pageNumber/image", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as User;
+      const document = await storage.getDocument(routeParam(req, "id"));
+      if (!document) return res.status(404).json({ error: "Document not found" });
+      const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+      if (
+        borrowerUserId !== user.id &&
+        !(await hasActiveDocumentTeamAccess(user, document, storage))
+      ) return res.status(403).json({ error: "Unauthorized" });
+      if (
+        document.documentType === "tax_return" &&
+        borrowerUserId !== user.id &&
+        !(await hasUserConsent("tax_document_use", borrowerUserId))
+      ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
+
+      const pageNumber = Number(routeParam(req, "pageNumber"));
+      if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > 1000) {
+        return res.status(400).json({ error: "Invalid page number" });
+      }
+      const [page] = await db.select({ imageUri: documentPages.imageUri })
+        .from(documentPages)
+        .innerJoin(documentUploads, eq(documentPages.uploadId, documentUploads.id))
+        .where(and(
+          eq(documentUploads.sourceDocumentId, document.id),
+          eq(documentPages.pageNumber, pageNumber),
+        ))
+        .limit(1);
+      if (!page) return res.status(404).json({ error: "Normalized page not found" });
+
+      res.set("Content-Type", "image/png");
+      res.set("Content-Disposition", `inline; filename="page-${pageNumber}.png"`);
+      if (isLocalFallbackEnabled()) return streamLocalObject(page.imageUri, res);
+      const objectFile = await objectStorageService.getObjectEntityFile(page.imageUri);
+      await objectStorageService.downloadObject(objectFile, res, 3600);
+    } catch (error) {
+      if (error instanceof ObjectNotFoundError) {
+        return res.status(404).json({ error: "Normalized page not found" });
+      }
+      console.error("Document page image error:", error);
+      res.status(500).json({ error: "Failed to load normalized document page" });
+    }
+  });
+
+  app.patch(
+    "/api/documents/:id/pages/classification",
+    requireRole("admin", "lo", "loa", "processor", "underwriter"),
+    async (req, res) => {
+      try {
+        const user = req.user as User;
+        const document = await storage.getDocument(routeParam(req, "id"));
+        if (!document) return res.status(404).json({ error: "Document not found" });
+        if (!(await hasActiveDocumentTeamAccess(user, document, storage))) {
+          return res.status(403).json({ error: "Unauthorized" });
+        }
+        const parsed = pageBoundaryCorrectionSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({
+            error: "Invalid page corrections",
+            details: parsed.error.flatten().fieldErrors,
+          });
+        }
+        const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
+        if (
+          document.documentType === "tax_return" &&
+          !(await hasUserConsent("tax_document_use", borrowerUserId))
+        ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
+
+        const {
+          correctDocumentPacketBoundaries,
+          extractMaterializedPacketSegments,
+        } = await import("../services/documentPageMaterialization");
+        const packet = await correctDocumentPacketBoundaries({
+          document,
+          borrowerUserId,
+          reviewedByUserId: user.id,
+          corrections: parsed.data.corrections,
+        });
+        const extraction = await extractMaterializedPacketSegments({
+          documentId: document.id,
+          borrowerUserId,
+        });
+        logAudit(req, "document.page_classification_corrected", "document", document.id, {
+          applicationId: document.applicationId,
+          correctedPages: parsed.data.corrections.map((correction) => correction.pageNumber),
+        });
+        res.json({ ...packet, extraction });
+      } catch (error) {
+        console.error("Document page correction error:", error);
+        res.status(500).json({ error: "Failed to save page corrections" });
+      }
+    },
+  );
+
   app.post("/api/documents/:id/extract", isAuthenticated, async (req, res) => {
     try {
       const { id } = routeParams(req);
@@ -408,22 +544,39 @@ export function registerDocumentRoutes(
 
       switch (document.documentType) {
         case "tax_return":
-          extractedData = await extractTaxReturnData(document.storagePath, documentYear);
+          extractedData = await extractTaxReturnData(
+            document.storagePath,
+            documentYear,
+            document.mimeType ?? undefined,
+          );
           break;
         case "pay_stub":
-          extractedData = await extractPayStubData(document.storagePath);
+          extractedData = await extractPayStubData(document.storagePath, document.mimeType ?? undefined);
+          break;
+        case "w2":
+          extractedData = await extractW2Data(document.storagePath, document.mimeType ?? undefined);
           break;
         case "bank_statement":
-          extractedData = await extractBankStatementData(document.storagePath);
+          extractedData = await extractBankStatementData(document.storagePath, document.mimeType ?? undefined);
           break;
         case "lease_agreement":
-          extractedData = await extractLeaseData(document.storagePath);
+          extractedData = await extractLeaseData(document.storagePath, document.mimeType ?? undefined);
           break;
         default:
           return res.status(400).json({ 
             error: "Document type not supported for extraction",
-            supportedTypes: ["tax_return", "pay_stub", "bank_statement", "lease_agreement"]
+            supportedTypes: ["tax_return", "pay_stub", "w2", "bank_statement", "lease_agreement"]
           });
+      }
+
+      if (extractedData.documentClassification) {
+        const { materializeDocumentPages } = await import("../services/documentPageMaterialization");
+        await materializeDocumentPages({
+          document,
+          borrowerUserId,
+          classification: extractedData.documentClassification,
+          modelVersion: extractedData.modelId ?? "unknown_extraction_model",
+        });
       }
 
       // Shared with the fire-and-forget auto-extraction inside
@@ -471,6 +624,15 @@ export function registerDocumentRoutes(
         });
       }
 
+      let packetExtraction = null;
+      if (extractionResult.classificationBlocked) {
+        const { extractMaterializedPacketSegments } = await import("../services/documentPageMaterialization");
+        packetExtraction = await extractMaterializedPacketSegments({
+          documentId: document.id,
+          borrowerUserId,
+        });
+      }
+
       if (document.applicationId) {
         const { taskEventEmitter } = await import("../services/taskEventEmitter");
         
@@ -503,6 +665,7 @@ export function registerDocumentRoutes(
         documentId: id,
         documentType: document.documentType,
         classificationBlocked: extractionResult.classificationBlocked,
+        packetExtraction,
         ...publicExtraction(extractedData),
       });
     } catch (error) {

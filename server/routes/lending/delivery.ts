@@ -54,7 +54,9 @@ export function registerDeliveryRoutes(
         });
       }
 
-      const mismoData = await storage.getMISMOLoanData(id);
+      const mismoData = await storage.getMISMOLoanData(id, {
+        sensitiveAccess: { actorUserId: req.user!.id, purpose: "mismo_export" },
+      });
 
       if (!mismoData) {
         return res.status(404).json({ error: "Application not found" });
@@ -91,8 +93,8 @@ export function registerDeliveryRoutes(
         description: "Readiness-gated loan package exported in MISMO 3.4 format",
         performedBy: req.user!.id,
       });
-      const { logAudit } = await import("../../auditLog");
-      await logAudit(req, "loan_application.mismo_exported", "loan_application", id, {
+      const { logAuditRequired } = await import("../../auditLog");
+      await logAuditRequired(req, "loan_application.mismo_exported", "loan_application", id, {
         readinessStage: readiness.currentStage,
       });
 

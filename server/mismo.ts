@@ -34,19 +34,27 @@ import {
   type LiabilityType,
 } from "@shared/mismo";
 
+export type MISMOPersonalInfo = UrlaPersonalInfo & { ssn?: string | null };
+
 export interface MISMOLoanDTO {
   application: LoanApplication;
   user: User | null;
-  // `ssn` is a virtual field: SSNs are encrypted at rest, and
-  // storage.getMISMOLoanData() decrypts the full value onto the record because
-  // GSE loan delivery (TaxpayerIdentifierValue) requires it.
-  personalInfo: (UrlaPersonalInfo & { ssn?: string | null }) | null;
+  // `ssn` is a virtual field: SSNs are encrypted at rest and are decrypted
+  // only when getMISMOLoanData receives an audited delivery purpose.
+  personalInfo: MISMOPersonalInfo | null;
+  /**
+   * Every borrower on the URLA, with the full SSN populated only on an
+   * audited export/submission path. Optional keeps older internal
+   * callers compatible; the primary-only fields above remain the fallback.
+   */
+  allPersonalInfo?: MISMOPersonalInfo[];
   employment: EmploymentHistory[];
   // Asset/liability `accountNumber` is likewise a decrypted virtual field.
   assets: (UrlaAsset & { accountNumber?: string | null })[];
   liabilities: (UrlaLiability & { accountNumber?: string | null })[];
   propertyInfo: UrlaPropertyInfo | null;
   declarations: BorrowerDeclarations | null;
+  allDeclarations?: BorrowerDeclarations[];
   loanOptions: LoanOption[];
   documents: Document[];
 }
@@ -406,7 +414,10 @@ function buildBorrowerNode(dto: MISMOLoanDTO): XMLNode {
   // schema's BORROWER_DETAIL (verified against MISMO_3_0.xsd). The SSN's one
   // schema-valid home is PARTY/TAXPAYER_IDENTIFIERS, which buildPartyNode
   // already emits; duplicating it here was both invalid and a wider PII spill.
-  borrowerDetail.push({ tag: "BorrowerClassificationType", text: "Primary" });
+  borrowerDetail.push({
+    tag: "BorrowerClassificationType",
+    text: (personalInfo?.borrowerSequenceNumber ?? 1) > 1 ? "Secondary" : "Primary",
+  });
   if (personalInfo?.maritalStatus) {
     const maritalMap: Record<string, string> = {
       married: "Married",
@@ -796,6 +807,38 @@ function buildPartyNode(dto: MISMOLoanDTO): XMLNode {
   }
 
   return { tag: "PARTY", children: partyChildren };
+}
+
+/**
+ * Materialize one PARTY context per URLA borrower. Employment and declarations
+ * are borrower-owned records, so they must be filtered before building each
+ * PARTY; passing the deal-wide arrays into every PARTY would duplicate income
+ * and attribute a co-borrower's job to the primary borrower.
+ */
+function borrowerPartyDtos(dto: MISMOLoanDTO): MISMOLoanDTO[] {
+  const personalRows = dto.allPersonalInfo?.length
+    ? dto.allPersonalInfo
+    : dto.personalInfo
+      ? [dto.personalInfo]
+      : [];
+
+  return [...personalRows]
+    .sort((a, b) => (a.borrowerSequenceNumber ?? 1) - (b.borrowerSequenceNumber ?? 1))
+    .map((personalInfo) => {
+      const sequence = personalInfo.borrowerSequenceNumber ?? 1;
+      return {
+        ...dto,
+        user: sequence === 1 ? dto.user : null,
+        personalInfo,
+        employment: dto.employment.filter(
+          (record) => (record.borrowerSequenceNumber ?? 1) === sequence,
+        ),
+        declarations:
+          dto.allDeclarations?.find(
+            (record) => (record.borrowerSequenceNumber ?? 1) === sequence,
+          ) ?? (sequence === 1 ? dto.declarations : null),
+      };
+    });
 }
 
 /**
@@ -1330,7 +1373,7 @@ export function generateMISMO34XML(
 
   dealChildren.push({
     tag: "PARTIES",
-    children: [buildPartyNode(dto)],
+    children: borrowerPartyDtos(dto).map(buildPartyNode),
   });
 
   const relationshipsNode = buildRelationshipsNode(dto);
@@ -1472,7 +1515,7 @@ export function validateULDDCompliance(dto: MISMOLoanDTO): ULDDValidationResult 
     errors.push("Borrower name is required");
   }
 
-  if (!personalInfo?.ssn) {
+  if (!personalInfo?.ssn && !personalInfo?.ssnLast4) {
     errors.push("Borrower SSN is required");
   }
 

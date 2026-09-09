@@ -14,6 +14,7 @@ import {
 describe("durable document extraction job policy", () => {
   it("queues the borrower document types with a supported extractor", () => {
     expect(standardDocumentNeedsExtraction("pay_stub")).toBe(true);
+    expect(standardDocumentNeedsExtraction("w2")).toBe(true);
     expect(standardDocumentNeedsExtraction("bank_statement")).toBe(true);
     expect(standardDocumentNeedsExtraction("lease_agreement")).toBe(true);
     expect(standardDocumentNeedsExtraction("government_id")).toBe(false);

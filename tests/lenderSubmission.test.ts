@@ -6,7 +6,7 @@ import {
   nextSubmissionStatuses,
   LENDER_SUBMISSION_STATUSES,
 } from "../shared/wholesaleLenders";
-import { simulateLenderAcknowledgment, buildLenderPackage } from "../server/services/lenderSubmission";
+import { simulateLenderAcknowledgment, buildLenderPackage, buildAusFindingsArtifact } from "../server/services/lenderSubmission";
 import type { MISMOLoanDTO } from "../server/mismo";
 
 describe("wholesale lender catalog", () => {
@@ -195,6 +195,41 @@ describe("buildLenderPackage", () => {
     const withDate = buildLenderPackage(baseDto(), "2026-08-01", clock);
     const withoutDate = buildLenderPackage(baseDto(), undefined, clock);
     expect(withDate.xml).not.toBe(withoutDate.xml);
+  });
+});
+
+describe("final AUS findings artifact", () => {
+  const findings = {
+    recommendation: "approve_eligible",
+    simulated: true,
+    inputIntegrity: { inputFingerprint: "a".repeat(64), evidenceFingerprint: "b".repeat(64) },
+    messages: [{ code: "DU-0001", severity: "info", text: "No adverse findings." }],
+    lpa: { riskClass: "accept", purchaseEligibility: "eligible", simulated: true },
+  };
+
+  it("canonicalizes and hashes the full dual-AUS report deterministically", () => {
+    const a = buildAusFindingsArtifact(findings);
+    const b = buildAusFindingsArtifact({
+      lpa: findings.lpa,
+      messages: findings.messages,
+      inputIntegrity: findings.inputIntegrity,
+      simulated: true,
+      recommendation: "approve_eligible",
+    });
+    expect(a).toEqual(b);
+    expect(a.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("refuses a summary that is missing LPA or input lineage", () => {
+    expect(() => buildAusFindingsArtifact({ recommendation: "approve_eligible" })).toThrow(
+      /findings are incomplete/i,
+    );
+  });
+
+  it("detects any changed finding through a different hash", () => {
+    const original = buildAusFindingsArtifact(findings);
+    const changed = buildAusFindingsArtifact({ ...findings, recommendation: "refer" });
+    expect(changed.hash).not.toBe(original.hash);
   });
 });
 

@@ -47,6 +47,7 @@ import {
   type InsertHmdaDemographics,
   bankStatementAnalyses,
   type BankStatementAnalysis,
+  auditLogs,
 } from "@shared/schema";
 import { TasksStorage } from "./tasks";
 import { indexRowsByKey } from "./batchGroup";
@@ -66,7 +67,7 @@ export class UrlaStorage extends TasksStorage {
   /**
    * Present a urla_personal_info row outside the storage layer: the SSN comes
    * back masked (XXX-XX-1234) and the ciphertext columns are withheld. Full
-   * SSNs are available only via getDecryptedUrlaSsn (audited callers).
+   * Full SSNs are available only inside the audited delivery assembly below.
    */
   private presentUrlaPersonalInfo(row: UrlaPersonalInfo): UrlaPersonalInfo {
     return {
@@ -109,7 +110,7 @@ export class UrlaStorage extends TasksStorage {
    * responsible for authorization and for writing an audit entry — this is
    * intentionally the ONLY path that returns more than the last 4.
    */
-  async getDecryptedUrlaSsn(applicationId: string, borrowerSequenceNumber: number = 1): Promise<string | null> {
+  private async getDecryptedUrlaSsn(applicationId: string, borrowerSequenceNumber: number = 1): Promise<string | null> {
     const row = await this.getUrlaPersonalInfoRaw(applicationId, borrowerSequenceNumber);
     if (!row) return null;
     return decryptSsnFromRow(row);
@@ -484,7 +485,25 @@ export class UrlaStorage extends TasksStorage {
   }
 
   async updateLenderSubmission(id: string, data: Partial<InsertLenderSubmission>): Promise<LenderSubmission | undefined> {
-    const { createdAt, updatedAt, id: _id, ...cleanData } = data as any;
+    // Package snapshots are write-once at submission. Strip them here as an
+    // application-layer guard; migration 0073 enforces the same rule in the
+    // database while still allowing lifecycle status updates.
+    const {
+      createdAt,
+      updatedAt,
+      id: _id,
+      readinessSnapshot: _readinessSnapshot,
+      mismoPackageXml: _mismoPackageXml,
+      mismoPackageHash: _mismoPackageHash,
+      mismoPackageGeneratedAt: _mismoPackageGeneratedAt,
+      incomePackageJson: _incomePackageJson,
+      incomePackageHash: _incomePackageHash,
+      incomePackageGeneratedAt: _incomePackageGeneratedAt,
+      ausFindingsJson: _ausFindingsJson,
+      ausFindingsHash: _ausFindingsHash,
+      ausFindingsGeneratedAt: _ausFindingsGeneratedAt,
+      ...cleanData
+    } = data as any;
     const [updated] = await db
       .update(lenderSubmissions)
       .set({ ...cleanData, statusUpdatedAt: new Date(), updatedAt: new Date() })
@@ -841,52 +860,86 @@ export class UrlaStorage extends TasksStorage {
   }
 
   // MISMO Export Data - aggregates all data needed for MISMO 3.4 XML generation
-  async getMISMOLoanData(applicationId: string) {
+  async getMISMOLoanData(
+    applicationId: string,
+    options?: {
+      sensitiveAccess?: {
+        actorUserId: string;
+        purpose: "mismo_export" | "lender_submission";
+      };
+    },
+  ) {
     const application = await this.getLoanApplication(applicationId);
     if (!application) {
       return null;
     }
 
-    const [user, urlaData, loanOpts, docs, fullSsn] = await Promise.all([
+    const [user, urlaData, loanOpts, docs] = await Promise.all([
       application.userId ? this.getUser(application.userId) : Promise.resolve(undefined),
       this.getCompleteUrlaData(applicationId),
       this.getLoanOptionsByApplication(applicationId),
       this.getDocumentsByApplication(applicationId),
-      // GSE loan delivery requires the real TaxpayerIdentifierValue. This is
-      // the one read path that decrypts the SSN; the export route is gated to
-      // internal staff roles only (never broker/lender partners or clients)
-      // and records the export as a deal activity.
-      this.getDecryptedUrlaSsn(applicationId),
     ]);
 
-    // GSE delivery needs full identifiers. The SSN comes from ssnVault's
-    // audited decryption (fullSsn, above); account numbers are decrypted here
-    // via piiVault. This object feeds the MISMO generator only — never a client.
-    const personalInfo = urlaData.personalInfo
-      ? { ...urlaData.personalInfo, ssn: fullSsn }
-      : null;
+    // Readiness and internal previews need presence, not plaintext. Full SSNs
+    // are available only when the caller supplies an actor and delivery
+    // purpose; record that access before decrypting any borrower identifier.
+    if (options?.sensitiveAccess) {
+      await db.insert(auditLogs).values({
+        actorUserId: options.sensitiveAccess.actorUserId,
+        action: "loan_application.pii_decrypted_for_delivery",
+        targetType: "loan_application",
+        targetId: applicationId,
+        metadata: {
+          purpose: options.sensitiveAccess.purpose,
+          borrowerCount: urlaData.allPersonalInfo.length,
+        },
+      });
+    }
+    const allPersonalInfo = await Promise.all(
+      urlaData.allPersonalInfo.map(async (info) => ({
+        ...info,
+        ssn: options?.sensitiveAccess
+          ? await this.getDecryptedUrlaSsn(
+              applicationId,
+              info.borrowerSequenceNumber ?? 1,
+            )
+          : null,
+      })),
+    );
+
+    // GSE delivery needs full identifiers. SSNs come from the audited ssnVault
+    // reads above; account numbers are decrypted only on the same audited path.
+    // Readiness callers retain row presence and masked metadata without adding
+    // plaintext identifiers to the in-memory DTO.
+    const personalInfo =
+      allPersonalInfo.find((info) => (info.borrowerSequenceNumber ?? 1) === 1) ?? null;
     const withAccountNumber = <T extends {
       accountNumberEncrypted: string | null;
       accountNumberIv: string | null;
       accountNumberKeyId: string | null;
     }>(record: T): T & { accountNumber: string | null } => ({
       ...record,
-      accountNumber: decryptPiiField({
-        encrypted: record.accountNumberEncrypted,
-        iv: record.accountNumberIv,
-        keyId: record.accountNumberKeyId,
-      }),
+      accountNumber: options?.sensitiveAccess
+        ? decryptPiiField({
+            encrypted: record.accountNumberEncrypted,
+            iv: record.accountNumberIv,
+            keyId: record.accountNumberKeyId,
+          })
+        : null,
     });
 
     return {
       application,
       user: user || null,
       personalInfo,
+      allPersonalInfo,
       employment: urlaData.employmentHistory,
       assets: urlaData.assets.map(withAccountNumber),
       liabilities: urlaData.liabilities.map(withAccountNumber),
       propertyInfo: urlaData.propertyInfo || null,
       declarations: urlaData.declarations || null,
+      allDeclarations: urlaData.allDeclarations,
       loanOptions: loanOpts,
       documents: docs,
     };

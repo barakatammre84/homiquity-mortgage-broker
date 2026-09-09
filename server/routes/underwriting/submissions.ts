@@ -8,6 +8,7 @@ import { z } from "zod";
 import * as creditService from "../../services/creditService";
 import { updateConditionMetrics } from "../../services/outcomeTracker";
 import { routeParams } from "../../http/routeParams";
+import { createHash } from "node:crypto";
 
 /**
  * Window the working-capital days-to-cash figure is measured over. Matches the
@@ -108,7 +109,7 @@ export function registerSubmissionRoutes(
           });
           // Omit the MISMO XML body (carries full SSN/DOB) from the response;
           // fetch it explicitly via the mismo-package route below.
-          const { mismoPackageXml, ...submission } = result.submission;
+          const { mismoPackageXml, ausFindingsJson, ...submission } = result.submission;
           res.status(201).json(submission);
         } catch (err) {
           if (err instanceof SubmissionBlockedError) {
@@ -148,7 +149,7 @@ export function registerSubmissionRoutes(
         }
         // Omit the MISMO XML body (carries full SSN/DOB) from the list view;
         // fetch it explicitly via the mismo-package route below.
-        res.json(submissions.map(({ mismoPackageXml, ...s }) => ({
+        res.json(submissions.map(({ mismoPackageXml, ausFindingsJson, ...s }) => ({
           ...s,
           conditionStats: statsBySubmission.get(s.id) ?? { total: 0, open: 0, cleared: 0 },
         })));
@@ -176,12 +177,68 @@ export function registerSubmissionRoutes(
         if (!submission || submission.applicationId !== id || !submission.mismoPackageXml) {
           return res.status(404).json({ error: "Package not found" });
         }
+        const currentHash = createHash("sha256").update(submission.mismoPackageXml).digest("hex");
+        if (!submission.mismoPackageHash || currentHash !== submission.mismoPackageHash) {
+          return res.status(409).json({ error: "Stored MISMO package failed its integrity check." });
+        }
+        const { logAuditRequired } = await import("../../auditLog");
+        await logAuditRequired(req, "broker.lender_submission_mismo_downloaded", "lender_submission", submissionId, {
+          applicationId: id,
+          packageHashPrefix: submission.mismoPackageHash.slice(0, 12),
+        });
         res.setHeader("Content-Type", "application/xml");
         res.setHeader("Content-Disposition", `attachment; filename="mismo-package-${submissionId}.xml"`);
         res.send(submission.mismoPackageXml);
       } catch (error) {
         console.error("Lender package download error:", error);
         res.status(500).json({ error: "Failed to fetch lender package" });
+      }
+    },
+  );
+
+  // Download the exact dual-AUS report retained with the lender package.
+  // Re-hash before release so a changed database value cannot masquerade as
+  // the findings that were current when the submission was created.
+  app.get(
+    "/api/loan-applications/:id/lender-submissions/:submissionId/aus-findings",
+    requireRole("admin", "lo", "loa", "processor", "underwriter", "closer"),
+    async (req, res) => {
+      try {
+        const { id, submissionId } = routeParams(req);
+        const application = await storage.getLoanApplicationWithAccess(id, req.user!.id, req.user!.role);
+        if (!application) return res.status(404).json({ error: "Application not found" });
+        const submission = await storage.getLenderSubmission(submissionId);
+        if (!submission || submission.applicationId !== id || !submission.ausFindingsJson) {
+          return res.status(404).json({ error: "AUS findings artifact not found" });
+        }
+        const { buildAusFindingsArtifact, SubmissionBlockedError } = await import("../../services/lenderSubmission");
+        let artifact;
+        try {
+          artifact = buildAusFindingsArtifact(submission.ausFindingsJson);
+        } catch (error) {
+          if (error instanceof SubmissionBlockedError) {
+            return res.status(409).json({ error: "Stored AUS findings failed their integrity check." });
+          }
+          throw error;
+        }
+        if (!submission.ausFindingsHash || artifact.hash !== submission.ausFindingsHash) {
+          return res.status(409).json({ error: "Stored AUS findings failed their integrity check." });
+        }
+        const { logAuditRequired } = await import("../../auditLog");
+        await logAuditRequired(req, "broker.lender_submission_aus_downloaded", "lender_submission", submissionId, {
+          applicationId: id,
+          packageHashPrefix: submission.ausFindingsHash.slice(0, 12),
+        });
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename="aus-findings-${submissionId}.json"`);
+        res.send(JSON.stringify({
+          hash: submission.ausFindingsHash,
+          generatedAt: submission.ausFindingsGeneratedAt,
+          findings: submission.ausFindingsJson,
+        }, null, 2));
+      } catch (error) {
+        console.error("AUS findings download error:", error);
+        res.status(500).json({ error: "Failed to fetch AUS findings artifact" });
       }
     },
   );

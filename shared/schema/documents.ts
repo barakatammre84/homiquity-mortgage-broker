@@ -168,6 +168,10 @@ export const documentUploads = pgTable("document_uploads", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   loanId: varchar("loan_id").references(() => loanApplications.id),
   borrowerId: varchar("borrower_id").references(() => users.id).notNull(),
+  // Bridge the legacy/live `documents` upload row to the page-intelligence
+  // model. One immutable source document owns at most one normalized page set;
+  // retries reuse it instead of producing competing page boundaries.
+  sourceDocumentId: varchar("source_document_id").references(() => documents.id),
   
   // Original file metadata
   originalFileName: varchar("original_file_name", { length: 500 }).notNull(),
@@ -196,6 +200,10 @@ export const documentUploads = pgTable("document_uploads", {
   index("idx_doc_uploads_loan").on(table.loanId),
   index("idx_doc_uploads_borrower").on(table.borrowerId),
   index("idx_doc_uploads_status").on(table.processingStatus),
+  uniqueIndex("uq_document_uploads_source_document")
+    .on(table.sourceDocumentId)
+    .where(sql`${table.sourceDocumentId} IS NOT NULL`),
+  index("idx_doc_uploads_source_document").on(table.sourceDocumentId),
 ]);
 
 // Durable background work for the borrower upload path. The document row and
@@ -309,10 +317,9 @@ export const logicalDocuments = pgTable("logical_documents", {
   accountNumberMasked: varchar("account_number_masked", { length: 50 }),
 
   // --- Bridge to the live upload flow (UAL P2a) ------------------------------
-  // The page-image pipeline (document_uploads/document_pages) needs
-  // rasterization infra that doesn't exist yet; until it does, a logical
-  // document is produced directly from a `documents` row by the tax-form
-  // extractor. source_document_id + extraction_run_id carry that provenance.
+  // source_document_id + extraction_run_id tie a logical form to the original
+  // immutable borrower upload and the exact extraction run. Normalized pages
+  // are joined through logical_document_pages.
   sourceDocumentId: varchar("source_document_id").references(() => documents.id),
   extractionRunId: varchar("extraction_run_id").references(() => taxExtractionRuns.id),
   // Resolved business entity this form belongs to (P2b entity resolution).
@@ -377,9 +384,8 @@ export const logicalDocumentPages = pgTable("logical_document_pages", {
 export const extractedFields = pgTable("extracted_fields", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   logicalDocumentId: varchar("logical_document_id").references(() => logicalDocuments.id),
-  // Nullable since UAL P2a: fields produced by the whole-document tax extractor
-  // carry page_number attribution instead of a rasterized page row. When the
-  // page-image pipeline lands, page_id becomes populated again.
+  // Nullable for historical and failed-review rows. Current standard and tax
+  // extraction links every retained field to its normalized source page.
   pageId: varchar("page_id").references(() => documentPages.id),
   pageNumber: integer("page_number"), // 1-indexed page attribution from classification
 

@@ -350,6 +350,18 @@ function fieldValueSchema(kind: TaxFieldKind) {
     .object({
       value: valueSchemaForKind[kind].nullable(),
       confidence: confidence01,
+      // A tax value without a source page is not reviewable evidence. Catching
+      // at the field boundary drops only the unsupported value, never the form.
+      pageNumber: z.preprocess(coerceNumeric, z.number().int().min(1).max(MAX_PAGES)),
+      boundingBox: z.object({
+        x: z.number().finite().min(0).max(1),
+        y: z.number().finite().min(0).max(1),
+        width: z.number().finite().min(0).max(1),
+        height: z.number().finite().min(0).max(1),
+      }).refine(
+        (box) => box.x + box.width <= 1.001 && box.y + box.height <= 1.001,
+        "Bounding box must stay within the page",
+      ).optional().catch(undefined),
     })
     .optional()
     .catch(undefined);
@@ -358,6 +370,10 @@ function fieldValueSchema(kind: TaxFieldKind) {
 export interface ExtractedFieldValue {
   value: number | string | boolean | null;
   confidence: number;
+  /** 1-indexed page in the original uploaded packet. */
+  pageNumber?: number;
+  /** Normalized coordinates in the rendered source page when available. */
+  boundingBox?: { x: number; y: number; width: number; height: number };
 }
 
 const formFieldsSchemaCache = new Map<TaxFormType, z.ZodTypeAny>();
