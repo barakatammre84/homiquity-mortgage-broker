@@ -17,7 +17,7 @@
 # is the wanted posture (a scheduler that silently no-ops hides a dead sweep).
 #
 # GitHub exposes only WHICH cron expression fired (github.event.schedule), so
-# one workflow carries all seven expressions and the resolve step maps the
+# one workflow carries all eight expressions and the resolve step maps the
 # expression back to its job path. An expression with no mapping fails the
 # run rather than skipping — editing a schedule without its case arm must be
 # loud. Scheduled workflows run against the default branch only.
@@ -33,6 +33,7 @@ on:
     - cron: "45 13 * * *" # /api/jobs/task-escalation
     - cron: "17 11 * * 1" # /api/jobs/aggregate-data (Mondays)
     - cron: "15 13 * * *" # /api/jobs/credit-monitoring
+    - cron: "30 11,23 * * *" # /api/jobs/core-provider-canaries (twice daily; proof expires after 24h)
   # Manual lever: lets the founder prove CRON_SECRET end-to-end without
   # waiting for a schedule, and re-fire a missed sweep after an outage.
   workflow_dispatch:
@@ -49,6 +50,7 @@ on:
           - task-escalation
           - aggregate-data
           - credit-monitoring
+          - core-provider-canaries
 
 permissions:
   contents: none
@@ -75,17 +77,25 @@ jobs:
               "45 13 * * *") job="task-escalation" ;;
               "17 11 * * 1") job="aggregate-data" ;;
               "15 13 * * *") job="credit-monitoring" ;;
+              "30 11,23 * * *") job="core-provider-canaries" ;;
               *)
                 echo "::error::No job mapped for schedule '$FIRED' — a cron expression was edited without updating this case list"
                 exit 1
                 ;;
             esac
           fi
+          if [ "$job" = "core-provider-canaries" ]; then
+            method="POST"
+          else
+            method="GET"
+          fi
           echo "job=$job" >> "$GITHUB_OUTPUT"
+          echo "method=$method" >> "$GITHUB_OUTPUT"
       - name: Trigger the sweep
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           JOB: ${{ steps.resolve.outputs.job }}
+          METHOD: ${{ steps.resolve.outputs.method }}
           # The RAILWAY service domain, deliberately NOT www.homiquity.com.
           #
           # This call is machine-to-machine — no human ever sees it — so there is
@@ -118,5 +128,7 @@ jobs:
           # letter-expiry, 31115455014 lifecycle — all `exit code 6`, all in
           # ~15s). Belt and braces alongside the host change below.
           curl -sf --retry 3 --retry-all-errors --max-time 120 \
+            -X "${METHOD}" \
+            -H "Origin: ${SWEEP_HOST}" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${SWEEP_HOST}/api/jobs/${JOB}"

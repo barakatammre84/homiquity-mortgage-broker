@@ -12,6 +12,7 @@ import { db } from "../db";
 import { intentEvents } from "@shared/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { routeParam } from "../http/routeParams";
+import { runCoreProviderCanarySweep } from "../services/coreProviderCanaries";
 
 /**
  * Scheduled-job endpoints.
@@ -32,6 +33,44 @@ function isCronRequest(req: Request): boolean {
 }
 
 export function registerJobRoutes(app: Express) {
+  // Borrower-data-free proof that the three core provider paths can execute in
+  // the deployed environment. Every capability records its own redacted row;
+  // an unhealthy result returns 503 so the scheduler becomes a visible alarm.
+  app.post("/api/jobs/core-provider-canaries", async (req, res) => {
+    if (isCronRequest(req)) {
+      try {
+        const result = await runCoreProviderCanarySweep(null);
+        return res.status(result.failed === 0 ? 200 : 503).json({
+          ok: result.failed === 0,
+          trigger: "cron",
+          ...result,
+        });
+      } catch (err) {
+        console.error("[jobs] Core provider canary sweep failed:", err);
+        return res.status(500).json({ ok: false, error: "Core provider canary sweep failed" });
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await runCoreProviderCanarySweep(user.id);
+        await logAudit(req, "jobs.core_provider_canaries", "system", "core_provider", {
+          total: result.total,
+          successful: result.successful,
+          failed: result.failed,
+        });
+        res.status(result.failed === 0 ? 200 : 503).json({
+          ok: result.failed === 0,
+          trigger: "manual",
+          ...result,
+        });
+      } catch (err) {
+        console.error("[jobs] Core provider canary sweep failed:", err);
+        res.status(500).json({ ok: false, error: "Core provider canary sweep failed" });
+      }
+    });
+  });
+
   app.get("/api/jobs/lifecycle", async (req, res, next) => {
     if (isCronRequest(req)) {
       try {

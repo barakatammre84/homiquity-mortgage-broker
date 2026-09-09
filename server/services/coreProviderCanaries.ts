@@ -45,6 +45,13 @@ export interface CoreCanaryProof {
   lastSuccess: CoreCanaryResult | null;
 }
 
+export interface CoreCanarySweepResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: CoreCanaryResult[];
+}
+
 export type CoreCanaryProofByCapability = Partial<
   Record<CoreCanaryCapabilityId, CoreCanaryProof>
 >;
@@ -214,7 +221,7 @@ function toResult(row: typeof coreProviderCanaryRuns.$inferSelect): CoreCanaryRe
  */
 export async function runCoreProviderCanary(
   capabilityId: CoreCanaryCapabilityId,
-  triggeredByUserId: string,
+  triggeredByUserId: string | null,
   runner: CanaryRunner = DEFAULT_RUNNERS[capabilityId],
   timeoutMs = CANARY_TIMEOUT_MS,
 ): Promise<CoreCanaryResult> {
@@ -243,6 +250,35 @@ export async function runCoreProviderCanary(
     triggeredByUserId,
   }).returning();
   return toResult(saved);
+}
+
+/**
+ * Run the complete borrower-data-free provider proof in parallel. Individual
+ * provider failures are persisted and summarized rather than short-circuiting
+ * the remaining capabilities, so one outage cannot hide the state of another.
+ */
+export async function runCoreProviderCanarySweep(
+  triggeredByUserId: string | null,
+  runners: Partial<Record<CoreCanaryCapabilityId, CanaryRunner>> = {},
+  timeoutMs = CANARY_TIMEOUT_MS,
+): Promise<CoreCanarySweepResult> {
+  const results = await Promise.all(
+    CORE_CANARY_CAPABILITIES.map((capabilityId) =>
+      runCoreProviderCanary(
+        capabilityId,
+        triggeredByUserId,
+        runners[capabilityId] ?? DEFAULT_RUNNERS[capabilityId],
+        timeoutMs,
+      ),
+    ),
+  );
+  const successful = results.filter((result) => result.status === "success").length;
+  return {
+    total: results.length,
+    successful,
+    failed: results.length - successful,
+    results,
+  };
 }
 
 export async function getCoreCanaryProof(

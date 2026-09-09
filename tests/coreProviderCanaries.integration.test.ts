@@ -78,4 +78,25 @@ describe.sequential("core provider canary ledger", () => {
 
     expect(result).toMatchObject({ status: "failure", failureClass: "timeout" });
   });
+
+  it("runs every provider proof and reports a red sweep without hiding healthy capabilities", async () => {
+    const { runCoreProviderCanarySweep } = await import("../server/services/coreProviderCanaries");
+    const calls: string[] = [];
+    const result = await runCoreProviderCanarySweep(userId, {
+      homi: async () => { calls.push("homi"); },
+      document_extraction: async () => {
+        calls.push("document_extraction");
+        throw new Error("synthetic provider failure");
+      },
+      object_storage: async () => { calls.push("object_storage"); },
+    });
+
+    expect(calls.sort()).toEqual(["document_extraction", "homi", "object_storage"]);
+    expect(result).toMatchObject({ total: 3, successful: 2, failed: 1 });
+    expect(result.results.find((item) => item.capabilityId === "document_extraction")).toMatchObject({
+      status: "failure",
+      failureClass: "unknown",
+    });
+    expect(result.results.filter((item) => item.status === "success")).toHaveLength(2);
+  });
 });
