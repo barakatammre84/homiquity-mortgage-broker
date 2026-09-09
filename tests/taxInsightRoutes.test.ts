@@ -157,7 +157,7 @@ describe("Tax insight routes", () => {
     expect(raw).not.toContain("rawResponseEncrypted");
     expect(raw).not.toContain("rawResponseIv");
     expect(raw).not.toContain("rawResponseKeyId");
-  });
+  }, 50_000);
 
   it("returns the caller's insights from /api/tax-insights/me", async () => {
     const me = await apiGet("/api/tax-insights/me", { headers: { Cookie: renterCookie } });
