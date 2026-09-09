@@ -82,6 +82,21 @@ describe("cron-jobs.yml schedules", () => {
     expect(workflow).toContain('-X "${METHOD}"');
   });
 
+  it("prints only redacted provider diagnostics before failing a canary sweep", () => {
+    const canaryBlock = workflow.slice(
+      workflow.indexOf('# Provider canaries are a state-changing POST.'),
+      workflow.indexOf('# Read-only sweeps retain transient retries.'),
+    );
+    expect(workflow).toContain('if [ "$JOB" = "core-provider-canaries" ]');
+    expect(workflow).toContain("results.map((result) => ({");
+    for (const field of ["capabilityId", "provider", "operation", "status", "latencyMs", "failureClass", "commitSha", "completedAt"]) {
+      expect(workflow).toContain(`${field}: result.${field}`);
+    }
+    expect(canaryBlock).not.toContain("--retry");
+    expect(canaryBlock).not.toContain("console.log(JSON.stringify(body");
+    expect(workflow).toContain('Core provider canary returned HTTP ${http_status}');
+  });
+
   it("targets the Railway service domain, not a third-party DNS zone", () => {
     // The sweep is machine-to-machine. Routing it through www.homiquity.com — a
     // CNAME in a Squarespace-hosted zone — cost three sweeps on 2026-08-06 when

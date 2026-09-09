@@ -415,6 +415,10 @@ missed escalation or time to a useful human response.
     redacted result even when a sibling fails, binds rows to the deployed commit and returns a
     failing HTTP status whenever production proof is incomplete so the scheduler cannot show
     green for an unhealthy core capability.
+35. Made failed scheduled canaries print only their safe per-capability status, latency, failure
+    class and commit before the workflow fails. The state-changing POST runs once without curl
+    retries, so an ambiguous timeout cannot duplicate provider calls or ledger rows and a red run
+    now identifies the capability that needs repair without exposing its prompt or response.
 
 ## Sources
 
