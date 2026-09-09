@@ -9,7 +9,7 @@ import { join } from "node:path";
  *
  * .github/workflows/cron-jobs.yml is THE scheduler — the platform cron block it
  * once mirrored was deleted at the Railway cutover, so there is no twin to fall
- * back on. Two of the six sweeps were already pinned at their own call sites
+ * back on. Two of the original six sweeps were already pinned at their own call sites
  * (letter-expiry in tests/letterIntegrity.test.ts, task-escalation in
  * tests/taskEngineSlaSeed.test.ts). The other four were not, which meant a
  * `- cron:` line could be deleted and the gate would stay green: removing a
@@ -37,12 +37,15 @@ const SCHEDULES: ReadonlyArray<readonly [string, string]> = [
   // Credit monitoring (2026-08-08). Runs after lifecycle so a score drop and the
   // day's other borrower-state changes land in the same working window.
   ["15 13 * * *", "credit-monitoring"],
+  // Synthetic, borrower-data-free proof for Homi, document extraction, and
+  // private object storage. A failed capability makes the workflow fail loudly.
+  ["30 11,23 * * *", "core-provider-canaries"],
 ];
 
-const workflow = await readFile(
-  join(__dirname, "../.github/workflows/cron-jobs.yml"),
-  "utf8",
-);
+const [workflow, jobs] = await Promise.all([
+  readFile(join(__dirname, "../.github/workflows/cron-jobs.yml"), "utf8"),
+  readFile(join(__dirname, "../server/routes/jobs.ts"), "utf8"),
+]);
 
 describe("cron-jobs.yml schedules", () => {
   it.each(SCHEDULES)('registers a trigger for "%s" (%s)', (schedule) => {
@@ -60,12 +63,23 @@ describe("cron-jobs.yml schedules", () => {
     ).toBe(true);
   });
 
-  it("schedules exactly these six sweeps and no others", () => {
-    // Catches the reverse drift: a seventh `- cron:` added without a case arm
+  it("schedules exactly these eight sweeps and no others", () => {
+    // Catches the reverse drift: another `- cron:` added without a case arm
     // fires a run that hits the `*)` arm and fails, and a schedule quietly
     // retimed here would otherwise pass every per-entry assertion above.
     const registered = [...workflow.matchAll(/- cron: "([^"]+)"/g)].map((m) => m[1]);
     expect(registered.sort()).toEqual(SCHEDULES.map(([s]) => s).sort());
+  });
+
+  it.each(SCHEDULES)("has a server endpoint for the %s schedule (%s)", (_schedule, job) => {
+    expect(jobs).toContain(`"/api/jobs/${job}"`);
+  });
+
+  it("uses a CSRF-protected POST for the provider canary side effect", () => {
+    expect(jobs).toContain('app.post("/api/jobs/core-provider-canaries"');
+    expect(workflow).toContain('method="POST"');
+    expect(workflow).toContain('-H "Origin: ${SWEEP_HOST}"');
+    expect(workflow).toContain('-X "${METHOD}"');
   });
 
   it("targets the Railway service domain, not a third-party DNS zone", () => {

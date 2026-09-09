@@ -62,7 +62,7 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger and a mortgage regression/attack suite | Production canary and measured reduction in completion time, repeated questions and handoff latency are not recorded | Strong assistant foundation; production usefulness remains unproven |
+| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a scheduled borrower-data-free provider proof and a mortgage regression/attack suite | A successful production canary and measured reduction in completion time, repeated questions and handoff latency are not yet recorded | Strong assistant foundation; production usefulness remains unproven until the live sweep passes and outcomes accumulate |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes | A representative provider-classified 100-page packet, production model canary and controlled production restart are not yet recorded | Strong complex-income logic with one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
@@ -410,6 +410,11 @@ missed escalation or time to a useful human response.
 33. Replaced the large-packet persistence loop's per-page database calls with transactional batch
     writes for pages, classifications, logical documents and page links; repeated 100-page runs
     retained exact counts and boundaries while completing in 6.8–7.2 seconds.
+34. Added one scheduled and manually dispatchable borrower-data-free sweep for Homi, document
+    extraction and private object storage. It runs all three bounded canaries, preserves each
+    redacted result even when a sibling fails, binds rows to the deployed commit and returns a
+    failing HTTP status whenever production proof is incomplete so the scheduler cannot show
+    green for an unhealthy core capability.
 
 ## Sources
 
