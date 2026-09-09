@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `d7bf9f7d876d50bff37bb577a914e68c781a7ded` on 2026-09-08.
+**Audited production baseline:** `8c57107d2575078703d2b79114f2db62410016db` on 2026-09-09.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -47,10 +47,11 @@ lender results never satisfy a verified decision or lender-acceptance gate.
 
 ## What is real today
 
-Production served the exact `main` commit above on 2026-09-08. Health, database-backed article and
-sitemap routes returned successfully, and the service reported SendGrid email configured. The
-repository has a strict required test gate, automatic production migrations and post-deploy commit
-verification.
+Production served the exact `main` commit above on 2026-09-09. Health and the scheduled core-proof
+route returned successfully, and the service reported SendGrid email configured. The repository
+has a strict required test gate, automatic production migrations and post-deploy commit
+verification. Borrower-data-free production canaries passed for Homi, PDF vision and private
+object-storage write/read/delete after a revoked Anthropic credential was detected and replaced.
 
 The internal complex-borrower journey is proven. Fictional multi-business, rental and mixed W-2
 plus side-business borrowers moved through the public application, full URLA, database
@@ -60,19 +61,19 @@ workpaper. Homiquity correctly refuses to present self-reported or simulated evi
 qualifying income, an approval or a lender-ready submission.
 
 No approved wholesale lender, current lender receiver, production credit/AUS/verification suite,
-real lender acceptance or funded Homiquity loan has been proven. Production object-storage
-durability and the complete operating handoff between licensed loan officer, processor,
-underwriter and closer also remain unproven.
+real lender acceptance or funded Homiquity loan has been proven. The private-storage round trip
+does not yet prove survival across a controlled restart, and the complete operating handoff between
+licensed loan officer, processor, underwriter and closer also remains unproven.
 
 ## Core capability map
 
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Built · Proven internally** | Run the production canaries and prove from the new outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
+| Guide the borrower with Homi | **Live · production canary proven** | Prove from journey outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
-| Collect and correct evidence | **Built · Proven internally** | Run production upload → restart → page/box review → correction → download on a pilot file; calibrate accuracy with the protected labeled set. |
-| Review complicated income | **Built · Proven internally** | A licensed reviewer reproduces the mixed-income calculation, approves it from a real client's accepted evidence and reconciles it with the pilot lender. |
+| Collect and correct evidence | **Built · provider and storage round trips proven** | Run production upload → restart → page/box review → correction → download on a pilot file; calibrate accuracy with the protected labeled set. |
+| Review complicated income | **Built · deterministic analysis proven internally** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built · XSD proven internally** | One approved lender accepts the multi-borrower MISMO, income and final AUS artifacts and completes an acknowledgement/correction exchange. |
@@ -84,21 +85,25 @@ underwriter and closer also remain unproven.
    restart recovery and staff-visible failures are built and proven locally for ordinary documents
    and consented multi-form tax packages. Document status, confidence, extracted facts and
    readiness commit atomically, demonstration extraction fails closed in production, and
-   tax-consent cleanup preserves unrelated work, and the canary ledger is built. Execute the
-   canaries and one controlled production interruption/recovery proof.
+   tax-consent cleanup preserves unrelated work. The canary ledger is live and Homi, PDF vision and
+   private-storage round trips pass in production. Complete one controlled production
+   interruption/recovery proof.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
    link logical documents, retain field-level source pages and support field and boundary review.
-   Run a representative 100-page tax packet, populate the protected labeled set and set review
-   thresholds from measured errors before treating extraction as hands-off.
+   A representative 100-page packet completes the local page pipeline inside the current capacity
+   envelope. Populate the protected independently reviewed labeled set and set review thresholds
+   from measured errors before treating extraction as hands-off.
 3. **Prove decision delivery:** underwriting, AUS and pre-approval letters carry input/policy
    fingerprints; stale output is blocked; out-of-scope files take a manual-underwrite path; and the
    multi-borrower MISMO plus final dual-AUS artifact passes the committed XSD. Retain provider-native
-   findings and reproduce the package through the live path before receiver certification.
+   findings and reproduce the package through the live path before receiver certification. The
+   scheduled core proof now checks mixed W-2, Schedule C and rental analysis plus repeatable
+   underwriting against deployed policy rows; it does not replace a live AUS result.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.
-5. **Prove Homi in production:** the mortgage scenario and prompt-attack regression suite is built;
-   record production canaries and change guidance only when journey measures show less borrower or
-   loan-officer effort.
+5. **Prove Homi's value:** production response canaries pass and the mortgage scenario and
+   prompt-attack regression suite is built. Change guidance only when journey measures show less
+   borrower or loan-officer effort.
 
 The dated [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md)
 contains the evidence and acceptance tests. This order is part of Phase 0 and Phase 1; it does not

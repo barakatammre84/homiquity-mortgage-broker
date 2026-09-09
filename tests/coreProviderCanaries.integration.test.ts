@@ -79,7 +79,26 @@ describe.sequential("core provider canary ledger", () => {
     expect(result).toMatchObject({ status: "failure", failureClass: "timeout" });
   });
 
-  it("runs every provider proof and reports a red sweep without hiding healthy capabilities", async () => {
+  it("executes the real mixed-income and underwriting engines with repeatable results", async () => {
+    const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
+    const financial = await runCoreProviderCanary("financial_analysis", userId);
+    const underwriting = await runCoreProviderCanary("underwriting_engine", userId);
+
+    expect(financial).toMatchObject({
+      provider: "Homiquity financial analysis",
+      operation: "mixed_income_repeatability",
+      status: "success",
+      failureClass: null,
+    });
+    expect(underwriting).toMatchObject({
+      provider: "Homiquity policy engine",
+      operation: "synthetic_conventional_repeatability",
+      status: "success",
+      failureClass: null,
+    });
+  });
+
+  it("runs every core proof and reports a red sweep without hiding healthy capabilities", async () => {
     const { runCoreProviderCanarySweep } = await import("../server/services/coreProviderCanaries");
     const calls: string[] = [];
     const result = await runCoreProviderCanarySweep(userId, {
@@ -89,14 +108,22 @@ describe.sequential("core provider canary ledger", () => {
         throw new Error("synthetic provider failure");
       },
       object_storage: async () => { calls.push("object_storage"); },
+      financial_analysis: async () => { calls.push("financial_analysis"); },
+      underwriting_engine: async () => { calls.push("underwriting_engine"); },
     });
 
-    expect(calls.sort()).toEqual(["document_extraction", "homi", "object_storage"]);
-    expect(result).toMatchObject({ total: 3, successful: 2, failed: 1 });
+    expect(calls.sort()).toEqual([
+      "document_extraction",
+      "financial_analysis",
+      "homi",
+      "object_storage",
+      "underwriting_engine",
+    ]);
+    expect(result).toMatchObject({ total: 5, successful: 4, failed: 1 });
     expect(result.results.find((item) => item.capabilityId === "document_extraction")).toMatchObject({
       status: "failure",
       failureClass: "unknown",
     });
-    expect(result.results.filter((item) => item.status === "success")).toHaveLength(2);
+    expect(result.results.filter((item) => item.status === "success")).toHaveLength(4);
   });
 });

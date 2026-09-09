@@ -125,6 +125,14 @@ describe("getCoreCapabilityReport", () => {
           latestAttempt: { status: "success", completedAt: "2026-09-07T11:30:00.000Z", environment: "production", commitSha: "commit-a" },
           lastSuccess: { completedAt: "2026-09-07T11:30:00.000Z", environment: "production", commitSha: "commit-a" },
         },
+        financial_analysis: {
+          latestAttempt: { status: "success", completedAt: "2026-09-09T11:40:00.000Z", environment: "production", commitSha: "commit-a" },
+          lastSuccess: { completedAt: "2026-09-09T11:40:00.000Z", environment: "production", commitSha: "commit-a" },
+        },
+        underwriting_engine: {
+          latestAttempt: { status: "success", completedAt: "2026-09-09T11:41:00.000Z", environment: "production", commitSha: "commit-a" },
+          lastSuccess: { completedAt: "2026-09-09T11:41:00.000Z", environment: "production", commitSha: "commit-a" },
+        },
       },
     );
 
@@ -139,7 +147,8 @@ describe("getCoreCapabilityReport", () => {
     });
     expect(capability(report, "object_storage").verificationState).toBe("stale");
     expect(capability(report, "plaid_verification").verificationState).toBe("not_recorded");
-    expect(capability(report, "underwriting_engine").verificationState).toBe("not_required");
+    expect(capability(report, "financial_analysis").verificationState).toBe("current");
+    expect(capability(report, "underwriting_engine").verificationState).toBe("current");
   });
 
   it("does not reuse a canary from another environment or production build", () => {
