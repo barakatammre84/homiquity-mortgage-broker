@@ -81,12 +81,14 @@ function WorkpaperCard({
   reason,
   setReason,
   onSaved,
+  onOpenEvidence,
 }: {
   applicationId: string;
   workpaper: FinancialWorkpaperView;
   reason: string;
   setReason: (reason: string) => void;
   onSaved: () => void;
+  onOpenEvidence: (documentId: string, pageNumber?: number) => void;
 }) {
   const { toast } = useToast();
   const review = useMutation({
@@ -136,9 +138,17 @@ function WorkpaperCard({
         <div className="space-y-1 text-sm">
           <p className="font-medium">Evidence used</p>
           {workpaper.sources.length ? workpaper.sources.map(source => (
-            <p key={source.documentId} className="text-muted-foreground">
-              {source.documentName} · v{source.versionNumber}{source.pages.length ? ` · page ${source.pages.join(", ")}` : ""}
-            </p>
+            <Button
+              key={source.documentId}
+              type="button"
+              variant="link"
+              size="sm"
+              className="touch-target h-auto justify-start whitespace-normal p-0 text-left font-normal text-muted-foreground"
+              onClick={() => onOpenEvidence(source.documentId, source.pages[0])}
+              data-testid={`open-workpaper-source-${source.documentId}`}
+            >
+              {source.documentName} · v{source.versionNumber}{source.pages.length ? ` · page ${source.pages.join(", ")}` : ""} · Open source
+            </Button>
           )) : <p className="text-muted-foreground">No accepted source evidence is linked yet.</p>}
         </div>
         {workpaper.review ? (
@@ -177,12 +187,14 @@ function MemoCard({
   reason,
   setReason,
   onSaved,
+  onOpenEvidence,
 }: {
   applicationId: string;
   memo: CreditMemoView;
   reason: string;
   setReason: (reason: string) => void;
   onSaved: () => void;
+  onOpenEvidence: (documentId: string, pageNumber?: number) => void;
 }) {
   const { toast } = useToast();
   const review = useMutation({
@@ -216,7 +228,22 @@ function MemoCard({
         <div className="rounded-md border p-3 text-sm">
           <p className="font-medium">Reference index</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-            {memo.references.map(reference => <li key={`${reference.type}:${reference.id}`}>{reference.label}</li>)}
+            {memo.references.map(reference => (
+              <li key={`${reference.type}:${reference.id}`}>
+                {reference.type === "document" ? (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="touch-target h-auto justify-start whitespace-normal p-0 text-left font-normal text-muted-foreground"
+                    onClick={() => onOpenEvidence(reference.id, reference.pageNumber)}
+                    data-testid={`open-memo-source-${reference.id}`}
+                  >
+                    {reference.label} · Open source
+                  </Button>
+                ) : reference.label}
+              </li>
+            ))}
           </ul>
         </div>
         {memo.review ? (
@@ -240,12 +267,14 @@ function MemoCard({
 export function FinancialReviewTab({
   applicationId,
   onNavigate,
+  onOpenEvidence,
   incomeVerified = false,
   assetsVerified = false,
   canVerify = true,
 }: {
   applicationId: string;
   onNavigate: (tab: string) => void;
+  onOpenEvidence: (documentId: string, pageNumber?: number) => void;
   incomeVerified?: boolean;
   assetsVerified?: boolean;
   canVerify?: boolean;
@@ -341,6 +370,7 @@ export function FinancialReviewTab({
           reason={reasons[workpaper.key] ?? ""}
           setReason={reason => setReasons(current => ({ ...current, [workpaper.key]: reason }))}
           onSaved={refresh}
+          onOpenEvidence={onOpenEvidence}
         />
       ))}
 
@@ -363,6 +393,7 @@ export function FinancialReviewTab({
           reason={reasons.memo ?? ""}
           setReason={reason => setReasons(current => ({ ...current, memo: reason }))}
           onSaved={refresh}
+          onOpenEvidence={onOpenEvidence}
         />
       )}
 

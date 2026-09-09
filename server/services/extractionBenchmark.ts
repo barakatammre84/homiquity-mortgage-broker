@@ -35,15 +35,44 @@ export interface ExtractionBenchmarkDataset {
   datasetId: string;
   version: string;
   kind: "synthetic" | "production_redacted";
+  /**
+   * A digest of the private source manifest, never the source documents. It
+   * binds labels and predictions to one immutable evaluation population.
+   */
+  labeling?: {
+    protocolVersion: string;
+    reviewerCount: number;
+    independentlyReviewed: boolean;
+    adjudicated: boolean;
+    manifestSha256: string;
+  };
+  /** The exact segments a published accuracy statement is allowed to name. */
+  claimScope?: {
+    documentTypes: string[];
+    situationTags: string[];
+  };
+  /** Quality targets approved before a run is scored. */
+  acceptanceThresholds?: ExtractionBenchmarkAcceptanceThresholds;
   cases: ExtractionBenchmarkCase[];
 }
 
 export interface ExtractionBenchmarkPredictions {
   datasetId: string;
   datasetVersion: string;
+  datasetManifestSha256?: string;
   modelId: string;
   promptVersion: string;
   cases: ExtractionBenchmarkCase[];
+}
+
+export interface ExtractionBenchmarkAcceptanceThresholds {
+  valuePrecision: number;
+  valueRecall: number;
+  pageAttributionAccuracy: number;
+  documentTypeAccuracy: number;
+  boundaryPrecision: number;
+  boundaryRecall: number;
+  businessWeightedFieldAccuracy: number;
 }
 
 export interface ExtractionBenchmarkMetrics {
@@ -75,12 +104,31 @@ export interface ExtractionBenchmarkReport {
   datasetKind: ExtractionBenchmarkDataset["kind"];
   modelId: string;
   promptVersion: string;
+  evidenceEligibleForProductionClaim: boolean;
+  meetsAcceptanceThresholds: boolean;
   eligibleForProductionClaim: boolean;
+  claimScope: {
+    documentTypes: string[];
+    situationTags: string[];
+  };
+  thresholdFailures: string[];
   claimBlockers: string[];
   overall: ExtractionBenchmarkMetrics;
   byDocumentType: Record<string, ExtractionBenchmarkMetrics>;
   bySituationTag: Record<string, ExtractionBenchmarkMetrics>;
 }
+
+const MINIMUM_HUMAN_LABELED_CASES = 30;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+const THRESHOLD_METRICS = [
+  "valuePrecision",
+  "valueRecall",
+  "pageAttributionAccuracy",
+  "documentTypeAccuracy",
+  "boundaryPrecision",
+  "boundaryRecall",
+  "businessWeightedFieldAccuracy",
+] as const satisfies ReadonlyArray<keyof ExtractionBenchmarkAcceptanceThresholds>;
 
 interface ScoreAccumulator {
   cases: number;
@@ -223,6 +271,35 @@ function metrics(score: ScoreAccumulator): ExtractionBenchmarkMetrics {
   };
 }
 
+function normalizedScope(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function validateThresholds(
+  thresholds: ExtractionBenchmarkAcceptanceThresholds | undefined,
+): void {
+  if (!thresholds) return;
+  for (const metric of THRESHOLD_METRICS) {
+    const value = thresholds[metric];
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`Benchmark acceptance threshold ${metric} must be between 0 and 1`);
+    }
+  }
+}
+
+function thresholdFailuresFor(
+  label: string,
+  actual: ExtractionBenchmarkMetrics,
+  thresholds: ExtractionBenchmarkAcceptanceThresholds,
+): string[] {
+  return THRESHOLD_METRICS.flatMap((metric) =>
+    actual[metric] < thresholds[metric]
+      ? [`${label} ${metric} ${actual[metric].toFixed(4)} is below ${thresholds[metric].toFixed(4)}.`]
+      : [],
+  );
+}
+
 export function scoreExtractionBenchmark(
   dataset: ExtractionBenchmarkDataset,
   predictions: ExtractionBenchmarkPredictions,
@@ -232,6 +309,14 @@ export function scoreExtractionBenchmark(
   }
   if (!dataset.datasetId?.trim() || !dataset.version?.trim() || !predictions.modelId?.trim() || !predictions.promptVersion?.trim()) {
     throw new Error("Benchmark identity, version, model and prompt are required");
+  }
+  validateThresholds(dataset.acceptanceThresholds);
+  if (
+    dataset.labeling?.manifestSha256 &&
+    predictions.datasetManifestSha256 &&
+    dataset.labeling.manifestSha256 !== predictions.datasetManifestSha256
+  ) {
+    throw new Error("Predictions do not match the benchmark dataset manifest");
   }
   dataset.cases.forEach((item) => validateCase(item, `Benchmark case ${item.caseId || "(blank)"}`));
   predictions.cases.forEach((item) => validateCase(item, `Prediction case ${item.caseId || "(blank)"}`));
@@ -259,16 +344,81 @@ export function scoreExtractionBenchmark(
     }
   }
 
-  const claimBlockers: string[] = [];
+  const scoredOverall = metrics(overall);
+  const scoredByDocumentType = Object.fromEntries(
+    [...byDocumentType].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, metrics(value)]),
+  );
+  const scoredBySituationTag = Object.fromEntries(
+    [...bySituationTag].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, metrics(value)]),
+  );
+  const claimScope = {
+    documentTypes: normalizedScope(dataset.claimScope?.documentTypes),
+    situationTags: normalizedScope(dataset.claimScope?.situationTags),
+  };
+  const evidenceBlockers: string[] = [];
   if (dataset.kind !== "production_redacted") {
-    claimBlockers.push("The dataset is synthetic; it cannot support a production accuracy claim.");
+    evidenceBlockers.push("The dataset is synthetic; it cannot support a production accuracy claim.");
   }
-  const underrepresented = [...byDocumentType.entries()]
-    .filter(([, value]) => value.cases < 30)
-    .map(([type, value]) => `${type} (${value.cases}/30)`);
-  if (underrepresented.length > 0) {
-    claimBlockers.push(`Document types need at least 30 human-labeled cases: ${underrepresented.join(", ")}.`);
+  const labeling = dataset.labeling;
+  if (
+    typeof labeling?.protocolVersion !== "string" ||
+    !labeling.protocolVersion.trim() ||
+    !Number.isInteger(labeling.reviewerCount) ||
+    labeling.reviewerCount < 2 ||
+    !labeling.independentlyReviewed ||
+    !labeling.adjudicated ||
+    typeof labeling.manifestSha256 !== "string" ||
+    !SHA256_PATTERN.test(labeling.manifestSha256)
+  ) {
+    evidenceBlockers.push(
+      "Labels need a versioned protocol, two independent reviewers, adjudication, and a valid private-manifest SHA-256.",
+    );
   }
+  if (labeling?.manifestSha256 && predictions.datasetManifestSha256 !== labeling.manifestSha256) {
+    evidenceBlockers.push("Predictions are not bound to the labeled dataset manifest SHA-256.");
+  }
+  if (claimScope.documentTypes.length === 0) {
+    evidenceBlockers.push("The production claim must name at least one document type.");
+  }
+  if (claimScope.situationTags.length === 0) {
+    evidenceBlockers.push("A complex-borrower claim must name at least one situation tag.");
+  }
+  const underrepresentedDocuments = claimScope.documentTypes
+    .map((type) => [type, scoredByDocumentType[type]?.cases ?? 0] as const)
+    .filter(([, count]) => count < MINIMUM_HUMAN_LABELED_CASES)
+    .map(([type, count]) => `${type} (${count}/${MINIMUM_HUMAN_LABELED_CASES})`);
+  if (underrepresentedDocuments.length > 0) {
+    evidenceBlockers.push(
+      `Claimed document types need at least 30 human-labeled cases: ${underrepresentedDocuments.join(", ")}.`,
+    );
+  }
+  const underrepresentedSituations = claimScope.situationTags
+    .map((tag) => [tag, scoredBySituationTag[tag]?.cases ?? 0] as const)
+    .filter(([, count]) => count < MINIMUM_HUMAN_LABELED_CASES)
+    .map(([tag, count]) => `${tag} (${count}/${MINIMUM_HUMAN_LABELED_CASES})`);
+  if (underrepresentedSituations.length > 0) {
+    evidenceBlockers.push(
+      `Claimed complex situations need at least 30 human-labeled cases: ${underrepresentedSituations.join(", ")}.`,
+    );
+  }
+
+  const thresholdFailures: string[] = [];
+  if (!dataset.acceptanceThresholds) {
+    thresholdFailures.push("Pre-approved acceptance thresholds are required before scoring a production claim.");
+  } else {
+    thresholdFailures.push(...thresholdFailuresFor("Overall", scoredOverall, dataset.acceptanceThresholds));
+    for (const type of claimScope.documentTypes) {
+      const segment = scoredByDocumentType[type];
+      if (segment) thresholdFailures.push(...thresholdFailuresFor(`Document type ${type}`, segment, dataset.acceptanceThresholds));
+    }
+    for (const tag of claimScope.situationTags) {
+      const segment = scoredBySituationTag[tag];
+      if (segment) thresholdFailures.push(...thresholdFailuresFor(`Situation ${tag}`, segment, dataset.acceptanceThresholds));
+    }
+  }
+  const evidenceEligibleForProductionClaim = evidenceBlockers.length === 0;
+  const meetsAcceptanceThresholds = Boolean(dataset.acceptanceThresholds) && thresholdFailures.length === 0;
+  const claimBlockers = [...evidenceBlockers, ...thresholdFailures];
 
   return {
     datasetId: dataset.datasetId,
@@ -276,10 +426,14 @@ export function scoreExtractionBenchmark(
     datasetKind: dataset.kind,
     modelId: predictions.modelId,
     promptVersion: predictions.promptVersion,
-    eligibleForProductionClaim: claimBlockers.length === 0,
+    evidenceEligibleForProductionClaim,
+    meetsAcceptanceThresholds,
+    eligibleForProductionClaim: evidenceEligibleForProductionClaim && meetsAcceptanceThresholds,
+    claimScope,
+    thresholdFailures,
     claimBlockers,
-    overall: metrics(overall),
-    byDocumentType: Object.fromEntries([...byDocumentType].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, metrics(value)])),
-    bySituationTag: Object.fromEntries([...bySituationTag].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, metrics(value)])),
+    overall: scoredOverall,
+    byDocumentType: scoredByDocumentType,
+    bySituationTag: scoredBySituationTag,
   };
 }

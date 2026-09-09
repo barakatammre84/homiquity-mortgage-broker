@@ -682,7 +682,12 @@ function buildMemo(application: LoanApplication, workpapers: FinancialWorkpaperV
     for (const source of workpaper.sources) {
       const documentKey = `document:${source.documentId}`;
       if (!references.some(reference => `${reference.type}:${reference.id}` === documentKey)) {
-        references.push({ type: "document", id: source.documentId, label: `${source.documentName} · v${source.versionNumber}${source.pages.length ? ` · p. ${source.pages.join(", ")}` : ""}` });
+        references.push({
+          type: "document",
+          id: source.documentId,
+          label: `${source.documentName} · v${source.versionNumber}${source.pages.length ? ` · p. ${source.pages.join(", ")}` : ""}`,
+          pageNumber: source.pages[0],
+        });
       }
       for (const factId of source.verifiedFactIds) {
         const factKey = `verified_fact:${factId}`;
