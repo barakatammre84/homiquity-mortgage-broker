@@ -7,6 +7,7 @@ import {
   type FieldVerificationStatus,
 } from "@shared/schema";
 import { eq, and, sql, gte, desc } from "drizzle-orm";
+import type { DatabaseTransaction } from "./documentLineage";
 
 export async function trackIntent(
   eventType: IntentEventType,
@@ -233,8 +234,12 @@ const READINESS_FIELDS: Array<{
   { category: "consent", fieldName: "econsent", fieldLabel: "Electronic consent", isRequired: true, weight: 0.5 },
 ];
 
-export async function initializeReadinessChecklist(userId: string, applicationId?: string): Promise<void> {
-  const existing = await db.select({ id: readinessChecklist.id })
+export async function initializeReadinessChecklist(
+  userId: string,
+  applicationId?: string,
+  transaction: DatabaseTransaction | typeof db = db,
+): Promise<void> {
+  const existing = await transaction.select({ id: readinessChecklist.id })
     .from(readinessChecklist)
     .where(eq(readinessChecklist.userId, userId))
     .limit(1);
@@ -242,7 +247,7 @@ export async function initializeReadinessChecklist(userId: string, applicationId
   if (existing.length > 0) return;
 
   for (const field of READINESS_FIELDS) {
-    await db.insert(readinessChecklist).values({
+    await transaction.insert(readinessChecklist).values({
       userId,
       applicationId: applicationId || null,
       category: field.category,
@@ -280,7 +285,8 @@ export async function updateReadinessField(
     sourceField?: string;
     sourceRecordId?: string;
     expiresAt?: Date;
-  }
+  },
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<void> {
   const tierMap: Record<FieldVerificationStatus, string> = {
     not_collected: "",
@@ -300,7 +306,7 @@ export async function updateReadinessField(
 
   const newTier = tierMap[options.verificationStatus] || "";
 
-  const [existing] = await db.select({
+  const [existing] = await transaction.select({
     trustTier: readinessChecklist.trustTier,
     verificationStatus: readinessChecklist.verificationStatus,
   })
@@ -319,7 +325,7 @@ export async function updateReadinessField(
     }
   }
 
-  await db.update(readinessChecklist)
+  await transaction.update(readinessChecklist)
     .set({
       isCollected: options.verificationStatus !== "not_collected",
       verificationStatus: options.verificationStatus,

@@ -5,6 +5,7 @@ const workflowGate = vi.hoisted(() => ({
   status: "uploaded" as string,
   isCurrentVersion: true,
 }));
+const workflowTransaction = { id: "shared-document-transaction" } as any;
 
 // ---------------------------------------------------------------------------
 // The borrower's own upload must persist what the model read — not just the
@@ -15,9 +16,9 @@ const workflowGate = vi.hoisted(() => ({
 //   A. POST /api/documents/:id/extract   — pressed by STAFF in the review
 //      workbench (client/src/components/staff/DocumentReviewPanel.tsx is its
 //      only caller).
-//   B. the fire-and-forget auto-extraction inside POST /api/documents/upload  —
-//      the path that runs when a BORROWER uploads a pay stub, bank statement
-//      or lease. Nothing in the borrower UI triggers (A).
+//   B. the durable extraction job inserted by POST /api/documents/upload — the
+//      path that runs when a BORROWER uploads a pay stub, bank statement or
+//      lease. Nothing in the borrower UI triggers (A).
 //
 // F-028 (`server/services/documentFacts.ts`) and F-030 (`wireExtractionToReadiness`)
 // were both wired into (A) and never into (B) — even though F-028's own docblock
@@ -30,10 +31,9 @@ const workflowGate = vi.hoisted(() => ({
 // as the #451 co-borrower fix that covered slot 1 only: the fix landed on one
 // caller of a two-caller behaviour.
 //
-// These tests drive the REAL upload route (same hermetic express-on-an-ephemeral-
-// port harness as tests/documentUploadTerminalGuard.test.ts) with a stubbed
-// extractor, and assert the borrower path persists facts, wires readiness, and
-// records model/prompt lineage exactly as the staff path does.
+// These tests drive the real upload route to prove the job is registered with
+// the document, then drive shared persistence to prove the claimed job keeps
+// facts, readiness and lineage under the human-review boundary.
 // ---------------------------------------------------------------------------
 
 vi.mock("../server/integrations/object_storage/objectStorage", () => ({
@@ -56,10 +56,11 @@ vi.mock("../server/services/documentLineage", async (importOriginal) => {
     ...actual,
     withDocumentWorkflowLock: async (
       _documentId: string,
-      run: (document: any, isCurrentVersion: boolean) => Promise<any>,
+      run: (document: any, isCurrentVersion: boolean, transaction: any) => Promise<any>,
     ) => run(
       { id: _documentId, status: workflowGate.status },
       workflowGate.isCurrentVersion,
+      workflowTransaction,
     ),
   };
 });
@@ -96,6 +97,10 @@ const PAY_STUB = {
   rawResponseEncrypted: "ciphertext",
   rawResponseIv: "iv",
   rawResponseKeyId: "key-1",
+  documentClassification: {
+    pageCount: 1,
+    pages: [{ pageNumber: 1, documentType: "paystub" as const, confidence: 0.98 }],
+  },
 };
 
 vi.mock("../server/extractionService", () => ({
@@ -112,15 +117,17 @@ vi.mock("../server/extractionService", () => ({
 // Coarse confidence bookkeeping is its own unit (tests/documentConfidence.test.ts);
 // here it only has to answer "does this need a human?".
 vi.mock("../server/services/documentConfidence", () => ({
-  recordCoarseExtraction: vi.fn(async ({ confidence }: { confidence: string }) => ({
-    humanReviewRequired: confidence === "low",
+  recordExtractionConfidence: vi.fn(async ({ overallConfidence }: { overallConfidence: number }) => ({
+    humanReviewRequired: overallConfidence < 0.8,
   })),
   coarseConfidenceToNumeric: (c: string) => (c === "high" ? 0.95 : c === "medium" ? 0.7 : 0.3),
 }));
 
 const persistDocumentFacts = vi.fn(async () => 2);
+const clearUnverifiedDocumentFacts = vi.fn(async () => undefined);
 vi.mock("../server/services/documentFacts", () => ({
   persistDocumentFacts: (...args: any[]) => persistDocumentFacts(...(args as [])),
+  clearUnverifiedDocumentFacts: (...args: any[]) => clearUnverifiedDocumentFacts(...(args as [])),
 }));
 
 const wireExtractionToReadiness = vi.fn(async () => ({ fieldsUpdated: ["monthly_income"] }));
@@ -132,9 +139,11 @@ vi.mock("../server/services/optimizationEngine", () => ({
 const h = {
   createdDocuments: [] as any[],
   updates: [] as Array<{ id: string; patch: any }>,
+  registrations: [] as any[],
   reset() {
     this.createdDocuments = [];
     this.updates = [];
+    this.registrations = [];
   },
 };
 
@@ -155,66 +164,18 @@ const storageStub = {
   getLoanApplication: async () => undefined,
 } as any;
 
-const registerDocumentVersion = async ({ document: input }: any) => ({
-  document: await storageStub.createDocument(input),
-  lineage: input.applicationId ? { documentId: `doc-${h.createdDocuments.length}` } : null,
-});
+const registerDocumentVersion = async (input: any) => {
+  h.registrations.push(input);
+  const document = await storageStub.createDocument(input.document);
+  return {
+    document,
+    lineage: input.document.applicationId ? { documentId: document.id } : null,
+  };
+};
 
-// ---------------------------------------------------------------------------
-// SYNCHRONISING ON A FIRE-AND-FORGET SIDE EFFECT
-//
-// The route answers 201 as soon as the document ROW exists; extraction runs
-// unawaited after that ("the record is created either way; extraction enriches
-// it in the background"). So `await fetch(...)` is a barrier for the response
-// and for nothing else.
-//
-// Nor do the extraction's side effects land together. `applyExtractionToDocument`
-// writes the document FIRST, and calls `persistDocumentFacts` and
-// `wireExtractionToReadiness` after it, each behind a dynamic import. Waiting on
-// `h.updates` therefore released the test at step 1 of 3 — and under parallel
-// load the later steps had not run yet (0 calls), then landed inside the NEXT
-// test, which counted them as its own (2 calls). One race, seen from both ends.
-//
-// So: wait for the side effect the assertion is actually about, and let every
-// test wait for the WHOLE extraction to settle before it ends — a straggler
-// that outlives its test is exactly what leaks into the next one. Never a fixed
-// sleep, and never a raised call count: both only move the flake.
-// ---------------------------------------------------------------------------
+const dispatchQueuedExtraction = vi.fn();
 
-/**
- * Polls until nothing is outstanding. On timeout it throws naming what never
- * arrived, so a real regression reads as the missing side effect rather than as
- * a bare "expected 1 call, got 0" a page away from its cause.
- */
-async function waitFor(pending: () => string[], timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const outstanding = pending();
-    if (outstanding.length === 0) return;
-    if (Date.now() > deadline) {
-      throw new Error(`extraction never settled within ${timeoutMs}ms — still missing: ${outstanding.join(", ")}`);
-    }
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
-
-/** Every side effect of a high-confidence read has landed. */
-const settleExtraction = () =>
-  waitFor(() => [
-    ...(h.updates.length > 0 ? [] : ["the document update"]),
-    ...(persistDocumentFacts.mock.calls.length > 0 ? [] : ["persistDocumentFacts (F-028)"]),
-    ...(wireExtractionToReadiness.mock.calls.length > 0 ? [] : ["wireExtractionToReadiness (F-030)"]),
-  ]);
-
-/**
- * A low-confidence read returns immediately after recording itself on the
- * document, so that update IS its last side effect — there is no later call to
- * wait for, which is the very thing the test then asserts.
- */
-const settleLowConfidenceExtraction = () =>
-  waitFor(() => (h.updates.length > 0 ? [] : ["the low-confidence read being recorded on the document"]));
-
-describe("POST /api/documents/upload — the borrower's upload keeps what the model read", () => {
+describe("durable borrower document extraction", () => {
   let server: import("node:http").Server;
   let base: string;
 
@@ -228,7 +189,10 @@ describe("POST /api/documents/upload — the borrower's upload keeps what the mo
       (req as any).user = { id: "borrower-1", role: "borrower" };
       next();
     });
-    registerDocumentRoutes(app, storageStub, { registerDocumentVersion });
+    registerDocumentRoutes(app, storageStub, {
+      registerDocumentVersion,
+      dispatchQueuedExtraction,
+    });
 
     server = app.listen(0);
     const { port } = server.address() as AddressInfo;
@@ -244,7 +208,9 @@ describe("POST /api/documents/upload — the borrower's upload keeps what the mo
     workflowGate.status = "uploaded";
     workflowGate.isCurrentVersion = true;
     persistDocumentFacts.mockClear();
+    clearUnverifiedDocumentFacts.mockClear();
     wireExtractionToReadiness.mockClear();
+    dispatchQueuedExtraction.mockClear();
   });
 
   const upload = (body: Record<string, unknown> = {}) =>
@@ -261,82 +227,119 @@ describe("POST /api/documents/upload — the borrower's upload keeps what the mo
       }),
     });
 
-  it("persists the extracted VALUES, not just the field names", async () => {
-    const res = await upload();
+  it.each(["pay_stub", "bank_statement", "lease_agreement"])(
+    "atomically registers a durable standard job for %s",
+    async (documentType) => {
+      const res = await upload({ documentType });
+      expect(res.status).toBe(201);
+      expect(h.registrations).toHaveLength(1);
+      expect(h.registrations[0].extractionJob).toEqual({
+        mode: "standard",
+        requestedByUserId: "borrower-1",
+      });
+      expect(dispatchQueuedExtraction).toHaveBeenCalledTimes(1);
+      expect(h.updates).toEqual([]);
+    },
+  );
+
+  it("does not create paid extraction work for an unsupported type", async () => {
+    const res = await upload({ documentType: "government_id" });
     expect(res.status).toBe(201);
-    await settleExtraction();
+    expect(h.registrations[0].extractionJob).toBeUndefined();
+    expect(dispatchQueuedExtraction).not.toHaveBeenCalled();
+  });
 
-    expect(
-      persistDocumentFacts,
-      "the borrower's pay stub was extracted and the values discarded — the F-028 gap, on the only path a borrower can reach",
-    ).toHaveBeenCalledTimes(1);
+  it("persists extracted values, readiness, lineage, and a human-review status together", async () => {
+    const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
+    const result = await applyExtractionToDocument({
+      storage: storageStub,
+      userId: "borrower-1",
+      documentId: "queued-doc",
+      documentType: "pay_stub",
+      applicationId: "app-1",
+      extracted: PAY_STUB,
+    });
 
+    expect(result.skipReason).toBeNull();
+    expect(persistDocumentFacts).toHaveBeenCalledTimes(1);
     const [documentId, documentType, extracted, confidence] = persistDocumentFacts.mock.calls[0] as any[];
-    expect(documentId).toBe(h.createdDocuments[0].id);
+    expect(documentId).toBe("queued-doc");
     expect(documentType).toBe("pay_stub");
-    // The extraction RESULT, never `extractedFields` (a string[] of NAMES) —
-    // handing the names to a value-reading map is what hid F-030.
     expect(extracted.ytdGross).toBe(50_400);
     expect(confidence).toBe("high");
-  });
-
-  it("credits the readiness fields the values support", async () => {
-    await upload();
-    await settleExtraction();
-
-    expect(
-      wireExtractionToReadiness,
-      "readiness never saw the borrower's upload — F-030 was wired to the staff route only",
-    ).toHaveBeenCalledTimes(1);
-    const [, , documentType, extracted] = wireExtractionToReadiness.mock.calls[0] as any[];
-    expect(documentType).toBe("pay_stub");
-    expect(extracted.ytdGross).toBe(50_400);
-  });
-
-  it("records model and prompt lineage on the document, as the staff path does", async () => {
-    await upload();
-    await settleExtraction();
+    expect(wireExtractionToReadiness).toHaveBeenCalledTimes(1);
+    expect(persistDocumentFacts.mock.calls[0]?.[5]).toBe(workflowTransaction);
+    expect(wireExtractionToReadiness.mock.calls[0]?.[5]).toBe(workflowTransaction);
 
     expect(h.updates).toHaveLength(1);
     const { patch } = h.updates[0];
-
-    // WORKFLOWS.md §4 step 3: "structured fields persisted with model + prompt
-    // lineage; sensitive extracted values encrypted."
     expect(patch.extractionResponseHash).toBe("sha256:deadbeef");
     expect(patch.extractionRawEncrypted).toBe("ciphertext");
     expect(patch.extractionRawIv).toBe("iv");
     expect(patch.extractionRawKeyId).toBe("key-1");
-
     const notes = JSON.parse(patch.notes);
     expect(notes.modelId).toBe("claude-sonnet-5");
     expect(notes.promptVersion).toBe("pay_stub/v3");
     expect(notes.responseHash).toBe("sha256:deadbeef");
-  });
-
-  it("still refuses to self-verify: extraction stages, a human disposes (MR-2)", async () => {
-    await upload();
-    await settleExtraction();
-
-    // humanReviewRequired=false is the *clear* case, and even then the highest
-    // status extraction may reach is "verifying".
-    expect(h.updates[0].patch.status).toBe("verifying");
+    expect(patch.status).toBe("verifying");
   });
 
   it("a low-confidence read persists no facts — a guess is not a fact", async () => {
-    const svc = await import("../server/extractionService");
-    (svc.extractPayStubData as any).mockResolvedValueOnce({
-      confidence: "low",
-      extractedFields: [],
-      warnings: ["Failed to extract data from pay stub"],
+    const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
+    await applyExtractionToDocument({
+      storage: storageStub,
+      userId: "borrower-1",
+      documentId: "low-confidence-doc",
+      documentType: "pay_stub",
+      applicationId: "app-1",
+      extracted: {
+        confidence: "low",
+        extractedFields: [],
+        warnings: ["Values need manual confirmation"],
+      },
     });
-
-    await upload();
-    await settleLowConfidenceExtraction();
 
     expect(persistDocumentFacts).not.toHaveBeenCalled();
     expect(wireExtractionToReadiness).not.toHaveBeenCalled();
-    // The document is still updated — the failed read is recorded, not silently dropped.
     expect(h.updates).toHaveLength(1);
+    expect(h.updates[0].patch.status).toBe("uploaded");
+  });
+
+  it("withholds values when the uploaded pages do not match the selected type", async () => {
+    const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
+    const result = await applyExtractionToDocument({
+      storage: storageStub,
+      userId: "borrower-1",
+      documentId: "mislabeled-doc",
+      documentType: "pay_stub",
+      applicationId: "app-1",
+      extracted: {
+        ...PAY_STUB,
+        documentClassification: {
+          pageCount: 2,
+          pages: [
+            { pageNumber: 1, documentType: "paystub" as const, confidence: 0.98 },
+            { pageNumber: 2, documentType: "w2" as const, confidence: 0.97 },
+          ],
+        },
+        pageCount: 2,
+      },
+    });
+
+    expect(result.classificationBlocked).toBe(true);
+    expect(result.factsPersisted).toBe(0);
+    expect(persistDocumentFacts).not.toHaveBeenCalled();
+    expect(wireExtractionToReadiness).not.toHaveBeenCalled();
+    expect(clearUnverifiedDocumentFacts).toHaveBeenCalledWith(
+      "mislabeled-doc",
+      workflowTransaction,
+    );
+    const notes = JSON.parse(h.updates[0].patch.notes);
+    expect(notes.documentClassification).toMatchObject({
+      compatible: false,
+      mixedPacket: true,
+    });
+    expect(notes.warnings.join(" ")).toMatch(/multiple document types/i);
     expect(h.updates[0].patch.status).toBe("uploaded");
   });
 

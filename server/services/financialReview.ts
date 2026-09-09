@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import {
   auditLogs,
@@ -447,7 +447,7 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
     ? (await assertDocumentLineageAccess(tx, applicationId, actor)).application
     : (await tx.select().from(loanApplications).where(eq(loanApplications.id, applicationId)).limit(1))[0];
   if (!application) throw new FinancialReviewError("Application not found", 404);
-  const [allDocuments, lineageRows, employment, otherIncome, assets, liabilities, latestBankStatements, propertyRows, businesses] = await Promise.all([
+  const [allDocuments, lineageRows, employment, otherIncome, assets, liabilities, latestBankStatements, propertyRows] = await Promise.all([
     tx.select().from(documents).where(eq(documents.applicationId, applicationId)),
     tx.select().from(documentLineage).where(eq(documentLineage.applicationId, applicationId)),
     tx.select().from(employmentHistory).where(eq(employmentHistory.applicationId, applicationId)).orderBy(desc(employmentHistory.createdAt), asc(employmentHistory.id)),
@@ -456,7 +456,6 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
     tx.select().from(urlaLiabilities).where(eq(urlaLiabilities.applicationId, applicationId)).orderBy(desc(urlaLiabilities.createdAt), asc(urlaLiabilities.id)),
     tx.select().from(bankStatementAnalyses).where(eq(bankStatementAnalyses.applicationId, applicationId)).orderBy(desc(bankStatementAnalyses.createdAt), desc(bankStatementAnalyses.id)).limit(1),
     tx.select().from(urlaPropertyInfo).where(eq(urlaPropertyInfo.applicationId, applicationId)).orderBy(desc(urlaPropertyInfo.createdAt), desc(urlaPropertyInfo.id)).limit(1),
-    tx.select().from(borrowerBusinessEntities).where(eq(borrowerBusinessEntities.applicationId, applicationId)),
   ]);
   const groups = currentDocumentVersions(allDocuments, lineageRows);
   const currentDocuments = groups.map(group => group.current.document);
@@ -465,8 +464,24 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
   const forms = currentIds.length ? await tx.select().from(logicalDocuments).where(and(
     or(eq(logicalDocuments.loanId, applicationId), and(isNull(logicalDocuments.loanId), sourceScope)),
     or(isNull(logicalDocuments.sourceDocumentId), sourceScope),
+    ne(logicalDocuments.status, "revoked"),
   )) : [];
   const formIds = forms.map(form => form.id);
+  // A current business-scoped upload remains valid evidence even before a tax
+  // package has produced logical forms. Union those lineage subjects with the
+  // resolved form entities; both sources are already limited to this
+  // application's current document versions above.
+  const businessEntityIds = [...new Set([
+    ...forms.flatMap(form => form.businessEntityId ? [form.businessEntityId] : []),
+    ...groups.flatMap(group =>
+      group.current.lineage?.subjectType === "business" && group.current.lineage.subjectId
+        ? [group.current.lineage.subjectId]
+        : []
+    ),
+  ])];
+  const businesses = businessEntityIds.length
+    ? await tx.select().from(borrowerBusinessEntities).where(inArray(borrowerBusinessEntities.id, businessEntityIds))
+    : [];
   const documentScope = currentIds.length ? inArray(extractedFields.documentId, currentIds) : undefined;
   const formScope = formIds.length ? inArray(extractedFields.logicalDocumentId, formIds) : undefined;
   const facts = currentIds.length || formIds.length ? await tx.select().from(extractedFields).where(and(

@@ -11,6 +11,7 @@ import rateLimit from "express-rate-limit";
 import compression from "compression";
 
 import { registerRoutes } from "./routes";
+import { startDocumentExtractionWorker } from "./services/documentExtractionJobs";
 import { pool } from "./db";
 import { betaGateMiddleware } from "./middleware/betaGate";
 import { trustProxyHops } from "./trustProxy";
@@ -658,6 +659,7 @@ export default async function runApp(
   server.listen({ port, host: "0.0.0.0" }, () => {
     log(`serving on port ${port}`);
   });
+  const documentExtractionWorker = startDocumentExtractionWorker();
 
   // Graceful drain on the platform's stop signal (deploy replace, restart,
   // scale-down): stop accepting, let in-flight requests finish, release the
@@ -669,6 +671,7 @@ export default async function runApp(
   const shutdown = (signal: NodeJS.Signals) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    documentExtractionWorker.stop();
     log(`${signal} received — draining connections`, "shutdown");
     const forceExit = setTimeout(() => {
       log("drain window elapsed — forcing exit", "shutdown");

@@ -5,7 +5,7 @@ import type { IStorage } from "../../storage";
 import { isAuthenticated, requireRole } from "../../auth";
 import { insertBorrowerDeclarationsSchema, CREDIT_DECISION_ROLES, type User } from "@shared/schema";
 import { isAdmin } from "@shared/roles";
-import { PREQUAL_ELIGIBLE_STATUSES, effectiveLetterStatus, letterRevocationSchema, resolveLetterAmount } from "@shared/letters";
+import { PREQUAL_ELIGIBLE_STATUSES, effectiveLetterStatus, effectivePreApprovalLetterStatus, letterRevocationSchema, resolveLetterAmount } from "@shared/letters";
 import { z } from "zod";
 import crypto from "crypto";
 import { logAudit } from "../../auditLog";
@@ -40,6 +40,22 @@ async function currentAdvertised30YrRate(storage: IStorage): Promise<number> {
     console.error("[Letter] Could not load advertised rate, using fallback:", rateErr);
   }
   return 0.07;
+}
+
+async function isPreApprovalLetterDecisionCurrent(
+  applicationId: string,
+  letter: { decisionInputFingerprint?: string | null; policyFingerprint?: string | null },
+): Promise<boolean> {
+  // Legacy letters carry no reproducible input lineage and therefore cannot
+  // be asserted as current after this gate ships.
+  if (!letter.decisionInputFingerprint || !letter.policyFingerprint) return false;
+  const { runInstantDecision } = await import("../../services/decisionEngine");
+  const decision = await runInstantDecision(applicationId);
+  return decision.status === "DECISION_READY"
+    && decision.decision === "APPROVED"
+    && decision.qualifier === "VERIFIED"
+    && decision.inputsFingerprint === letter.decisionInputFingerprint
+    && decision.resolvedPolicy?.fingerprint === letter.policyFingerprint;
 }
 
 export function registerLetterRoutes(
@@ -95,6 +111,27 @@ export function registerLetterRoutes(
         });
       }
 
+      // Recompute at issuance. The application status and amount are cached
+      // projections and may predate newer URLA facts, evidence, or policy. A
+      // current VERIFIED approval is the only state that may create an outward
+      // pre-approval letter.
+      const { analyzeIntake } = await import("../../services/loanAnalysis");
+      const currentAnalysis = await analyzeIntake(id, "preapproval_letter_generation");
+      const currentDecision = currentAnalysis.decision;
+      if (
+        !currentDecision
+        || currentDecision.status !== "DECISION_READY"
+        || currentDecision.decision !== "APPROVED"
+        || currentDecision.qualifier !== "VERIFIED"
+        || !currentDecision.resolvedPolicy?.fingerprint
+      ) {
+        return res.status(422).json({
+          error: "The current verified decision does not support a pre-approval letter. Review the latest facts and run underwriting again.",
+          code: currentDecision?.decision === "MANUAL_REVIEW" ? "manual_underwrite" : "decision_not_currently_approved",
+          reasons: currentDecision?.reasons ?? currentDecision?.missingItems ?? [],
+        });
+      }
+
       const { generatePreApprovalPDF, STANDARD_PRE_APPROVAL_CONDITIONS } = await import("../../services/pdfLetterGenerator");
 
       const letterNumber = `BN-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
@@ -102,7 +139,7 @@ export function registerLetterRoutes(
       expirationDate.setDate(expirationDate.getDate() + 90);
 
       const resolvedAmount = resolveLetterAmount(
-        application.preApprovalAmount,
+        currentAnalysis.preApprovalAmount,
         application.purchasePrice,
         application.downPayment,
       );
@@ -140,25 +177,12 @@ export function registerLetterRoutes(
       }
       const borrowerName = [borrower.firstName, borrower.lastName].filter(Boolean).join(" ") || "Borrower";
 
-      const annualIncome = parseFloat(application.annualIncome || "0");
-      const monthlyDebts = parseFloat(application.monthlyDebts || "0");
+      const annualIncome = currentDecision.metrics!.monthlyIncome * 12;
       const loanAmountNum = parseFloat(loanAmount) || 0;
       const rate = await currentAdvertised30YrRate(storage);
       // currentAdvertised30YrRate returns a FRACTION (0.07-style), not a percent.
       const monthlyPayment = monthlyPrincipalAndInterestFromFraction(loanAmountNum, rate, 360);
-      let rentalDebtTotal = 0;
-      if (Array.isArray(application.incomeSources)) {
-        for (const src of application.incomeSources as any[]) {
-          if (src.type === "rental" && Array.isArray(src.rentalProperties)) {
-            for (const p of src.rentalProperties) {
-              rentalDebtTotal += parseFloat(String(p.monthlyDebtPayment || "0").replace(/,/g, "")) || 0;
-            }
-          }
-        }
-      }
-      const totalMonthlyObligations = monthlyDebts + (monthlyPayment || 0) + rentalDebtTotal;
-      const monthlyIncome = annualIncome / 12;
-      const dti = monthlyIncome > 0 ? (totalMonthlyObligations / monthlyIncome) * 100 : 0;
+      const dti = currentDecision.metrics!.dti;
       const dpPercent = purchasePrice > 0 ? ((downPayment / purchasePrice) * 100).toFixed(1) : undefined;
 
       const creditScore = application.creditScore ? parseInt(String(application.creditScore)) : 0;
@@ -273,6 +297,8 @@ export function registerLetterRoutes(
           productType: application.isVeteran ? "VA" : "CONV",
           occupancy,
           loanPurpose: application.loanPurpose || "Purchase",
+          decisionInputFingerprint: currentDecision.inputsFingerprint,
+          policyFingerprint: currentDecision.resolvedPolicy.fingerprint,
           expirationDate,
           companyLegalName: COMPANY_CONFIG.legalName,
           companyNmlsId: COMPANY_CONFIG.nmlsId,
@@ -411,6 +437,17 @@ export function registerLetterRoutes(
         });
       }
 
+      if (
+        letter.status === "issued"
+        && !(await isPreApprovalLetterDecisionCurrent(id, letter))
+      ) {
+        return res.status(409).json({
+          error: "Financial facts or underwriting policy changed after this letter was issued. Re-run the decision and issue a new letter.",
+          code: "letter_stale",
+          letterNumber: letter.letterNumber,
+        });
+      }
+
       if (letter.pdfStorageKey) {
         try {
           const { objectStorageClient } = await import("../../integrations/object_storage/objectStorage");
@@ -477,11 +514,15 @@ export function registerLetterRoutes(
       // Computed-at-read expiry: never report "issued" past the expiration
       // date, whatever the sweep's timing. The revocation reason stays
       // server-side — staff free text does not reach borrower-facing responses.
+      const effectiveStatus = effectiveLetterStatus(letter);
+      const decisionCurrent = effectiveStatus === "issued"
+        ? await isPreApprovalLetterDecisionCurrent(id, letter)
+        : true;
       res.json({
         hasLetter: true,
         letterId: letter.id,
         letterNumber: letter.letterNumber,
-        status: effectiveLetterStatus(letter),
+        status: effectivePreApprovalLetterStatus(letter, decisionCurrent),
         expirationDate: letter.expirationDate,
         generatedAt: letter.generatedAt,
         revokedAt: letter.revokedAt,

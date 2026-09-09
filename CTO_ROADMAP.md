@@ -1,10 +1,10 @@
 # Homiquity CTO roadmap
 
-**Last evidence review:** 2026-09-08
+**Last evidence review:** 2026-09-09
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `d77e356fdc76d8ebaec17fea854da421bc24034d` on 2026-09-08.
+**Audited production baseline:** `d7bf9f7d876d50bff37bb577a914e68c781a7ded` on 2026-09-08.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -80,16 +80,24 @@ underwriter and closer also remain unproven.
 
 ## Core intelligence build order
 
-1. **Make evidence ingestion durable:** persisted extraction jobs, restart recovery, staff-visible
-   failures and recorded provider canaries.
-2. **Connect the page-level evidence model:** classify and split packets, retain source pages and
-   boxes, review fields beside the document, and measure accuracy from human-graded values.
-3. **Make decisions expire correctly:** invalidate stale underwriting/AUS output, add an explicit
-   manual-underwrite outcome, deliver co-borrowers, and retain final findings.
+1. **Prove durable evidence ingestion in production:** database-backed extraction jobs, leased
+   restart recovery and staff-visible failures are built and proven locally for ordinary documents
+   and consented multi-form tax packages. Document status, confidence, extracted facts and
+   readiness commit atomically, demonstration extraction fails closed in production, and
+   tax-consent cleanup preserves unrelated work. Record provider canaries and run one controlled
+   production interruption/recovery proof.
+2. **Finish the page-level evidence model:** ordinary uploads now classify every page independently,
+   block mislabeled and mixed packets, retain field page/box evidence and support field-by-field
+   review. Build automatic physical page splitting, rendered evidence boxes and a human-graded
+   accuracy set before extraction can be treated as hands-off.
+3. **Finish decision delivery:** underwriting, AUS and pre-approval letters now carry input/policy
+   fingerprints, stale output is blocked, and out-of-scope files take an explicit manual-underwrite
+   path. Deliver co-borrowers and retain final findings artifacts before receiver certification.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.
-5. **Improve Homi from measured friction:** change guidance only when a journey metric shows that
-   it reduces borrower or loan-officer effort.
+5. **Prove Homi in production:** the mortgage scenario and prompt-attack regression suite is built;
+   record production canaries and change guidance only when journey measures show less borrower or
+   loan-officer effort.
 
 The dated [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md)
 contains the evidence and acceptance tests. This order is part of Phase 0 and Phase 1; it does not

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { defineConfig } from "vitest/config";
 import path from "path";
 
@@ -42,6 +43,8 @@ export default defineConfig({
       "tests/documentCorrectionJourney.test.ts",
       "tests/applicationSignalIsolation.test.ts",
       "tests/staleEvidenceIsolation.test.ts",
+      "tests/documentExtractionQueue.integration.test.ts",
+      "tests/documentFieldReview.integration.test.ts",
     ],
   },
   resolve: {

@@ -8,6 +8,7 @@ import {
   borrowerProfiles,
   dealTeamMembers,
   dealActivities,
+  documentExtractionJobs,
   documentLineage,
   documents,
   loanApplications,
@@ -87,7 +88,11 @@ async function withLockedExtractionSlot<T>(run: () => Promise<T>): Promise<T> {
  */
 export async function withDocumentWorkflowLock<T>(
   documentId: string,
-  run: (document: Document, isCurrentVersion: boolean) => Promise<T>,
+  run: (
+    document: Document,
+    isCurrentVersion: boolean,
+    transaction: DatabaseTransaction,
+  ) => Promise<T>,
 ): Promise<T> {
   return withLockedExtractionSlot(() => db.transaction(async (transaction) => {
     const [candidate] = await transaction
@@ -128,7 +133,7 @@ export async function withDocumentWorkflowLock<T>(
         .limit(1);
       isCurrentVersion = latest?.documentId === current.id;
     }
-    return run(current, isCurrentVersion);
+    return run(current, isCurrentVersion, transaction);
   }));
 }
 
@@ -255,6 +260,24 @@ export interface RegisterDocumentVersionInput {
   document: InsertDocument;
   contentSha256: string | null;
   replacesDocumentId?: string;
+  /** Inserted with the document so an acknowledged upload cannot lose work. */
+  extractionJob?: {
+    mode: "standard" | "autopilot" | "tax_package";
+    requestedByUserId: string;
+  };
+}
+
+async function insertExtractionJob(
+  transaction: DatabaseTransaction,
+  documentId: string,
+  extractionJob: RegisterDocumentVersionInput["extractionJob"],
+) {
+  if (!extractionJob) return;
+  await transaction.insert(documentExtractionJobs).values({
+    documentId,
+    requestedByUserId: extractionJob.requestedByUserId,
+    mode: extractionJob.mode,
+  });
 }
 
 async function registerDocumentVersionInTransaction(
@@ -265,6 +288,7 @@ async function registerDocumentVersionInTransaction(
     const applicationId = input.document.applicationId ?? null;
     if (!applicationId) {
       const [document] = await transaction.insert(documents).values(input.document).returning();
+      await insertExtractionJob(transaction, document.id, input.extractionJob);
       return { document, lineage: null };
     }
     if (!workflowLockHeld) await lockDocumentWorkflow(transaction, applicationId);
@@ -322,6 +346,7 @@ async function registerDocumentVersionInTransaction(
       contentSha256: input.contentSha256,
       recordedByUserId: input.actor.id,
     }).returning();
+    await insertExtractionJob(transaction, document.id, input.extractionJob);
     await transaction.insert(auditLogs).values({
       actorUserId: input.actor.id,
       action: input.replacesDocumentId ? "document.version_replaced" : "document.lineage_recorded",

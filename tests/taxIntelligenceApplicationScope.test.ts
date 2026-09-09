@@ -5,6 +5,10 @@ const serviceMocks = vi.hoisted(() => ({
   buildTaxReconciliation: vi.fn(),
   getLatestSituationProfile: vi.fn(),
   classifyAndPersistSituation: vi.fn(),
+  hasUserConsent: vi.fn(async () => true),
+  getLatestTaxIntelligence: vi.fn(),
+  getTaxPackageExtractionJob: vi.fn(),
+  getDealTeamMembers: vi.fn(async () => [{ userId: "lo-1" }]),
 }));
 
 vi.mock("../server/auth", () => ({
@@ -12,11 +16,16 @@ vi.mock("../server/auth", () => ({
 }));
 vi.mock("../server/auditLog", () => ({ logAudit: vi.fn() }));
 vi.mock("../server/services/frictionLog", () => ({ logFriction: vi.fn() }));
-vi.mock("../server/consentGate", () => ({ hasUserConsent: vi.fn(async () => true) }));
+vi.mock("../server/consentGate", () => ({ hasUserConsent: serviceMocks.hasUserConsent }));
 vi.mock("../server/services/taxDocumentIntelligence", () => ({
   runTaxDocumentIntelligence: vi.fn(),
-  getLatestTaxIntelligence: vi.fn(),
+  getLatestTaxIntelligence: serviceMocks.getLatestTaxIntelligence,
   TaxDocumentIntelligenceError: class TaxDocumentIntelligenceError extends Error {},
+}));
+vi.mock("../server/services/documentExtractionJobs", () => ({
+  enqueueTaxPackageExtraction: vi.fn(),
+  getTaxPackageExtractionJob: serviceMocks.getTaxPackageExtractionJob,
+  kickDocumentExtractionWorker: vi.fn(),
 }));
 vi.mock("../server/services/borrowerEntityResolution", () => ({
   resolveAndPersistEntities: vi.fn(),
@@ -37,8 +46,16 @@ vi.mock("../server/services/decisionEngine", () => ({ recalculateDecision: vi.fn
 
 const application = { id: "app-1", userId: "borrower-1" };
 const storage = {
-  getDealTeamMembers: async () => [{ userId: "lo-1" }],
+  getDealTeamMembers: serviceMocks.getDealTeamMembers,
   getLoanApplication: async (id: string) => (id === application.id ? application : undefined),
+  getDocument: async (id: string) => id === "tax-doc-1"
+    ? {
+        id,
+        userId: "lo-1",
+        applicationId: application.id,
+        documentType: "tax_return",
+      }
+    : undefined,
 } as any;
 
 describe("staff tax intelligence application scope", () => {
@@ -62,6 +79,15 @@ describe("staff tax intelligence application scope", () => {
   afterAll(() => server?.close());
   beforeEach(() => {
     vi.clearAllMocks();
+    serviceMocks.hasUserConsent.mockResolvedValue(true);
+    serviceMocks.getDealTeamMembers.mockResolvedValue([{ userId: "lo-1" }]);
+    serviceMocks.getTaxPackageExtractionJob.mockResolvedValue(null);
+    serviceMocks.getLatestTaxIntelligence.mockResolvedValue({
+      runId: "run-1",
+      documentId: "tax-doc-1",
+      status: "completed",
+      forms: [],
+    });
     serviceMocks.buildTaxReconciliation.mockResolvedValue({
       userId: "borrower-1",
       generatedAt: new Date().toISOString(),
@@ -90,6 +116,29 @@ describe("staff tax intelligence application scope", () => {
     expect(serviceMocks.buildTaxReconciliation).toHaveBeenCalledWith("borrower-1", "app-1");
   });
 
+  it("treats the application owner as borrower when staff uploaded the tax return", async () => {
+    const response = await fetch(
+      `${base}/api/documents/tax-doc-1/tax-intelligence?applicationId=app-1`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.hasUserConsent).toHaveBeenCalledWith(
+      "tax_document_use",
+      "borrower-1",
+    );
+    expect(serviceMocks.getLatestTaxIntelligence).toHaveBeenCalledWith("tax-doc-1");
+  });
+
+  it("does not give a former staff uploader owner access after assignment ends", async () => {
+    serviceMocks.getDealTeamMembers.mockResolvedValue([]);
+    const response = await fetch(
+      `${base}/api/documents/tax-doc-1/tax-intelligence?applicationId=app-1`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(serviceMocks.getLatestTaxIntelligence).not.toHaveBeenCalled();
+  });
+
   it("limits a loan officer's situation profile to the assigned application", async () => {
     const response = await fetch(
       `${base}/api/tax-intelligence/situation?userId=borrower-1&applicationId=app-1`,
@@ -98,5 +147,29 @@ describe("staff tax intelligence application scope", () => {
     expect(response.status).toBe(200);
     expect(serviceMocks.getLatestSituationProfile).toHaveBeenCalledWith("borrower-1", "app-1");
     expect(serviceMocks.classifyAndPersistSituation).not.toHaveBeenCalled();
+  });
+
+  it("stops staff access when the borrower revokes tax-document authorization", async () => {
+    serviceMocks.hasUserConsent.mockResolvedValue(false);
+    const response = await fetch(
+      `${base}/api/tax-intelligence/reconciliation?userId=borrower-1&applicationId=app-1`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(serviceMocks.buildTaxReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("does not require tax-document consent for staff bank-statement analysis", async () => {
+    serviceMocks.hasUserConsent.mockResolvedValue(false);
+    const response = await fetch(`${base}/api/applications/app-1/bank-statement-analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    // The empty analysis reaches its own input validation instead of being
+    // rejected by the unrelated tax-document consent gate.
+    expect(response.status).toBe(400);
+    expect(serviceMocks.hasUserConsent).not.toHaveBeenCalled();
   });
 });

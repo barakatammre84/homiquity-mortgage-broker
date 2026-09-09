@@ -32,13 +32,20 @@ import type { AnalyticsDomain } from "@shared/schema";
 import { firstQueryValue } from "./queryParams";
 import { routeParam, routeParams } from "../http/routeParams";
 import { getCoreCapabilityReport } from "../services/coreCapabilityStatus";
+import { getDocumentExtractionQueueSummary } from "../services/documentExtractionJobs";
 
 export function registerDataIntelligenceRoutes(app: Express) {
 
   app.get("/api/analytics/core-capabilities",
     requireRole("admin", "lo", "loa", "processor", "underwriter"),
-    (_req, res) => {
-      res.json(getCoreCapabilityReport());
+    async (_req, res) => {
+      try {
+        const documentExtractionQueue = await getDocumentExtractionQueueSummary();
+        res.json({ ...getCoreCapabilityReport(), documentExtractionQueue });
+      } catch (error) {
+        console.error("Core capability status error:", error);
+        res.status(500).json({ error: "Failed to fetch core capability status" });
+      }
     }
   );
 

@@ -56,7 +56,7 @@ DOCUMENT_PACKAGE_TYPES	shared/schema/documents.ts	array	5	91571264c095	DocumentP
 DOCUMENT_REVIEW_ROLES	shared/documentStatus.ts	array	5	8401e578170a		5	internal	
 DOCUMENT_STATUSES	shared/documentStatus.ts	array	4	e24710fd8d36	DocumentStatus	3	internal	
 DOCUMENT_SUBJECT_TYPES	shared/documentLineage.ts	array	4	7fb7640d846a	DocumentSubjectType	2	internal	
-DOCUMENT_TYPE_TAXONOMY	shared/schema/documents.ts	array	46	926146f14c60	DocumentTypeTaxonomy	1	internal	
+DOCUMENT_TYPE_TAXONOMY	shared/schema/documents.ts	array	46	926146f14c60	DocumentTypeTaxonomy	4	internal	
 EditSeverity	shared/fannieMae/loanDeliveryEdits.ts	union	2	aaecbabcc789		0	internal	
 EditSource	shared/fannieMae/loanDeliveryEdits.ts	union	4	22a54bcd93dc		0	internal	
 ENTITY_BEARING_FORM_TYPES	shared/taxFormExtraction.ts	array	5	08087b74fd82		2	internal	
@@ -128,7 +128,7 @@ PLATFORM_SCHEDULE_FEE_IDS	shared/compliance/feeTolerance.ts	array	3	bf718f344b46
 POLICY_AUTHORITIES	shared/schema/underwritingConditions.ts	array	6	163e49349dd8	PolicyAuthority	1	internal	
 POLICY_STATUSES	shared/schema/underwritingConditions.ts	array	5	b63e7f349a87	PolicyStatus	2	internal	
 PRE_APPROVAL_CONDITION_CATEGORIES	shared/schema/lendingLetters.ts	array	4	1978f7026d81	PreApprovalConditionCategory	0	internal	
-PRE_APPROVAL_LETTER_STATUS	shared/statusVocabularies.ts	array	5	74fc870ad7b5	PreApprovalLetterStatus	3	internal	
+PRE_APPROVAL_LETTER_STATUS	shared/statusVocabularies.ts	array	6	0accca844c76	PreApprovalLetterStatus	3	internal	
 PRE_APPROVAL_OCCUPANCY_TYPES	shared/schema/lendingLetters.ts	array	3	c72977170f17	PreApprovalOccupancyType	0	internal	
 PRE_APPROVAL_PRODUCT_TYPES	shared/schema/lendingLetters.ts	array	5	7887c71f6bab	PreApprovalProductType	0	internal	
 PREFERRED_LOAN_TYPES	shared/statusVocabularies.ts	array	4	968b72b0e7df	PreferredLoanType	4	internal	

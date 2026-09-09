@@ -136,6 +136,34 @@ describe("stage 2 — AUS", () => {
     expect(r.readyToSubmitToLender).toBe(false);
   });
 
+  it("blocks a recorded casefile after its decision inputs change", () => {
+    const r = deriveSubmissionStages(cleanInputs({
+      aus: {
+        casefileId: "CF-123",
+        recommendation: "approve_eligible",
+        lpaAssessed: true,
+        inputsCurrent: false,
+        staleReason: "income evidence changed.",
+      },
+    }));
+    expect(stage(r, "aus").status).toBe("blocked");
+    expect(stage(r, "aus").blockers.some(b => b.includes("stale"))).toBe(true);
+    expect(r.readyToSubmitToLender).toBe(false);
+  });
+
+  it("surfaces the manual-underwrite path without disguising it as a clean automated result", () => {
+    const r = deriveSubmissionStages(cleanInputs({
+      aus: {
+        casefileId: "CF-123",
+        recommendation: "refer_with_caution",
+        lpaAssessed: true,
+        inputsCurrent: true,
+        decisionPath: "manual_underwrite",
+      },
+    }));
+    expect(stage(r, "aus").warnings.some(w => w.includes("manual underwriting"))).toBe(true);
+  });
+
   it("warns — never blocks — on refer / ineligible recommendations (manual broker placement stays open)", () => {
     for (const rec of ["refer", "refer_with_caution", "approve_ineligible"]) {
       const r = deriveSubmissionStages(cleanInputs({ aus: { casefileId: "CF-123", recommendation: rec, lpaAssessed: true } }));

@@ -47,13 +47,13 @@ sites actually use it.
 | Capability | State | Measured |
 |---|---|---|
 | `PageShell` page geometry | **BUILT · ADOPTED 18%** | 50 of 285 page files import it — *pnpm guard:ui → `pageShellDrift`* |
-| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 23 file(s) import the registry, 319 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
+| Icon registry `lib/icons.ts` | **BUILT · ADOPTED 7%** | 24 file(s) import the registry, 319 still import `lucide-react` directly — *pnpm guard:ui → `directLucideImports`* |
 | `PageShell fullHeight` | **BUILT · ADOPTED 0%** | zero call sites — correct: it is for `BareLayout` routes only, and none use PageShell yet |
 | `Heading` / `Text` (`ui/typography.tsx`) | **BUILT · ADOPTED 0%** | zero call sites — allowlisted in `scripts/orphan-scan.cjs` as known-unused |
 | `Logo` + `BrandingProvider` | **BUILT · ADOPTED** | 26 call site(s) |
 | Raw `<button>` with no height, padding or `.touch-target` | **NEEDS REVIEW** | 36 in 27 file(s) — each is EITHER a sub-44px control or a button wrapping a large area; only a human can tell which |
 | `EmptyState` | **BUILT** | 10 file(s) use it |
-| `bg-surface` app ground | **ADOPTED (via layout)** | set once on `PrivateLayout`'s `<main>`; 5 file(s) name it directly — pages inherit it |
+| `bg-surface` app ground | **ADOPTED (via layout)** | set once on `PrivateLayout`'s `<main>`; 6 file(s) name it directly — pages inherit it |
 | Component tests / `components/ui` primitives | **BUILT** | colocated `*.test.tsx` beside components; 34 primitives — *pnpm test:client* |
 | `pageShellDrift` — PageShell drift (hand-rolled min-h-screen in a file that also imports PageShell) | **HELD** | **0** file(s) — **at zero; any hit is a regression** |
 | `directLucideImports` — direct lucide-react import (icon-registry drift) | ratcheting down | **319** file(s) |

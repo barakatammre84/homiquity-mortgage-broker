@@ -17,10 +17,25 @@ async function loginCookie(email: string, password: string): Promise<string> {
   return setCookie ? setCookie.split(";")[0] : "";
 }
 
+async function waitForTaxPackage(documentId: string, cookie: string) {
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    const status = await apiGet(`/api/documents/${documentId}/tax-intelligence`, {
+      headers: { Cookie: cookie },
+    });
+    if (status.status === 200 && status.body?.status === "completed") return status.body;
+    if (status.status === 200 && ["failed", "cancelled"].includes(status.body?.status)) {
+      throw new Error(`Tax package ended as ${status.body.status}: ${status.body.error ?? "unknown"}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("Timed out waiting for durable tax package processing");
+}
+
 /**
- * Tax Return Insight routes. Run the server with EXTRACTION_SIMULATE=true so
- * extraction is deterministic without Anthropic credentials; the suite still
- * passes without the flag (the empty low-confidence path also persists a row).
+ * Tax Return Insight routes. The preflight and CI integration servers run with
+ * EXTRACTION_SIMULATE=true and blank model credentials so extraction is
+ * deterministic without private object storage or external model calls.
  *
  * renter@test.com is the incubator persona (no application) — exactly the
  * user this consumer-direct flow serves.
@@ -91,9 +106,10 @@ describe("Tax insight routes", () => {
       { documentId },
       { headers: { Cookie: renterCookie } },
     );
-    expect(processed.status).toBe(200);
-    expect(processed.body?.insight?.taxYear).toBeTypeOf("number");
-    expect(processed.body?.insight?.confidence).toBeTruthy();
+    expect(processed.status).toBe(202);
+    expect(["pending", "running", "completed"]).toContain(processed.body?.status);
+    const completed = await waitForTaxPackage(documentId, renterCookie);
+    expect(completed.formCount).toBeGreaterThan(0);
 
     // The encrypted raw model response must never reach the client.
     const raw = JSON.stringify(processed.body);
@@ -140,7 +156,7 @@ describe("Tax insight routes", () => {
     expect([403, 404]).toContain(res.status);
   });
 
-  it("origination extract route derives no insight without consent (security-review fix)", async () => {
+  it("origination extract route performs no tax processing without consent", async () => {
     const buyerCookie = await loginCookie("buyer@test.com", TEST_PASSWORD);
     expect(buyerCookie).toBeTruthy();
 
@@ -170,12 +186,15 @@ describe("Tax insight routes", () => {
       {},
       { headers: { Cookie: buyerCookie } },
     );
-    expect(extract.status).toBe(200);
+    expect(extract.status).toBe(hasConsent ? 200 : 403);
+    if (!hasConsent) {
+      expect(extract.body?.code).toBe("CONSENT_REQUIRED");
+    }
 
     const me = await apiGet("/api/tax-insights/me", { headers: { Cookie: buyerCookie } });
     expect(me.status).toBe(200);
     if (!hasConsent) {
-      // Extraction succeeds, but no insight may exist for an unconsented user.
+      // The source file remains available, but no extraction or projection runs.
       expect(me.body.insights.length).toBe(0);
     } else {
       expect(me.body.insights.length).toBeGreaterThan(0);
@@ -254,12 +273,14 @@ describe("Tax consent revocation", () => {
       expect(consent.status).toBe(201);
     }
 
+    const queuedDocumentId = await registerTaxDoc();
     const processed = await apiPost(
       "/api/tax-insights/process",
-      { documentId: await registerTaxDoc() },
+      { documentId: queuedDocumentId },
       { headers: { Cookie: renterCookie } },
     );
-    expect(processed.status).toBe(200);
+    expect(processed.status).toBe(202);
+    await waitForTaxPackage(queuedDocumentId, renterCookie);
   });
 
   it("rejects unauthenticated revocation", async () => {

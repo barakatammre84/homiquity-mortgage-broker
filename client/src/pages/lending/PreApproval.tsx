@@ -778,6 +778,7 @@ function PreApprovalFunnel() {
   return (
     <div className="min-h-screen flex flex-col bg-background overflow-x-hidden">
       <SEOHead title="Get Pre-Approved in 3 Minutes" description="Start your mortgage pre-approval application. Answer a few questions about your income and finances to get a clear, confident approval decision." />
+      <SkipLink />
       {restoreBanner}
       
       <VerificationPulse active={submitMutation.isPending || (isAuthenticated && hasPendingSubmit())} />
@@ -803,7 +804,7 @@ function PreApprovalFunnel() {
       {/* pt clears the fixed FunnelProgressHeader, which is ~115px tall (counter
           row + chapter rail + labels + the chapter/time line) rather than the
           ~70px of the single-line header it replaced. */}
-      <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-32 sm:pt-36 pb-0 relative flex flex-col items-center lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-10 lg:items-center">
+      <main id="main" tabIndex={-1} className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-32 sm:pt-36 pb-0 relative flex flex-col items-center lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-10 lg:items-center focus:outline-none">
        <div className="w-full min-w-0 flex flex-1 lg:flex-none flex-col items-center justify-center">
         {/*
           mode="wait" mounts the next step only after the previous step's exit
@@ -901,7 +902,7 @@ function PreApprovalFunnel() {
            without the DTI, the payment estimate and the why-we-ask advice starved
            the borrower most likely to abandon (DESIGN_SYSTEM.md §12.3). */}
        <AdvisoryPanel formValues={watchedValues} currentStepId={currentQ.id} />
-      </div>
+      </main>
 
       {teaser && (
         <AffordabilityTeaserOverlay

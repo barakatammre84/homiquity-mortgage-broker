@@ -249,7 +249,20 @@ describe("AutomatedUnderwritingRecommendationDescription — reports the real AU
     expect(recommendationOf(xml)).toBeNull();
     // UNDERWRITING_DETAIL is independently minOccurs="0" and must survive.
     expect(xml).toContain("<UNDERWRITING_DETAIL>");
-    expect(xml).toContain("<LoanManualUnderwritingIndicator>false</LoanManualUnderwritingIndicator>");
+    expect(xml).toContain("<LoanManualUnderwritingIndicator>true</LoanManualUnderwritingIndicator>");
+  });
+
+  it("declares manual underwriting when the decision engine routed the case out of scope", () => {
+    const xml = generateMISMO34XML(baseDto({
+      application: {
+        ausRecommendation: "refer_with_caution",
+        ausFindings: {
+          inputIntegrity: { decisionPath: "manual_underwrite" },
+        },
+      } as any,
+    }));
+    expect(recommendationOf(xml)).toBe("Refer with Caution");
+    expect(xml).toContain("<LoanManualUnderwritingIndicator>true</LoanManualUnderwritingIndicator>");
   });
 
   it("omits rather than guesses when the stored value is unrecognised", () => {

@@ -21,7 +21,6 @@ import type { Document, LoanApplication } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -44,6 +43,7 @@ import {
   type DocumentReviewGroup,
   type ComparisonRow,
 } from "@/lib/documentReview";
+import { ExtractedFieldReview } from "@/components/staff/ExtractedFieldReview";
 
 const GROUP_ORDER: DocumentReviewGroup[] = ["needs_review", "other", "verified", "rejected"];
 const GROUP_LABELS: Record<DocumentReviewGroup, string> = {
@@ -71,6 +71,7 @@ type ExtractionRun = Record<string, unknown> & {
   confidence?: "high" | "medium" | "low";
   warnings?: string[];
   extractedFields?: string[];
+  classificationBlocked?: boolean;
 };
 
 interface DocumentReviewPanelProps {
@@ -80,6 +81,7 @@ interface DocumentReviewPanelProps {
   canReview: boolean;
   selectedDocumentId: string | null;
   onSelectDocument: (id: string) => void;
+  onOpenSourcePage?: (pageNumber: number) => void;
 }
 
 export function DocumentReviewPanel({
@@ -89,12 +91,12 @@ export function DocumentReviewPanel({
   canReview,
   selectedDocumentId,
   onSelectDocument,
+  onOpenSourcePage,
 }: DocumentReviewPanelProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [rejectTarget, setRejectTarget] = useState<Document | null>(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [taxYear, setTaxYear] = useState(String(new Date().getFullYear() - 1));
   const [extractionRuns, setExtractionRuns] = useState<Record<string, ExtractionRun>>({});
 
   const invalidateFile = () =>
@@ -127,15 +129,12 @@ export function DocumentReviewPanel({
 
   const extractMutation = useMutation({
     mutationFn: async (doc: Document) => {
-      const body =
-        doc.documentType === "tax_return" && taxYear.trim()
-          ? { documentYear: Number(taxYear) }
-          : {};
-      const res = await apiRequest("POST", `/api/documents/${doc.id}/extract`, body);
+      const res = await apiRequest("POST", `/api/documents/${doc.id}/extract`, {});
       return { docId: doc.id, run: (await res.json()) as ExtractionRun };
     },
     onSuccess: ({ docId, run }) => {
       setExtractionRuns((prev) => ({ ...prev, [docId]: run }));
+      queryClient.invalidateQueries({ queryKey: ["/api/documents", docId, "extracted-fields"] });
       // Extraction can restage the document (uploaded ↔ verifying) and rewrite
       // its notes — refresh the file so groups and summaries stay truthful.
       invalidateFile();
@@ -152,7 +151,9 @@ export function DocumentReviewPanel({
   const renderDocDetail = (doc: Document) => {
     const parsed = parseExtractionNotes(doc.notes);
     const run = extractionRuns[doc.id];
-    const compareRows = run ? compareExtractedToStated(doc.documentType, run, application) : [];
+    const compareRows = run && !run.classificationBlocked
+      ? compareExtractedToStated(doc.documentType, run, application)
+      : [];
     const isPending = doc.status !== "verified" && doc.status !== "rejected";
 
     return (
@@ -191,6 +192,37 @@ export function DocumentReviewPanel({
                 </span>
               )}
             </div>
+            {parsed.documentClassification && (
+              <div
+                className="rounded-md border border-border bg-surface px-2.5 py-2 text-xs"
+                data-testid={`document-classification-${doc.id}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">Page classification</span>
+                  <Badge
+                    variant="secondary"
+                    className={`no-default-hover-elevate ${parsed.documentClassification.compatible ? CONFIDENCE_CHIP.high : CONFIDENCE_CHIP.low}`}
+                  >
+                    {parsed.documentClassification.compatible ? "Matches upload type" : "Needs correction"}
+                  </Badge>
+                  {parsed.documentClassification.mixedPacket && (
+                    <Badge variant="secondary" className="no-default-hover-elevate bg-warning-subtle text-warning-subtle-foreground">
+                      Mixed packet
+                    </Badge>
+                  )}
+                </div>
+                {parsed.documentClassification.segments.length > 0 && (
+                  <p className="mt-1 text-muted-foreground">
+                    {parsed.documentClassification.segments.map((segment) => {
+                      const pages = segment.pageStart === segment.pageEnd
+                        ? `page ${segment.pageStart}`
+                        : `pages ${segment.pageStart}–${segment.pageEnd}`;
+                      return `${segment.documentType.replace(/_/g, " ")} (${pages}, ${Math.round(segment.confidence * 100)}%)`;
+                    }).join(" · ")}
+                  </p>
+                )}
+              </div>
+            )}
             {parsed.extractedFields.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 Fields read: {parsed.extractedFields.join(", ")}
@@ -211,23 +243,8 @@ export function DocumentReviewPanel({
           <p className="text-xs text-muted-foreground">No extraction has run for this document yet.</p>
         )}
 
-        {canReview && isExtractableDocumentType(doc.documentType) && (
+        {canReview && isExtractableDocumentType(doc.documentType) && doc.documentType !== "tax_return" && (
           <div className="flex flex-wrap items-end gap-2">
-            {doc.documentType === "tax_return" && (
-              <div className="space-y-1">
-                <Label htmlFor={`tax-year-${doc.id}`} className="text-xs">
-                  Tax year
-                </Label>
-                <Input
-                  id={`tax-year-${doc.id}`}
-                  className="h-8 w-24"
-                  inputMode="numeric"
-                  value={taxYear}
-                  onChange={(e) => setTaxYear(e.target.value)}
-                  data-testid="input-tax-year"
-                />
-              </div>
-            )}
             <Button
               size="sm" className="touch-target"
               variant="outline"
@@ -239,6 +256,12 @@ export function DocumentReviewPanel({
               {extractMutation.isPending ? "Extracting…" : run || parsed ? "Re-run extraction" : "Run extraction"}
             </Button>
           </div>
+        )}
+
+        {canReview && doc.documentType === "tax_return" && (
+          <p className="rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
+            Tax analysis runs only while the borrower’s authorization is active. Review the authorized results below.
+          </p>
         )}
 
         {run && compareRows.length > 0 && (
@@ -259,10 +282,17 @@ export function DocumentReviewPanel({
               </div>
             ))}
             <p className="text-xs text-muted-foreground">
-              Triage only — values are from this extraction run and are not stored in plaintext.
-              Verification remains your call.
+              This comparison is a triage aid. Confirm the stored values against their source before verifying the document.
             </p>
           </div>
+        )}
+
+        {(parsed || run) && (
+          <ExtractedFieldReview
+            documentId={doc.id}
+            canReview={canReview && isPending}
+            onOpenSourcePage={onOpenSourcePage}
+          />
         )}
 
         {canReview && isPending && (

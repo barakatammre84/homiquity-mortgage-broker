@@ -313,6 +313,18 @@ describe("classifyTaxDocument (simulate path)", () => {
     expect(result.lineage.modelId).toBe(svc.SIMULATED_MODEL_ID);
     expect(result.classification?.warnings?.some((w) => /simulated/i.test(w))).toBe(true);
   });
+
+  it("refuses tax-package simulation in production", async () => {
+    const prior = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      await expect(svc.classifyTaxDocument("/objects/uploads/production-simdoc"))
+        .rejects.toThrow(/cannot be enabled in production/i);
+    } finally {
+      if (prior === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prior;
+    }
+  });
 });
 
 describe("extractTaxFormInstanceFields (simulate path)", () => {

@@ -79,3 +79,13 @@ export function effectiveLetterStatus<S extends string>(
   }
   return letter.status;
 }
+
+/** Decision-aware status for outward pre-approval letters. */
+export function effectivePreApprovalLetterStatus<S extends string>(
+  letter: { status: S; expirationDate: Date | string },
+  decisionCurrent: boolean,
+  now: Date = new Date(),
+): S | "expired" | "stale" {
+  const status = effectiveLetterStatus(letter, now);
+  return status === "issued" && !decisionCurrent ? "stale" : status;
+}

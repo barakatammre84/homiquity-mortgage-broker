@@ -102,6 +102,13 @@ describe("PreApprovalLetterCard", () => {
     expect(screen.getByTestId("text-letter-revoked-at").textContent).toContain("Aug 4, 2026");
   });
 
+  it("explains that stale letters require a new decision and issue", () => {
+    renderCard({ ...issuedLetter, status: "stale" });
+    expect(screen.getByTestId("badge-letter-status").textContent).toBe("Stale");
+    expect(screen.getByTestId("text-letter-stale").textContent).toMatch(/re-run the decision/i);
+    expect(screen.queryByTestId("button-revoke-letter")).toBeNull();
+  });
+
   it("gates the confirm button on the shared letterRevocationSchema", async () => {
     const user = userEvent.setup();
     renderCard(issuedLetter);

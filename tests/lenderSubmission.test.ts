@@ -201,7 +201,7 @@ describe("buildLenderPackage", () => {
 // ---------------------------------------------------------------------------
 // Dual-AUS LPA leg (simulated, mirrors the DU simulation seam)
 // ---------------------------------------------------------------------------
-import { submitToLPA } from "../server/services/ausSubmission";
+import { submitToDU, submitToLPA } from "../server/services/ausSubmission";
 
 describe("LPA leg (dual AUS)", () => {
   const baseInput = {
@@ -237,5 +237,19 @@ describe("LPA leg (dual AUS)", () => {
   it("goes Caution on sub-620 or missing credit", async () => {
     expect((await submitToLPA({ ...baseInput, creditScore: 600 })).riskClass).toBe("caution");
     expect((await submitToLPA({ ...baseInput, creditScore: null })).riskClass).toBe("caution");
+  });
+
+  it("keeps an out-of-scope complex file on the explicit manual-underwrite path", async () => {
+    const input = {
+      ...baseInput,
+      decisionPath: "manual_underwrite" as const,
+      manualUnderwriteReasons: ["Complex income requires licensed review."],
+    };
+    const [du, lpa] = await Promise.all([submitToDU(input), submitToLPA(input)]);
+    expect(du.decisionPath).toBe("manual_underwrite");
+    expect(du.recommendation).toBe("refer_with_caution");
+    expect(du.messages.some(message => message.code === "HMQ-MANUAL-001")).toBe(true);
+    expect(lpa.decisionPath).toBe("manual_underwrite");
+    expect(lpa.riskClass).toBe("caution");
   });
 });

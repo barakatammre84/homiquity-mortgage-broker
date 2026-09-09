@@ -107,6 +107,10 @@ export default function BorrowerFile() {
     );
   };
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [sourcePageRequest, setSourcePageRequest] = useState<{
+    pageNumber: number;
+    requestId: number;
+  } | null>(null);
 
   const { data: appData, isLoading: appLoading } = useQuery<ApplicationData>({
     queryKey: loanApplicationKeys.detail(applicationId),
@@ -610,7 +614,14 @@ export default function BorrowerFile() {
                       application={application}
                       canReview={canReviewDocuments(user?.role)}
                       selectedDocumentId={selectedDocumentId}
-                      onSelectDocument={setSelectedDocumentId}
+                      onSelectDocument={(documentId) => {
+                        setSelectedDocumentId(documentId);
+                        setSourcePageRequest(null);
+                      }}
+                      onOpenSourcePage={(pageNumber) => setSourcePageRequest((current) => ({
+                        pageNumber,
+                        requestId: (current?.requestId ?? 0) + 1,
+                      }))}
                     />
                     {(() => {
                       const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
@@ -622,6 +633,7 @@ export default function BorrowerFile() {
                             documentId={selectedDocument.id}
                             fileName={selectedDocument.fileName}
                             mimeType={selectedDocument.mimeType}
+                            requestedPage={sourcePageRequest}
                           />
                         </Suspense>
                       ) : (

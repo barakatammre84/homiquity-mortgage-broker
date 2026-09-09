@@ -53,6 +53,7 @@ export const LETTER_STATUS_BADGE: Record<
 > = {
   draft: { label: "Draft", variant: "secondary" },
   issued: { label: "Issued", variant: "success" },
+  stale: { label: "Stale", variant: "destructive" },
   superseded: { label: "Superseded", variant: "secondary" },
   expired: { label: "Expired", variant: "warning" },
   revoked: { label: "Revoked", variant: "destructive" },
@@ -160,6 +161,11 @@ export function PreApprovalLetterCard({
                 </>
               )}
             </div>
+            {letter.status === "stale" && (
+              <p className="text-sm text-destructive" data-testid="text-letter-stale">
+                Financial facts or underwriting policy changed after this letter was issued. Re-run the decision and issue a new letter before using it.
+              </p>
+            )}
             {revocable && (
               <Dialog
                 open={revokeDialog.open}

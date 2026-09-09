@@ -73,6 +73,11 @@ export const preApprovalLetters = pgTable("pre_approval_letters", {
   lockedRate: decimal("locked_rate", { precision: 5, scale: 3 }),
   
   underwritingSnapshotId: varchar("underwriting_snapshot_id").references(() => underwritingDecisions.id),
+  // Exact deterministic-decision state used to issue the letter. Read and
+  // download paths recompute both fingerprints; a mismatch makes the letter
+  // stale until a new decision and letter are issued.
+  decisionInputFingerprint: varchar("decision_input_fingerprint", { length: 64 }),
+  policyFingerprint: varchar("policy_fingerprint", { length: 64 }),
   
   primaryDisclaimerId: varchar("primary_disclaimer_id").references(() => disclaimerVersions.id),
   brokerRoleDisclaimerId: varchar("broker_role_disclaimer_id").references(() => disclaimerVersions.id),
@@ -655,4 +660,3 @@ export type LenderDataPackage = typeof lenderDataPackages.$inferSelect;
 // =============================================================================
 // OFFER BRIDGE ARCHITECTURE
 // =============================================================================
-

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq, desc } from "drizzle-orm";
 import type { BorrowerDeclarations } from "@shared/schema";
 import { storage } from "../storage";
@@ -48,6 +49,8 @@ export interface InstantDecision {
   isVerified: boolean;
   reasons: string[];
   missingItems: string[];
+  /** SHA-256 over the borrower facts and derived income inputs evaluated in this run. */
+  inputsFingerprint: string;
   /** Resolved thresholds/matrix cells + fingerprint for reproducibility (null pre-decision). */
   resolvedPolicy: ResolvedPolicy | null;
   /** The multi-path income evaluation behind this decision (UAL P3). Present once financials are aggregated. */
@@ -77,6 +80,12 @@ export interface InstantDecision {
      */
     monthsOfReserves: number;
   } | null;
+}
+
+const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v1";
+
+function decisionInputFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 // Map free-text URLA account types to the engine's asset buckets.
@@ -341,12 +350,45 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
 
   const fin = await aggregateBorrowerFinancials(app);
 
+  // A policy fingerprint proves which rules were used; this separate digest
+  // proves which borrower facts were evaluated. Keep the payload explicit so
+  // adding an unrelated application column cannot invalidate every decision.
+  const decisionEvidence = {
+    version: DECISION_INPUT_FINGERPRINT_VERSION,
+    application: {
+      annualIncome: app.annualIncome,
+      monthlyDebts: app.monthlyDebts,
+      creditScore: app.creditScore,
+      employmentType: app.employmentType,
+      purchasePrice: app.purchasePrice,
+      downPayment: app.downPayment,
+      propertyValue: app.propertyValue,
+      propertyState: app.propertyState,
+      propertyType: app.propertyType,
+      loanPurpose: app.loanPurpose,
+      amortizationType: app.amortizationType,
+      isVeteran: app.isVeteran,
+      householdFamilySize: app.householdFamilySize,
+      homeSquareFootage: app.homeSquareFootage,
+      financialDataProvenance: app.financialDataProvenance,
+      incomeVerified: app.incomeVerified,
+      assetsVerified: app.assetsVerified,
+      creditVerified: app.creditVerified,
+      currentPropertyDisposition: app.currentPropertyDisposition,
+      departingResidence: app.departingResidence,
+    },
+    incomeInputsFingerprint: fin.incomeInputsFingerprint,
+    incomeEvaluationFingerprint: fin.incomeEvaluationFingerprint,
+  };
+  const prePricingInputsFingerprint = decisionInputFingerprint(decisionEvidence);
+
   // Every decision (including NEEDS_MORE_INFO) carries the income evaluation
   // that produced its income figure, so recalculateDecision can persist it and
   // link it to the snapshot.
-  const base: Pick<InstantDecision, "qualifier" | "isVerified" | "income"> = {
+  const base: Pick<InstantDecision, "qualifier" | "isVerified" | "income" | "inputsFingerprint"> = {
     qualifier,
     isVerified,
+    inputsFingerprint: prePricingInputsFingerprint,
     income: {
       result: fin.income,
       inputsFingerprint: fin.incomeInputsFingerprint,
@@ -493,6 +535,10 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     householdFamilySize: app.householdFamilySize ?? undefined,
     homeSquareFootage: app.homeSquareFootage ?? undefined,
   };
+  const pricedInputsFingerprint = decisionInputFingerprint({
+    ...decisionEvidence,
+    underwritingInput: input,
+  });
 
   let result;
   try {
@@ -510,7 +556,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       // so it lands in the queue with an auditable reason instead of crashing or
       // looping forever asking for documents that would never resolve it.
       if (err.kind === "POLICY_OUT_OF_BAND") {
-        return { status: "DECISION_READY", decision: "MANUAL_REVIEW", reasons: [err.publicMessage], missingItems: [], metrics: null, resolvedPolicy: null, ...base };
+        return { status: "DECISION_READY", decision: "MANUAL_REVIEW", reasons: [err.publicMessage], missingItems: [], metrics: null, resolvedPolicy: null, ...base, inputsFingerprint: pricedInputsFingerprint };
       }
     }
     // Anything else (e.g. a missing policy matrix) is a system fault, not an
@@ -552,6 +598,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
         : 0,
     },
     ...base,
+    inputsFingerprint: pricedInputsFingerprint,
   };
 }
 
@@ -607,6 +654,7 @@ export async function recalculateDecision(
       incomeBasis: d.metrics ? d.metrics.incomeBasis : null,
       reasons: d.reasons,
       missingItems: d.missingItems,
+      inputFingerprint: d.inputsFingerprint,
       resolvedPolicy: d.resolvedPolicy ?? null,
       policyFingerprint: d.resolvedPolicy?.fingerprint ?? null,
       incomePathEvaluationId,

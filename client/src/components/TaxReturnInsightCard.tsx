@@ -64,6 +64,11 @@ interface ConsentRecord {
 
 type Step = "idle" | "consent" | "working";
 
+interface TaxProcessingStatus {
+  status: "queued" | "pending" | "running" | "processing" | "completed" | "failed" | "cancelled";
+  error?: string;
+}
+
 const DISCLAIMER =
   "Educational estimate only — not a prequalification, preapproval, loan offer, or commitment to lend. Figures used in a loan decision are separately verified during a loan application.";
 
@@ -117,7 +122,24 @@ export function TaxReturnInsightCard() {
       const processRes = await apiRequest("POST", "/api/tax-insights/process", {
         documentId: document.id,
       });
-      return processRes.json();
+      await processRes.json();
+
+      // Tax packages can contain dozens of forms. The server owns the durable
+      // work and this view follows its state, so navigating away or a server
+      // restart cannot lose an accepted upload.
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const statusRes = await apiRequest(
+          "GET",
+          `/api/documents/${encodeURIComponent(document.id)}/tax-intelligence`,
+        );
+        const status = await statusRes.json() as TaxProcessingStatus;
+        if (status.status === "completed") return status;
+        if (status.status === "failed" || status.status === "cancelled") {
+          throw new Error(status.error ?? "We couldn't read this tax return automatically.");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+      }
+      throw new Error("Your tax return is still processing. You can come back to this page shortly.");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tax-insights/me"] });
@@ -295,7 +317,7 @@ export function TaxReturnInsightCard() {
         ) : busy ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Reading your return securely — this usually takes a few seconds.
+            Organizing and reading every form securely — larger returns can take a minute or two.
           </div>
         ) : insight && !lowConfidence ? (
           <div className="space-y-2" data-testid="tax-insight-result">

@@ -42,6 +42,7 @@ export const decisionSnapshots = pgTable(
     // Reproducibility: the resolved policy thresholds/matrix cells this decision
     // used, plus a short fingerprint over them. Lookup matrices are mutable, so
     // these let a past decision be reconstructed even after a matrix edit.
+    inputFingerprint: varchar("input_fingerprint", { length: 64 }),
     resolvedPolicy: jsonb("resolved_policy"),
     policyFingerprint: varchar("policy_fingerprint", { length: 64 }),
 

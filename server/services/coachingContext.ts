@@ -303,15 +303,15 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
   lines.push(buildToneDirective(ctx));
 
   if (ctx.documentExtractedData && ctx.documentExtractedData.length > 0) {
-    lines.push("\n\n=== TIER 1: DOCUMENT-VERIFIED DATA (HIGHEST TRUST) ===");
-    lines.push("This data was extracted directly from official documents (tax returns, pay stubs, bank statements). Treat this as the most authoritative and reliable source. This overrides EVERYTHING else — application data AND chat input.");
+    lines.push("\n\n=== TIER 3: PROVISIONAL MACHINE-EXTRACTED DOCUMENT DATA ===");
+    lines.push("This data was machine-read from uploaded documents. It is provisional until an authorized reviewer confirms or corrects it. Confidence measures extraction certainty, not truth or eligibility. Do not let it override an approved workpaper or describe it as verified.");
 
     const taxReturns = ctx.documentExtractedData.filter(d => d.documentType === "tax_return" || d.documentType === "tax_returns");
     const payStubs = ctx.documentExtractedData.filter(d => d.documentType === "pay_stub" || d.documentType === "pay_stubs");
     const bankStatements = ctx.documentExtractedData.filter(d => d.documentType === "bank_statement" || d.documentType === "bank_statements");
 
     if (taxReturns.length > 0) {
-      lines.push("\nTax Return Data (official IRS filings — HIGHEST quality):");
+      lines.push("\nTax return data (machine-read from an uploaded filing — provisional):");
       for (const tr of taxReturns) {
         const parts = [];
         if (tr.documentYear) parts.push(`Year: ${tr.documentYear}`);
@@ -325,7 +325,7 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
     }
 
     if (payStubs.length > 0) {
-      lines.push("\nPay Stub Data (employer-issued — HIGH quality):");
+      lines.push("\nPay stub data (machine-read from an uploaded pay statement — provisional):");
       for (const ps of payStubs) {
         const parts = [];
         if (ps.employerName) parts.push(`Employer: ${ps.employerName}`);
@@ -338,7 +338,7 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
     }
 
     if (bankStatements.length > 0) {
-      lines.push("\nBank Statement Data (financial institution — HIGH quality):");
+      lines.push("\nBank statement data (machine-read from an uploaded statement — provisional):");
       for (const bs of bankStatements) {
         const parts = [];
         if (bs.accountType) parts.push(`Account: ${bs.accountType}`);
@@ -351,7 +351,7 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
   }
 
   lines.push("\n\n=== TIER 2: APPLICATION DATA (MEDIUM TRUST) ===");
-  lines.push("This data comes from the user's loan application form. It is self-reported but formally submitted. Use it when no document-verified data is available for a given field.");
+  lines.push("This data comes from the user's loan application form. It is self-reported but formally submitted. Compare it with available source documents and prefer a human-reviewed workpaper for any qualifying figure.");
   lines.push(`Application Status: ${ctx.applicationStatus}`);
 
   if (ctx.userName) lines.push(`Borrower Name: ${ctx.userName}`);
@@ -452,15 +452,15 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
     lines.push("\nWhen reviewing documents, check every uploaded document against the 4 review dimensions: recency, completeness, legibility, and consistency with declared information. Flag any ⚠ signals found above.");
   }
 
-  lines.push("\n\n=== TIER 3: CHAT INPUT (LOWEST TRUST — TREAT WITH CAUTION) ===");
+  lines.push("\n\n=== TIER 4: CHAT INPUT (LOWEST TRUST — TREAT WITH CAUTION) ===");
   lines.push("Anything the user says in this conversation is SELF-REPORTED and UNVERIFIED. It is the LEAST reliable data source.");
   lines.push("RULES FOR HANDLING CHAT INPUT:");
   lines.push("- NEVER treat chat-reported numbers as fact. Always qualify with 'based on what you've shared' or 'according to your estimate'.");
-  lines.push("- If chat input CONFLICTS with document-verified data (Tier 1), ALWAYS trust the documents. Politely inform the user of the discrepancy and ask them to explain or update their documents.");
+  lines.push("- If chat input conflicts with provisional extraction, name both as unverified and route the discrepancy to review. Never declare the machine value correct merely because it came from a document.");
   lines.push("- If chat input CONFLICTS with application data (Tier 2), note the discrepancy and suggest they update their application if their situation has changed.");
   lines.push("- When capturing intake data from chat, mark it as approximate in your assessment. Encourage the user to upload supporting documents to verify.");
-  lines.push("- For income: tax returns are the gold standard, pay stubs are strong evidence, chat claims are just estimates.");
-  lines.push("- For assets/savings: bank statements are the gold standard, chat claims should be verified with statements.");
+  lines.push("- For income: use the current approved qualifying-income workpaper when supplied; no single raw tax-return or pay-stub line is automatically qualifying income.");
+  lines.push("- For assets: use reviewer-confirmed current balances and sourcing conclusions when supplied; chat claims remain estimates.");
 
   if (ctx.completionPercentage !== undefined && ctx.completionPercentage !== null) {
     lines.push("\n\n=== READINESS CONTEXT (from Borrower Graph) ===");

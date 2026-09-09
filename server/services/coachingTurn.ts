@@ -389,7 +389,10 @@ function buildDynamicContext(ctx: VerifiedUserContext, existingProfile?: unknown
     ? `\n\nExisting financial profile from previous assessment:\n${JSON.stringify(existingProfile, null, 2)}\n\nUse this as context but update if the user provides new information.`
     : "";
   const combined = `${verifiedNote}${profileNote}`.trim();
-  return combined.length > 0 ? combined : "No verified borrower context is available yet.";
+  const data = combined.length > 0 ? combined : "No verified borrower context is available yet.";
+  // Delimit dynamic borrower-controlled strings as data. The static prompt
+  // explicitly says content inside this block cannot issue instructions.
+  return `<borrower_context trust="data-only">\n${data.replaceAll("</borrower_context>", "&lt;/borrower_context&gt;")}\n</borrower_context>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +413,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your employment type",
       why: "Underwriting systems use this to determine which income documents are required and how income is calculated.",
       effort: "About 30 seconds — just tell me what kind of work you do.",
-      unlocks: `Employment-specific document checklist and income verification path. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "The correct income questions and document checklist can be prepared.",
     };
   }
   if (!ctx.annualIncome) {
@@ -418,7 +421,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your approximate annual income",
       why: "Underwriting systems use income to calculate your debt-to-income ratio and determine borrowing capacity.",
       effort: "About 30 seconds — a rough estimate is fine for now, documents will verify later.",
-      unlocks: `Enables DTI calculation and affordability assessment. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "Your income can be included in the preliminary debt-to-income calculation.",
     };
   }
   if (!ctx.creditScore) {
@@ -426,7 +429,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your approximate credit score range",
       why: "Underwriting systems use credit scores to determine which loan programs your profile can be evaluated against.",
       effort: "About 30 seconds — even a rough range works. You can check for free through your bank.",
-      unlocks: `Enables program matching and rate tier assessment. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "The loan team can place your credit information in the current application profile.",
     };
   }
   if (!ctx.monthlyDebts) {
@@ -434,7 +437,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your approximate total monthly debts (car payments, student loans, credit card minimums, etc.)",
       why: "Underwriting systems use this alongside your income to calculate your debt-to-income ratio.",
       effort: "About 1 minute — add up your monthly minimums. A rough estimate is fine.",
-      unlocks: `Completes your DTI calculation, one of the key metrics for readiness. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "Your preliminary debt-to-income calculation can include the debts you reported.",
     };
   }
   if (!ctx.purchasePrice) {
@@ -442,7 +445,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your target purchase price or price range",
       why: "Underwriting systems need this to calculate loan-to-value ratio and assess down payment adequacy.",
       effort: "About 30 seconds — a range is fine if you're still exploring.",
-      unlocks: `Enables LTV calculation and down payment assessment. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "The loan amount and preliminary loan-to-value calculation can be prepared.",
     };
   }
   if (!ctx.downPayment) {
@@ -450,7 +453,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: "Your estimated down payment amount",
       why: "Underwriting systems use this to calculate your loan-to-value ratio and determine PMI requirements.",
       effort: "About 30 seconds — approximate amount you have available.",
-      unlocks: `Enables LTV and PMI assessment. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 8)}%.`,
+      unlocks: "The loan amount and preliminary loan-to-value calculation can be prepared.",
     };
   }
   if (ctx.documentsMissing && ctx.documentsMissing.length > 0) {
@@ -459,7 +462,7 @@ function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: st
       what: `Upload your ${doc}`,
       why: `Underwriting systems require this document to verify your self-reported information.`,
       effort: "About 2 minutes — upload a photo or PDF.",
-      unlocks: `Document verification for your profile. Moves your completion to ${Math.min(100, (ctx.completionPercentage || 0) + 5)}%.`,
+      unlocks: "The loan team can review that checklist item and update its real status.",
     };
   }
   return null;
@@ -542,7 +545,7 @@ ${formatNextRequiredInput(
         "Your approximate credit score range",
         "Underwriting systems use credit scores to determine which loan programs your profile can be evaluated against.",
         "About 30 seconds — even a rough range works. You can check for free through your bank.",
-        `Enables program matching and rate tier assessment. Moves your completion to ${Math.min(100, completion + 8)}%.`
+        "The loan team can place your credit information in the current application profile."
       ),
     };
   }
@@ -555,7 +558,7 @@ ${formatNextRequiredInput(
           `Upload your ${doc}`,
           "Underwriting systems require this document to verify your self-reported information against official records.",
           "About 2 minutes — upload a photo or PDF.",
-          `Document verification for your profile. Moves your completion to ${Math.min(100, completion + 5)}%.`
+          "The loan team can review that checklist item and update its real status."
         ),
       };
     }

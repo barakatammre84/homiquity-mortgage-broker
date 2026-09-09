@@ -26,6 +26,10 @@ import {
   withDocumentWorkflowLock,
 } from "../../services/documentLineage";
 import { sha256LocalObject } from "../../integrations/object_storage";
+import {
+  kickDocumentExtractionWorker,
+  standardDocumentNeedsExtraction,
+} from "../../services/documentExtractionJobs";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -42,11 +46,16 @@ export function registerDocumentRoutes(
   dependencies: {
     registerDocumentVersion?: typeof registerDocumentVersion;
     registerRequestedDocumentVersion?: typeof registerRequestedDocumentVersion;
+    dispatchQueuedExtraction?: () => void;
   } = {},
 ) {
   const persistDocumentVersion = dependencies.registerDocumentVersion ?? registerDocumentVersion;
   const persistRequestedDocumentVersion =
     dependencies.registerRequestedDocumentVersion ?? registerRequestedDocumentVersion;
+  const dispatchQueuedExtraction = dependencies.dispatchQueuedExtraction ??
+    (dependencies.registerDocumentVersion || dependencies.registerRequestedDocumentVersion
+      ? () => {}
+      : kickDocumentExtractionWorker);
   app.get("/api/loan-applications/:id/declarations", isAuthenticated, async (req, res) => {
     try {
       const { id } = routeParams(req);
@@ -221,6 +230,26 @@ export function registerDocumentRoutes(
         applicationId = pickWorkableLoanApplication(apps)?.id ?? null;
       }
 
+      // Decide the background workflow before registration so the document and
+      // its extraction job commit atomically. The worker re-checks Autopilot's
+      // kill switch at execution time as a second safety boundary.
+      let autopilotEnabled = false;
+      if (applicationId) {
+        const { getAutopilotConfig, isAutopilotEnabled } = await import("../../services/autopilot/config");
+        if ((await getAutopilotConfig()).enabled) {
+          const appForGate = await storage.getLoanApplication(applicationId);
+          autopilotEnabled = await isAutopilotEnabled(appForGate?.loanOfficerId);
+        }
+      }
+      // Tax packages enter the richer, consent-gated multi-form queue from
+      // /api/tax-insights/process. Do not spend a second model pass through
+      // generic Autopilot when that explicit borrower action follows upload.
+      const extractionMode = autopilotEnabled && documentType !== "tax_return"
+        ? "autopilot" as const
+        : standardDocumentNeedsExtraction(documentType)
+          ? "standard" as const
+          : null;
+
       // Soft duplicate detection (same name + size for this borrower). Never
       // blocks — the response carries the hint so the UI can surface it.
       const existingDocs = await storage.getDocumentsByUser(userId);
@@ -239,6 +268,9 @@ export function registerDocumentRoutes(
         actor: { id: userId, role: user.role },
         contentSha256,
         replacesDocumentId: parsed.data.replacesDocumentId,
+        ...(extractionMode
+          ? { extractionJob: { mode: extractionMode, requestedByUserId: userId } }
+          : {}),
         document: {
           userId,
           applicationId,
@@ -343,62 +375,10 @@ export function registerDocumentRoutes(
         );
       }
 
-      // Autopilot gate: when the agent is active (and this file is in pilot
-      // scope), the orchestrator handles perception + package-gap follow-ups +
-      // narration; otherwise fall back to today's bare auto-extraction. The
-      // global `enabled` check is cached, so an upload pays no extra query when
-      // Autopilot is off (the default).
-      let autopilotEnabled = false;
-      if (applicationId) {
-        const { getAutopilotConfig, isAutopilotEnabled } = await import("../../services/autopilot/config");
-        if ((await getAutopilotConfig()).enabled) {
-          const appForGate = await storage.getLoanApplication(applicationId);
-          autopilotEnabled = await isAutopilotEnabled(appForGate?.loanOfficerId);
-        }
-      }
-
-      // Fire-and-forget extraction for types that need no extra inputs — the
-      // record is created either way; extraction enriches it in the background.
-      const AUTO_EXTRACT: Record<string, "extractPayStubData" | "extractBankStatementData" | "extractLeaseData"> = {
-        pay_stub: "extractPayStubData",
-        bank_statement: "extractBankStatementData",
-        lease_agreement: "extractLeaseData",
-      };
-      const extractor = AUTO_EXTRACT[documentType];
-      if (autopilotEnabled && applicationId) {
-        const { runAutopilotForDocument } = await import("../../services/autopilot/orchestrator");
-        void runAutopilotForDocument({
-          applicationId,
-          documentId: document.id,
-          documentType,
-          storagePath: document.storagePath,
-          fileSize: document.fileSize,
-          triggeredBy: userId,
-        }).catch((err) =>
-          console.warn(`[Autopilot] Document run failed for ${document.id} (non-fatal):`, err?.message || err),
-        );
-      } else if (extractor) {
-        (async () => {
-          const svc = await import("../../extractionService");
-          const extracted = await svc[extractor](document.storagePath);
-          // Shared with the staff-triggered POST /api/documents/:id/extract, so
-          // the borrower's own upload persists the VALUES the model read and
-          // credits readiness — not just the field names. These two paths used
-          // to be separate implementations and drifted; see the module docblock.
-          const { applyExtractionToDocument } = await import("../../services/extractionPersistence");
-          await applyExtractionToDocument({
-            storage,
-            userId,
-            documentId: document.id,
-            documentType,
-            applicationId: applicationId || null,
-            fileSize: document.fileSize ?? undefined,
-            extracted,
-          });
-        })().catch((err) =>
-          console.warn(`[Documents] Auto-extraction failed for ${document.id} (non-fatal):`, err?.message || err),
-        );
-      }
+      // The durable worker claims the job with a database lease. Kicking it is
+      // only a latency optimization: startup recovery and the polling loop will
+      // resume the same row after a restart even if this process stops here.
+      if (extractionMode) dispatchQueuedExtraction();
 
       res.status(201).json({
         ...toDocumentViewForRole(document, user.role),

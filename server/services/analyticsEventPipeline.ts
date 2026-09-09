@@ -5,6 +5,7 @@ import {
   type InsertAnalyticsEvent,
 } from "@shared/schema";
 import { eq, and, gte, lte, sql, desc, count } from "drizzle-orm";
+import type { DatabaseTransaction } from "./documentLineage";
 
 export async function emitEvent(
   domain: AnalyticsDomain,
@@ -23,10 +24,11 @@ export async function emitEvent(
     newValue?: any;
     source?: string;
     automationTriggered?: boolean;
-  } = {}
+  } = {},
+  transaction: DatabaseTransaction | typeof db = db,
 ): Promise<void> {
   try {
-    await db.insert(analyticsEvents).values({
+    await transaction.insert(analyticsEvents).values({
       domain,
       eventName,
       applicationId: options.applicationId || null,

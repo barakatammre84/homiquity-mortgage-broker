@@ -148,7 +148,7 @@ async function runSample(sample: ToolTriggerSample): Promise<Outcome> {
     if (toolsCalled.includes(tool)) failures.push(`called ${tool} on a general question`);
   }
   for (const needle of sample.mustMention ?? []) {
-    if (!reply.includes(needle)) failures.push(`reply omits "${needle}" from the tool result`);
+    if (!lower.includes(needle.toLowerCase())) failures.push(`reply omits "${needle}" from the tool result`);
   }
   for (const needle of sample.mustNotMention ?? []) {
     if (lower.includes(needle.toLowerCase())) failures.push(`reply contains "${needle}"`);
@@ -181,14 +181,14 @@ async function main() {
       console.log(`         stop_reasons: ${outcome.stopReasons.join(" → ") || "(none)"}`);
       console.log(
         `         reply (${outcome.reply.length} chars): ${
-          outcome.reply.replace(/\s+/g, " ").slice(0, 400) || "(EMPTY)"
+          outcome.reply.replace(/\s+/g, " ").slice(0, 1_200) || "(EMPTY)"
         }`,
       );
     }
   }
 
   console.log("\n  by property");
-  for (const property of ["trigger", "restraint", "grounding", "honest_gap"] as const) {
+  for (const property of ["trigger", "restraint", "grounding", "honest_gap", "prompt_injection"] as const) {
     const group = outcomes.filter((o) => o.sample.property === property);
     if (group.length === 0) continue;
     const passed = group.filter((o) => !o.error && o.failures.length === 0).length;

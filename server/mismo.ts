@@ -957,9 +957,21 @@ function buildLoanNode(dto: MISMOLoanDTO, mersMin?: string, loanState?: LoanStat
         ],
       });
     }
+    const decisionPath = (
+      application.ausFindings as {
+        decisionPath?: string;
+        inputIntegrity?: { decisionPath?: string };
+      } | null
+    )?.inputIntegrity?.decisionPath
+      ?? (application.ausFindings as { decisionPath?: string } | null)?.decisionPath;
+    // When no recognized AUS result exists, or the local engine explicitly
+    // routed the file out of its automated matrix, the lender package must say
+    // manual underwriting. A hardcoded false misstates the very workflow the
+    // findings and readiness gate ask the loan officer to follow.
+    const manualUnderwriting = !ausRecommendation || decisionPath === "manual_underwrite";
     underwritingChildren.push({
       tag: "UNDERWRITING_DETAIL",
-      children: [{ tag: "LoanManualUnderwritingIndicator", text: "false" }],
+      children: [{ tag: "LoanManualUnderwritingIndicator", text: String(manualUnderwriting) }],
     });
     loanChildren.push({ tag: "UNDERWRITING", children: underwritingChildren });
   }

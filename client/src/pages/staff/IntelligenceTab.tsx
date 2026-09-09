@@ -57,6 +57,17 @@ interface CoreCapabilityReport {
   environment: "production" | "non_production";
   readyForLiveLoanLifecycle: boolean;
   counts: Record<CoreCapabilityState, number>;
+  documentExtractionQueue: {
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    retryScheduled: number;
+    staleLeases: number;
+    oldestPendingAt: string | null;
+    lastCompletedAt: string | null;
+  };
   capabilities: Array<{
     id: string;
     label: string;
@@ -438,6 +449,54 @@ export default function IntelligenceTab() {
                         <p className="text-xl font-semibold">{coreCapabilities.counts[state]}</p>
                       </div>
                     ))}
+                  </div>
+                  <div className="rounded-lg border p-4" data-testid="document-extraction-queue">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="font-medium">Document extraction queue</p>
+                        <p className="text-xs text-muted-foreground">
+                          Durable work that resumes after a deploy or process restart.
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          coreCapabilities.documentExtractionQueue.failed > 0 ||
+                          coreCapabilities.documentExtractionQueue.staleLeases > 0
+                            ? "destructive"
+                            : coreCapabilities.documentExtractionQueue.pending > 0 ||
+                                coreCapabilities.documentExtractionQueue.processing > 0
+                              ? "secondary"
+                              : "default"
+                        }
+                      >
+                        {coreCapabilities.documentExtractionQueue.failed > 0
+                          ? "Needs attention"
+                          : coreCapabilities.documentExtractionQueue.pending > 0 ||
+                              coreCapabilities.documentExtractionQueue.processing > 0
+                            ? "Working"
+                            : "Healthy"}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {([
+                        ["Pending", coreCapabilities.documentExtractionQueue.pending],
+                        ["Processing", coreCapabilities.documentExtractionQueue.processing],
+                        ["Retry scheduled", coreCapabilities.documentExtractionQueue.retryScheduled],
+                        ["Failed", coreCapabilities.documentExtractionQueue.failed],
+                        ["Stale leases", coreCapabilities.documentExtractionQueue.staleLeases],
+                      ] as const).map(([label, value]) => (
+                        <div key={label} className="rounded-md bg-muted/40 p-2">
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className="text-lg font-semibold">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Last completed:{" "}
+                      {coreCapabilities.documentExtractionQueue.lastCompletedAt
+                        ? new Date(coreCapabilities.documentExtractionQueue.lastCompletedAt).toLocaleString()
+                        : "not recorded"}
+                    </p>
                   </div>
                   {coreCapabilities.capabilities.map(capability => (
                     <div

@@ -6,8 +6,8 @@ import {
   extractTaxReturnData,
   EXTRACTION_MODEL_ID,
   EXTRACTION_PROMPT_VERSION,
+  type ExtractedDocumentData,
 } from "../../extractionService";
-import { recordCoarseExtraction } from "../documentConfidence";
 import { logAiInteraction } from "../aiInteractionLog";
 import { recalculateDecision } from "../decisionEngine";
 import { evaluateBrokerSubmissionReadiness } from "../brokerSubmissionReadiness";
@@ -23,10 +23,11 @@ import type { PreUwFlag } from "../preUnderwriting";
 import type { LoanApplication } from "@shared/schema";
 import { toNum } from "@shared/lib/number";
 import {
-  documentProcessingBlockReason,
   getDocumentProcessingBlockReason,
-  withDocumentWorkflowLock,
+  type DatabaseTransaction,
 } from "../documentLineage";
+import { applyExtractionToDocument } from "../extractionPersistence";
+import { classifyExtractionResult } from "../documentExtractionOutcome";
 
 /**
  * Autopilot document orchestrator — the always-on agent's reaction to a borrower
@@ -56,15 +57,16 @@ export interface AutopilotDocumentParams {
   storagePath: string;
   fileSize?: number | null;
   triggeredBy: string;
+  beforePersist?: (transaction: DatabaseTransaction) => Promise<void>;
+  assertActive?: () => Promise<void>;
 }
 
 interface ExtractionOutcome {
-  confidence: "high" | "medium" | "low";
-  extractedFields: string[];
-  warnings?: string[];
-  modelId?: string;
+  extracted: ExtractedDocumentData;
   /** Human-readable narration lines derived from the extraction. */
   highlights: string[];
+  /** Page classification withheld the extracted values from the evidence graph. */
+  classificationBlocked?: boolean;
 }
 
 const usd = (n: number): string => `$${Math.round(n).toLocaleString()}`;
@@ -89,7 +91,7 @@ async function extractByType(
       if (e.employerName) highlights.push(`Employer: ${e.employerName}`);
       if (e.grossPay != null) highlights.push(`Gross pay (period): ${usd(e.grossPay)}`);
       if (e.ytdGross != null) highlights.push(`YTD gross: ${usd(e.ytdGross)}`);
-      return { confidence: e.confidence, extractedFields: e.extractedFields, warnings: e.warnings, modelId: e.modelId, highlights };
+      return { extracted: e, highlights };
     }
     case "tax_return": {
       const e = await extractTaxReturnData(storagePath);
@@ -107,17 +109,17 @@ async function extractByType(
         }
       }
       if (e.scheduleC?.netProfitLoss != null) highlights.push(`Schedule C net profit: ${usd(e.scheduleC.netProfitLoss)}`);
-      return { confidence: e.confidence, extractedFields: e.extractedFields, warnings: e.warnings, modelId: e.modelId, highlights };
+      return { extracted: e, highlights };
     }
     case "bank_statement": {
       const e = await extractBankStatementData(storagePath);
       if (e.closingBalance != null) highlights.push(`Closing balance: ${usd(e.closingBalance)}`);
       if (e.totalDeposits != null) highlights.push(`Total deposits: ${usd(e.totalDeposits)}`);
-      return { confidence: e.confidence, extractedFields: e.extractedFields, warnings: e.warnings, modelId: e.modelId, highlights };
+      return { extracted: e, highlights };
     }
     case "lease_agreement": {
       const e = await extractLeaseData(storagePath);
-      return { confidence: e.confidence, extractedFields: e.extractedFields, warnings: e.warnings, modelId: e.modelId, highlights };
+      return { extracted: e, highlights };
     }
     default:
       return null;
@@ -132,12 +134,13 @@ function buildNarration(p: {
 }): string {
   const parts: string[] = [];
   if (p.outcome) {
-    parts.push(
-      p.outcome.highlights.length
+    const extracted = p.outcome.extracted;
+    parts.push(p.outcome.classificationBlocked
+      ? "Document received; its page type needs manual classification before any values are used."
+      : p.outcome.highlights.length
         ? p.outcome.highlights.join(" · ")
-        : `Parsed ${p.outcome.extractedFields.length} field(s) (confidence: ${p.outcome.confidence}).`,
-    );
-    if (p.outcome.warnings?.length) parts.push(`Notes: ${p.outcome.warnings.join("; ")}.`);
+        : `Parsed ${extracted.extractedFields.length} field(s) (confidence: ${extracted.confidence}).`);
+    if (extracted.warnings?.length) parts.push(`Notes: ${extracted.warnings.join("; ")}.`);
   } else if (p.extractionFailed) {
     parts.push("Document received; automated parsing was unavailable for this file.");
   } else {
@@ -206,21 +209,45 @@ export async function runAutopilotForSection(params: {
   }
 }
 
-export async function runAutopilotForDocument(params: AutopilotDocumentParams): Promise<void> {
-  const { applicationId, documentId, documentType, storagePath, fileSize, triggeredBy } = params;
+export interface AutopilotDocumentRunResult {
+  status: "completed" | "skipped" | "failed";
+  errorCode: string;
+  retryable: boolean;
+}
+
+export async function runAutopilotForDocument(
+  params: AutopilotDocumentParams,
+): Promise<AutopilotDocumentRunResult> {
+  const {
+    applicationId,
+    documentId,
+    documentType,
+    storagePath,
+    fileSize,
+    triggeredBy,
+    beforePersist,
+    assertActive,
+  } = params;
   const startedAt = Date.now();
+  let extractionPersisted = false;
   try {
     const application = await storage.getLoanApplication(applicationId);
-    if (!application) return;
+    if (!application) {
+      return { status: "skipped", errorCode: "application_not_found", retryable: false };
+    }
 
     // Defensive re-check of the kill switch + pilot allowlist (the caller also
     // gates; this makes the orchestrator safe to invoke from anywhere).
-    if (!(await isAutopilotEnabled(application.loanOfficerId))) return;
+    if (!(await isAutopilotEnabled(application.loanOfficerId))) {
+      return { status: "skipped", errorCode: "autopilot_disabled", retryable: false };
+    }
 
     // Avoid model work when this upload was already reviewed or replaced
     // before the detached job started. Persistence repeats the check because
     // the state can still change while the model is running.
-    if (await getDocumentProcessingBlockReason(documentId)) return;
+    if (await getDocumentProcessingBlockReason(documentId)) {
+      return { status: "skipped", errorCode: "document_no_longer_processable", retryable: false };
+    }
 
     // Live banner: flip the borrower's status to "We're reviewing your
     // information…" for anyone watching the SSE stream in this process.
@@ -228,72 +255,63 @@ export async function runAutopilotForDocument(params: AutopilotDocumentParams): 
 
     // 1. PERCEIVE (+ 2. RECONCILE narration) ---------------------------------
     let outcome: ExtractionOutcome | null = null;
-    let extractionFailed = false;
     try {
       outcome = await extractByType(documentType, storagePath, application);
     } catch (err) {
-      extractionFailed = true;
-      console.error(`[Autopilot] Extraction failed for ${documentId} (non-fatal):`, err);
+      console.error(`[Autopilot] Extraction failed for ${documentId}:`, err);
+      await publishCurrentStatus(applicationId);
+      return { status: "failed", errorCode: "provider_or_storage_failure", retryable: true };
     }
 
     if (outcome) {
-      const persisted = await withDocumentWorkflowLock(
-        documentId,
-        async (currentDocument, isCurrentVersion) => {
-          if (documentProcessingBlockReason(currentDocument, isCurrentVersion)) {
-            return false;
-          }
-          const { humanReviewRequired } = await recordCoarseExtraction({
-            documentId,
-            documentType,
-            applicationId,
-            confidence: outcome!.confidence,
-            extractedFields: outcome!.extractedFields,
-            fileSize: fileSize ?? undefined,
-          });
-          await storage.updateDocument(documentId, {
-            // MR-2: a doc that clears the review threshold is staged "verifying" for a
-            // human to confirm; AI confidence never auto-sets "verified".
-            status: !humanReviewRequired ? "verifying" : "uploaded",
-            notes: JSON.stringify({
-              extractedAt: new Date().toISOString(),
-              extractedFields: outcome!.extractedFields,
-              confidence: outcome!.confidence,
-              humanReviewRequired,
-              warnings: outcome!.warnings,
-              modelId: outcome!.modelId ?? EXTRACTION_MODEL_ID,
-            }),
-          });
-
-          // Governance: extraction previously logged only to the document row.
-          await logAiInteraction({
-            applicationId,
-            userId: triggeredBy,
-            workflow: "autopilot_extraction",
-            provider: "claude",
-            model: outcome!.modelId ?? EXTRACTION_MODEL_ID,
-            systemPrompt: EXTRACTION_PROMPT_VERSION,
-            prompt: `Autopilot document extraction: ${documentType} (${documentId})`,
-            response: outcome!.extractedFields.join(", "),
-            classification: "internal_only",
-            latencyMs: Date.now() - startedAt,
-          });
-          return true;
-        },
-      );
-      if (!persisted) {
+      const failure = classifyExtractionResult(outcome.extracted);
+      if (failure) {
         await publishCurrentStatus(applicationId);
-        return;
+        return { status: "failed", errorCode: failure.code, retryable: failure.retryable };
       }
+      const persisted = await applyExtractionToDocument({
+        storage,
+        userId: application.userId,
+        documentId,
+        documentType,
+        applicationId,
+        fileSize: fileSize ?? undefined,
+        extracted: outcome.extracted,
+        beforePersist,
+      });
+      if (persisted.skipReason) {
+        await publishCurrentStatus(applicationId);
+        return { status: "skipped", errorCode: `document_${persisted.skipReason}`, retryable: false };
+      }
+      outcome.classificationBlocked = persisted.classificationBlocked;
+      extractionPersisted = true;
+      await assertActive?.();
+
+      // Governance log stays separate from the encrypted raw response and the
+      // structured fact rows written by applyExtractionToDocument.
+      await logAiInteraction({
+        applicationId,
+        userId: triggeredBy,
+        workflow: "autopilot_extraction",
+        provider: "claude",
+        model: outcome.extracted.modelId ?? EXTRACTION_MODEL_ID,
+        systemPrompt: outcome.extracted.promptVersion ?? EXTRACTION_PROMPT_VERSION,
+        prompt: `Autopilot document extraction: ${documentType} (${documentId})`,
+        response: outcome.extracted.extractedFields.join(", "),
+        classification: "internal_only",
+        latencyMs: Date.now() - startedAt,
+      });
     }
 
     // 3. COGNIZE — refresh the pre-qualification snapshot (append-only, safe). --
+    await assertActive?.();
     await recalculateDecision(applicationId, "autopilot_document");
 
     // 4. ACT — give the file's current flags teeth (cited package follow-ups). -
     let createdFollowUps: string[] = [];
     const flags = (application.preUwFlags as { flags?: PreUwFlag[] } | null)?.flags ?? [];
     if (flags.length > 0 && (await canGenerateFollowUps())) {
+      await assertActive?.();
       const res = await materializeFlagsToFollowUps(applicationId, flags);
       createdFollowUps = res.created;
     }
@@ -310,18 +328,31 @@ export async function runAutopilotForDocument(params: AutopilotDocumentParams): 
     }
 
     // 6. NARRATE — one rich activity-feed entry (LO Timeline + borrower file). --
+    await assertActive?.();
     await storage.createDealActivity({
       applicationId,
       activityType: "autopilot_review",
       title: `Autopilot reviewed ${prettyDocType(documentType)}`,
-      description: buildNarration({ outcome, extractionFailed, createdFollowUps, readinessLine }),
+      description: buildNarration({ outcome, extractionFailed: false, createdFollowUps, readinessLine }),
       performedBy: application.userId,
     });
 
     // 7. Live banner: push the result state ("Looks good!" / "A few items
     // needed.") to anyone watching the borrower's SSE stream.
     await publishCurrentStatus(applicationId);
+    return { status: "completed", errorCode: "none", retryable: false };
   } catch (err) {
     console.error(`[Autopilot] Document run failed for ${params.documentId} (non-fatal):`, err);
+    try {
+      await publishCurrentStatus(applicationId);
+    } catch {
+      /* a status refresh must not hide the extraction result */
+    }
+    // Once structured facts are committed, retrying the whole Autopilot pass
+    // would pay for and persist the same extraction twice. The remaining steps
+    // are advisory and report their own failures.
+    return extractionPersisted
+      ? { status: "completed", errorCode: "post_extraction_advisory_failure", retryable: false }
+      : { status: "failed", errorCode: "unexpected_autopilot_failure", retryable: true };
   }
 }
