@@ -166,7 +166,9 @@ describe.sequential("financial workpapers and cited memo", () => {
     expect(current.memo.workpaperVersionIds).toHaveLength(6);
     expect(current.memo.sections.find((section: { key: string }) => section.key === "business").body).toContain("Fictional S Corp");
     expect(current.memo.sections.find((section: { key: string }) => section.key === "business").referenceIds).toContain(`document:${documentIds[2]}`);
-    expect(current.memo.references.some((reference: { type: string; label: string }) => reference.type === "document" && reference.label.includes("p. 1"))).toBe(true);
+    expect(current.memo.references.some((reference: { type: string; label: string; pageNumber?: number }) =>
+      reference.type === "document" && reference.label.includes("p. 1") && reference.pageNumber === 1,
+    )).toBe(true);
     const approved = await call("lo", `/api/loan-applications/${applicationId}/financial-review/memo/${memoId}/review`, { action: "approve", reason: "Approved for lender presentation after complete review.", expectedFingerprint: current.memo.inputFingerprint });
     expect(approved.status).toBe(201);
     expect((await workspace()).memo.review.action).toBe("approve");

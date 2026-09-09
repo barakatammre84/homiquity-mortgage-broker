@@ -121,6 +121,7 @@ export type CreditMemoReference = {
   type: "workpaper" | "document" | "verified_fact";
   id: string;
   label: string;
+  pageNumber?: number;
 };
 
 export type CreditMemoSection = {

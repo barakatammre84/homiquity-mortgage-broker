@@ -122,13 +122,20 @@ async function visitNormalizedDocumentPages(
     const image = await loadImage(bytes);
     const size = normalizedDimensions(image.width, image.height);
     const canvas = createCanvas(size.width, size.height);
-    canvas.getContext("2d").drawImage(image, 0, 0, size.width, size.height);
-    await visit({
-      pageNumber: 1,
-      bytes: canvas.toBuffer("image/png"),
-      width: size.width,
-      height: size.height,
-    });
+    try {
+      canvas.getContext("2d").drawImage(image, 0, 0, size.width, size.height);
+      await visit({
+        pageNumber: 1,
+        bytes: canvas.toBuffer("image/png"),
+        width: size.width,
+        height: size.height,
+      });
+    } finally {
+      // @napi-rs/canvas owns native pixel memory outside V8's ordinary heap.
+      // Resize immediately after persistence instead of waiting for a later GC.
+      canvas.width = 0;
+      canvas.height = 0;
+    }
     return 1;
   }
 
@@ -155,18 +162,25 @@ async function visitNormalizedDocumentPages(
       );
       const viewport = page.getViewport({ scale });
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-      await page.render({
-        canvas: canvas as never,
-        canvasContext: canvas.getContext("2d") as never,
-        viewport,
-      }).promise;
-      await visit({
-        pageNumber,
-        bytes: canvas.toBuffer("image/png"),
-        width: canvas.width,
-        height: canvas.height,
-      });
-      page.cleanup();
+      try {
+        await page.render({
+          canvas: canvas as never,
+          canvasContext: canvas.getContext("2d") as never,
+          viewport,
+        }).promise;
+        const width = canvas.width;
+        const height = canvas.height;
+        await visit({
+          pageNumber,
+          bytes: canvas.toBuffer("image/png"),
+          width,
+          height,
+        });
+      } finally {
+        page.cleanup();
+        canvas.width = 0;
+        canvas.height = 0;
+      }
     }
   } finally {
     await loadingTask.destroy();
@@ -494,39 +508,37 @@ export async function materializeDocumentPages(input: {
         pageCount: rendered.length,
       }).returning({ id: documentUploads.id });
 
-      const pageRows: Array<{ id: string; pageNumber: number }> = [];
-      for (let index = 0; index < rendered.length; index++) {
-        const page = rendered[index];
-        const [row] = await transaction.insert(documentPages).values({
+      const pageRows = await transaction.insert(documentPages).values(
+        rendered.map((page, index) => ({
           uploadId: upload.id,
           pageNumber: page.pageNumber,
           imageUri: storedUris[index],
           width: page.width,
           height: page.height,
           ocrEngine: "pdfjs_canvas_normalizer",
-        }).returning({ id: documentPages.id, pageNumber: documentPages.pageNumber });
-        pageRows.push(row);
-
-        const classification = input.classification.pages.find(
-          (candidate) => candidate.pageNumber === page.pageNumber,
-        )!;
-        await transaction.insert(pageClassifications).values({
-          pageId: row.id,
+        })),
+      ).returning({ id: documentPages.id, pageNumber: documentPages.pageNumber });
+      const pageIdByNumber = new Map(pageRows.map((page) => [page.pageNumber, page.id]));
+      const classificationByPage = new Map(
+        input.classification.pages.map((classification) => [classification.pageNumber, classification]),
+      );
+      await transaction.insert(pageClassifications).values(pageRows.map((page) => {
+        const classification = classificationByPage.get(page.pageNumber)!;
+        return {
+          pageId: page.id,
           documentType: classification.documentType,
           confidence: classification.confidence.toFixed(4),
           modelVersion: input.modelVersion,
           classificationMethod: "model_vision",
-        });
-      }
+        };
+      }));
 
       const segments = input.createLogicalDocuments === false
         ? []
         : classificationSegments(input.classification);
-      for (const segment of segments) {
-        const segmentPages = pageRows.filter(
-          (page) => page.pageNumber >= segment.pageStart && page.pageNumber <= segment.pageEnd,
-        );
-        const [logical] = await transaction.insert(logicalDocuments).values({
+      const persistedSegments = segments.length === 0
+        ? []
+        : await transaction.insert(logicalDocuments).values(segments.map((segment) => ({
           loanId: input.document.applicationId ?? null,
           borrowerId: input.borrowerUserId,
           documentType: segment.documentType,
@@ -535,18 +547,26 @@ export async function materializeDocumentPages(input: {
           sourceDocumentId: input.document.id,
           pageStart: segment.pageStart,
           pageEnd: segment.pageEnd,
-          expectedPageCount: segmentPages.length,
-          actualPageCount: segmentPages.length,
+          expectedPageCount: segment.pageEnd - segment.pageStart + 1,
+          actualPageCount: segment.pageEnd - segment.pageStart + 1,
           isComplete: true,
           modelId: input.modelVersion,
-        }).returning({ id: logicalDocuments.id });
-        if (segmentPages.length > 0) {
-          await transaction.insert(logicalDocumentPages).values(segmentPages.map((page, index) => ({
-            logicalDocumentId: logical.id,
-            pageId: page.id,
-            pageOrder: index + 1,
-          })));
-        }
+        }))).returning({
+          id: logicalDocuments.id,
+          pageStart: logicalDocuments.pageStart,
+          pageEnd: logicalDocuments.pageEnd,
+        });
+      const pageLinks = persistedSegments.flatMap((segment) => {
+        const pageStart = segment.pageStart!;
+        const pageEnd = segment.pageEnd!;
+        return Array.from({ length: pageEnd - pageStart + 1 }, (_, index) => ({
+          logicalDocumentId: segment.id,
+          pageId: pageIdByNumber.get(pageStart + index)!,
+          pageOrder: index + 1,
+        }));
+      });
+      if (pageLinks.length > 0) {
+        await transaction.insert(logicalDocumentPages).values(pageLinks);
       }
 
       return {

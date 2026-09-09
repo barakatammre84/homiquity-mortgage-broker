@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-09
 
-**Code reviewed:** production `d7bf9f7d876d50bff37bb577a914e68c781a7ded` plus the current release candidate
+**Code reviewed:** production `a4bb9d9e2c9efd8bafa4c9d9e5f061e958070205` plus the current release candidate
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -64,7 +64,7 @@ for the borrowers that a standardized fast lane handles poorly.
 |---|---|---|---|
 | Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger and a mortgage regression/attack suite | Production canary and measured reduction in completion time, repeated questions and handoff latency are not recorded | Strong assistant foundation; production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
-| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result | A representative 100-page performance run and production model canary are not yet recorded | Strong complex-income logic with one visual evidence model |
+| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes | A representative provider-classified 100-page packet, production model canary and controlled production restart are not yet recorded | Strong complex-income logic with one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
@@ -147,8 +147,21 @@ for every retained field, normalizes the packet into private page images, links 
 form to its exact page range and links each field to its cited page. Queue retries reuse the page
 layer and links without duplicating logical documents.
 
-**Production proof still required:** run the full workflow against a representative 100-page
-packet under the Phase 0 performance gate.
+**Mechanical capacity proof completed 2026-09-09:**
+`DATABASE_URL="$(bash scripts/local-db.sh url)" pnpm tsx scripts/page-pipeline-benchmark.ts`
+ran the application page pipeline over a synthetic 100-page tax packet. The final implementation
+produced 100 readable private PNG pages and four exact 25-page logical documents in three repeated
+runs of 6.8–7.2 seconds. Peak process RSS was 549–567 MB; the final run attributed 245.5 MB of that
+increase to the page-processing interval. The original SHA-256 was unchanged, repeat calls reused
+the result in 1 ms, and final cleanup removed every test row and object. Page and classification
+rows plus logical-document links now persist in transactional batches instead of more than 200
+sequential database round trips. The harness supplies ground-truth classifications, so this proves
+normalization, persistence, segmentation, source immutability and idempotency only. Production
+capacity still needs confirmation against the deployed container memory limit.
+
+**Production proof still required:** run a representative provider-classified 100-page packet,
+grade its financial fields against the protected labeled set, and interrupt/restart the production
+worker while retaining one result and durable cloud pages.
 
 Claude's PDF pipeline itself converts PDFs page by page and warns that dense or large files may
 need splitting and normalization.[11] Citations can identify PDF page ranges when text is
@@ -171,8 +184,12 @@ percentage scale.
 **Fixed in this release candidate:** a versioned benchmark scorer grades exact values, missing
 fields, false fields, document boundaries, original-page attribution and higher-impact mortgage
 fields. Results are segmented by document type and complex-borrower situation. It refuses to mark a
-synthetic dataset or a type with fewer than 30 human-labeled cases as eligible for a production
-accuracy claim.
+synthetic dataset or a claimed segment with fewer than 30 human-labeled cases as eligible for a
+production accuracy claim. Claim eligibility now also requires a private-manifest SHA-256 shared
+by the labels and predictions, a versioned protocol, two independent reviewers, adjudication,
+explicit document and complex-situation scope, and pre-approved quality thresholds. A run must
+meet every threshold overall and inside each claimed segment; sound evidence alone cannot turn
+poor measured performance into an accuracy claim.
 
 **Build next:** assemble the protected redacted dataset, run the production model and calibrate
 review thresholds from observed error and business impact. Never advertise an accuracy percentage
@@ -381,6 +398,18 @@ missed escalation or time to a useful human response.
     leaving the staff control surface waiting indefinitely.
 29. Made MISMO and final underwriting-artifact access logs fail closed, so sensitive package bytes
     are never released when the audit store cannot record who accessed them.
+30. Bound extraction accuracy claims to an immutable private dataset manifest, independently
+    reviewed and adjudicated labels, explicit complex-borrower scope, sufficient segment coverage
+    and pre-approved thresholds that the measured run must actually pass.
+31. Added and passed a repeatable 100-page application-pipeline proof for normalization, private
+    derived pages, logical boundaries, immutable source bytes, idempotent retry and cleanup, while
+    explicitly excluding model accuracy and cloud durability from that result.
+32. Linked financial workpapers and credit-memo document references directly to the existing
+    evidence viewer, including the first cited normalized page, so an officer can inspect the
+    source without leaving the review and searching the document list.
+33. Replaced the large-packet persistence loop's per-page database calls with transactional batch
+    writes for pages, classifications, logical documents and page links; repeated 100-page runs
+    retained exact counts and boundaries while completing in 6.8–7.2 seconds.
 
 ## Sources
 

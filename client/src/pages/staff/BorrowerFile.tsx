@@ -598,6 +598,14 @@ export default function BorrowerFile() {
                       <FinancialReviewTab
                         applicationId={applicationId}
                         onNavigate={setActiveTab}
+                        onOpenEvidence={(documentId, pageNumber) => {
+                          setSelectedDocumentId(documentId);
+                          setSourcePageRequest(pageNumber ? current => ({
+                            pageNumber,
+                            requestId: (current?.requestId ?? 0) + 1,
+                          }) : null);
+                          setActiveTab("documents");
+                        }}
                         incomeVerified={application.incomeVerified === true}
                         assetsVerified={application.assetsVerified === true}
                         canVerify={canVerifyFinancials}
