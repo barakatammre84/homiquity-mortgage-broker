@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `960a8c8d6cdf785eef9be4f6df2fbef65c028848` on 2026-09-10.
+**Audited production baseline:** `0b3683911fcb243520c88fe4411148a212c35b70` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -53,7 +53,7 @@ has a strict required test gate, automatic production migrations and post-deploy
 verification. On that exact build, a post-restart borrower-data-free sweep passed Homi's grounded
 status turn, the real synthetic pay-statement extraction path with page evidence, private
 object-storage write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting
-in 5.069 s, 11.393 s, 0.451 s, 0.005 s and 0.743 s. The Homi check uses the production prompt and
+in 6.278 s, 11.060 s, 0.635 s, 0.009 s and 0.802 s. The Homi check uses the production prompt and
 context builder, requires the real status tool schema, grounds the reply in fixed server truth and
 passes outbound compliance lint without reading a borrower file.
 
@@ -63,7 +63,9 @@ of at most 25 pages and maps every retained field back to the original source pa
 serial tax worker prevents a long return from delaying ordinary borrower documents, while keeping
 paid tax work bounded. Provider-pass
 failures fail the durable job instead of becoming an empty “completed” analysis; incomplete
-page-backed evidence requires human review.
+page-backed evidence requires human review. Classification and every form pass hold active consent
+through the provider call, so calls already dispatched finish before revocation succeeds and no
+later provider use begins after it succeeds.
 
 The recovery build proves recovery of an interrupted provider-backed ordinary-document job. The
 first deployment completed a real synthetic pay-statement provider read, verified exact values and

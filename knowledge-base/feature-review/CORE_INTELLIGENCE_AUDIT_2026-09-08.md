@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production `9267ad963e48853fce8a4259b13faef8960bb29a`
+**Code reviewed:** production `0b3683911fcb243520c88fe4411148a212c35b70`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -68,7 +68,7 @@ for the borrowers that a standardized fast lane handles poorly.
 |---|---|---|---|
 | Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path and provider-before-persist restart recovery pass in production | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
-| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, bounded per-form provider excerpts, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; both 100-page mechanical proofs pass; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, protected labeled accuracy run and interrupted multi-form recovery are not yet recorded | Strong complex-income logic with bounded provider work and one visual evidence model |
+| Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; both 100-page mechanical proofs pass; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, protected labeled accuracy run and interrupted multi-form recovery are not yet recorded | Strong complex-income logic with bounded provider work and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
@@ -201,6 +201,16 @@ revocation succeeds; after it succeeds, no later provider callback runs. This bo
 uses at most three database connections during concurrent form reads. This synthetic harness does
 not measure provider accuracy, provider
 latency, production memory or production cost.
+
+**Exact-build release proof completed 2026-09-10:** PR #786 merged as
+`0b3683911fcb243520c88fe4411148a212c35b70`; the main migration and deploy-verification workflow
+passed and an independent public health request returned that exact commit. Codex Security scan
+`138ee0b4-b861-4cce-97c6-281c23a36739` found two medium issues in the frozen pre-fix diff: consent
+could be revoked between provider calls, and model-selected ranges could amplify raster work. The
+release adds the shared consent-use fence, 25-page form cap and non-overlap validation; 48 focused
+tests, 7 PostgreSQL consent/queue tests and the full release preflight passed. The post-deploy
+borrower-data-free sweep passed Homi, pay-statement extraction, private storage, mixed-income
+analysis and underwriting in 6.278 s, 11.060 s, 0.635 s, 0.009 s and 0.802 s on the exact build.
 
 **Production proof still required:** run a representative provider-classified 100-page packet,
 confirm it fits the deployed capacity envelope, grade its financial fields against the protected
@@ -546,6 +556,9 @@ missed escalation or time to a useful human response.
 45. Closed the tax-consent provider race with a shared borrower fence around classification and
     every form extraction. Revocation waits for already-dispatched calls, then prevents every later
     external use as well as final persistence.
+46. Released the bounded tax-packet architecture as production commit `0b368391`; exact health,
+    the main deploy gate and all five core capability canaries passed on that build. The remaining
+    tax claim is provider-classified large-packet capacity/restart proof and labeled accuracy.
 
 ## Sources
 
