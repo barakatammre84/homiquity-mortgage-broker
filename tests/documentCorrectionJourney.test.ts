@@ -200,10 +200,10 @@ beforeAll(async () => {
   );
   await pool.query(
     `INSERT INTO loan_conditions
-      (id,application_id,category,title,description,priority,status,required_document_types)
+      (id,application_id,category,title,description,priority,status,required_document_types,created_at)
      VALUES
-      ($1,$3,'compliance','Government-issued photo ID','Upload a readable current ID.','prior_to_docs','outstanding',ARRAY['government_id']),
-      ($2,$3,'compliance','Identity verification','The same ID satisfies this verification item.','prior_to_docs','outstanding',ARRAY['drivers_license'])`,
+      ($1,$3,'compliance','Government-issued photo ID','Upload a readable current ID.','prior_to_docs','outstanding',ARRAY['government_id'],CURRENT_TIMESTAMP),
+      ($2,$3,'compliance','Identity verification','The same ID satisfies this verification item.','prior_to_docs','outstanding',ARRAY['drivers_license'],CURRENT_TIMESTAMP - interval '1 millisecond')`,
     [firstConditionId, secondConditionId, applicationId],
   );
 }, 120_000);

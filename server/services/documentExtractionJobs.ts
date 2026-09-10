@@ -48,6 +48,19 @@ import {
   assertCoreTaxPacketCanaryRuntimeIdentity,
   isCoreTaxPacketCanaryJob,
 } from "./coreTaxPacketCanary";
+import {
+  CORE_TAX_PACKET_RESTART_JOB_ID,
+  CORE_TAX_PACKET_RESTART_HEARTBEAT_MS,
+  CORE_TAX_PACKET_RESTART_LEASE_MS,
+  CORE_TAX_PACKET_RESTART_RECLAIM_WAIT_MS,
+  CoreTaxPacketRestartProofError,
+  assertCoreTaxPacketRestartRuntimeIdentity,
+  coreTaxPacketRestartCompletionAudit,
+  holdCoreTaxPacketRestartFirstResult,
+  isCoreTaxPacketRestartJob,
+  prepareCoreTaxPacketRestartAttempt,
+  recordCoreTaxPacketRestartProviderReady,
+} from "./coreTaxPacketRestartProof";
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
   "pay_stub",
@@ -266,7 +279,7 @@ export function nextFailureTransition(input: {
 
 async function claimNextJob(
   now = new Date(),
-  proofJob: "exclude" | "only" | "tax_canary" = "exclude",
+  proofJob: "exclude" | "only" | "tax_canary" | "tax_restart" = "exclude",
   lane: DocumentExtractionWorkerLane = "ordinary",
 ): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
@@ -278,10 +291,13 @@ async function claimNextJob(
           ? eq(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID)
           : proofJob === "tax_canary"
             ? eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID)
-            : and(
-                ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
-                ne(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID),
-              ),
+            : proofJob === "tax_restart"
+              ? eq(documentExtractionJobs.id, CORE_TAX_PACKET_RESTART_JOB_ID)
+              : and(
+                  ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
+                  ne(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID),
+                  ne(documentExtractionJobs.id, CORE_TAX_PACKET_RESTART_JOB_ID),
+                ),
         lane === "tax_package"
           ? eq(documentExtractionJobs.mode, "tax_package")
           : ne(documentExtractionJobs.mode, "tax_package"),
@@ -310,7 +326,11 @@ async function claimNextJob(
         status: "processing",
         attemptCount: candidate.attemptCount + 1,
         claimedAt: now,
-        leaseExpiresAt: new Date(now.getTime() + documentExtractionLeaseMs(candidate)),
+        leaseExpiresAt: new Date(now.getTime() + (
+          isCoreTaxPacketRestartJob(candidate)
+            ? CORE_TAX_PACKET_RESTART_LEASE_MS
+            : documentExtractionLeaseMs(candidate)
+        )),
         claimedBy: claimToken,
         updatedAt: now,
       })
@@ -351,7 +371,11 @@ async function renewLease(job: DocumentExtractionJob): Promise<boolean> {
   const now = new Date();
   const renewed = await db
     .update(documentExtractionJobs)
-    .set({ leaseExpiresAt: new Date(now.getTime() + documentExtractionLeaseMs(job)), updatedAt: now })
+    .set({ leaseExpiresAt: new Date(now.getTime() + (
+      isCoreTaxPacketRestartJob(job)
+        ? CORE_TAX_PACKET_RESTART_LEASE_MS
+        : documentExtractionLeaseMs(job)
+    )), updatedAt: now })
     .where(and(
       eq(documentExtractionJobs.id, job.id),
       eq(documentExtractionJobs.status, "processing"),
@@ -382,7 +406,8 @@ async function completeJob(job: DocumentExtractionJob): Promise<void> {
       ))
       .returning({ id: documentExtractionJobs.id });
     if (!completed) return;
-    const canaryAudit = coreExtractionRestartCompletionAudit(job, now);
+    const canaryAudit = coreExtractionRestartCompletionAudit(job, now)
+      ?? coreTaxPacketRestartCompletionAudit(job, now);
     await transaction.insert(auditLogs).values(canaryAudit ?? {
       actorUserId: job.requestedByUserId,
       action: "document.extraction_completed",
@@ -570,6 +595,7 @@ async function executeStandardJob(
 
 async function executeTaxPackageJob(
   document: Document,
+  job: DocumentExtractionJob,
   borrowerUserId: string,
   claimFence: DocumentExtractionClaimFence,
 ): Promise<"completed" | "cancelled" | "cancelled_consent"> {
@@ -589,12 +615,21 @@ async function executeTaxPackageJob(
     getLatestTaxIntelligence,
     runTaxDocumentIntelligence,
   } = await import("./taxDocumentIntelligence");
+  if (isCoreTaxPacketRestartJob(job) && job.attemptCount > 1) {
+    await prepareCoreTaxPacketRestartAttempt(job);
+  }
   let summary = await getLatestTaxIntelligence(document.id);
   if (!summary || summary.status !== "completed") {
     summary = await runTaxDocumentIntelligence(
       document,
       borrowerUserId,
       claimFence.lockForPersistence,
+      isCoreTaxPacketRestartJob(job) && job.attemptCount === 1
+        ? async (read) => {
+            await recordCoreTaxPacketRestartProviderReady(job, read);
+            await holdCoreTaxPacketRestartFirstResult(job);
+          }
+        : undefined,
     );
   }
   if (summary.status === "failed") {
@@ -709,7 +744,7 @@ async function executeJob(
   if (block) return "cancelled";
 
   if (job.mode === "tax_package") {
-    return executeTaxPackageJob(document, borrowerUserId, claimFence);
+    return executeTaxPackageJob(document, job, borrowerUserId, claimFence);
   }
 
   if (job.mode === "autopilot") {
@@ -755,6 +790,9 @@ export function failureFromUnknown(error: unknown): ExtractionFailure {
   if (error instanceof CoreTaxPacketCanaryError) {
     return { code: `core_tax_packet_${error.code}`, retryable: false };
   }
+  if (error instanceof CoreTaxPacketRestartProofError) {
+    return { code: `core_tax_restart_${error.code}`, retryable: false };
+  }
   if (
     error &&
     typeof error === "object" &&
@@ -795,11 +833,16 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
         claimLost = true;
         console.error(`[DocumentExtraction] Lease renewal failed for ${job.id}:`, error);
       });
-  }, documentExtractionHeartbeatMs(job));
+  }, isCoreTaxPacketRestartJob(job)
+    ? CORE_TAX_PACKET_RESTART_HEARTBEAT_MS
+    : documentExtractionHeartbeatMs(job));
   heartbeat.unref();
   try {
     if (isCoreTaxPacketCanaryJob(job)) {
       await assertCoreTaxPacketCanaryRuntimeIdentity();
+    }
+    if (isCoreTaxPacketRestartJob(job)) {
+      await assertCoreTaxPacketRestartRuntimeIdentity(job);
     }
     const outcome = await executeJob(job, claimFence);
     if (outcome === "cancelled" || outcome === "cancelled_consent") {
@@ -829,6 +872,7 @@ let ordinaryWorkerRunning: Promise<void> | null = null;
 let taxPackageWorkerRunning: Promise<void> | null = null;
 let coreRestartWorkerRunning: Promise<void> | null = null;
 let coreTaxPacketCanaryWorkerRunning: Promise<void> | null = null;
+let coreTaxPacketRestartWorkerRunning: Promise<void> | null = null;
 let workerStarted = false;
 let pollTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
@@ -910,6 +954,36 @@ export function kickCoreTaxPacketCanaryWorker(): void {
     .catch((error) => console.error("[DocumentExtraction] Core tax packet canary worker failed:", error))
     .finally(() => {
       coreTaxPacketCanaryWorkerRunning = null;
+    });
+}
+
+async function drainCoreTaxPacketRestartJob(): Promise<void> {
+  // Railway can briefly keep the old container alive while the replacement
+  // becomes healthy. Wait through that overlap plus the final short lease.
+  const deadline = Date.now() + CORE_TAX_PACKET_RESTART_RECLAIM_WAIT_MS;
+  for (;;) {
+    const job = await claimNextJob(new Date(), "tax_restart", "tax_package");
+    if (job) {
+      await processClaimedJob(job);
+      return;
+    }
+    const [current] = await db.select({ status: documentExtractionJobs.status })
+      .from(documentExtractionJobs)
+      .where(eq(documentExtractionJobs.id, CORE_TAX_PACKET_RESTART_JOB_ID))
+      .limit(1);
+    if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+/** Keep the deliberate ten-minute hold out of the real borrower tax lane. */
+export function kickCoreTaxPacketRestartWorker(): void {
+  if (coreTaxPacketRestartWorkerRunning) return;
+  coreTaxPacketRestartWorkerRunning = drainCoreTaxPacketRestartJob()
+    .catch((error) => console.error("[DocumentExtraction] Core tax restart proof worker failed:", error))
+    .finally(() => {
+      coreTaxPacketRestartWorkerRunning = null;
     });
 }
 

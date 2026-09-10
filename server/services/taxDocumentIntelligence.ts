@@ -17,6 +17,7 @@ import {
   taxFieldValueType,
   MAX_FORM_INSTANCES,
   type ExtractedFieldValue,
+  type ClassifiedFormInstance,
   type TaxFormInstance,
   type TaxFormType,
   type K1Variant,
@@ -149,6 +150,14 @@ interface PersistedInstance {
   extraction: TaxFormInstanceExtraction;
 }
 
+export interface TaxDocumentProviderRead {
+  classification: Awaited<ReturnType<typeof classifyTaxDocument>>["classification"] & {};
+  instances: ClassifiedFormInstance[];
+  extractions: TaxFormInstanceExtraction[];
+  classificationLineage: Awaited<ReturnType<typeof classifyTaxDocument>>["lineage"];
+  simulated: boolean;
+}
+
 function toTaxFormInstances(persisted: PersistedInstance[]): TaxFormInstance[] {
   return persisted.map((p) => ({
     formType: p.instanceMeta.formType,
@@ -172,6 +181,7 @@ export async function runTaxDocumentIntelligence(
   document: Document,
   borrowerUserId: string,
   beforePersist?: (transaction: DatabaseTransaction) => Promise<void>,
+  afterProviderRead?: (read: TaxDocumentProviderRead) => Promise<void>,
 ): Promise<TaxIntelligenceRunSummary> {
   // Eligibility and the one-running-job claim share the document workflow
   // lock. Two requests cannot both pass a read-then-insert window, and known
@@ -386,6 +396,17 @@ export async function runTaxDocumentIntelligence(
         simulated: cls.simulated,
       });
     }
+
+    // Operational recovery proofs stop here: every paid response has passed
+    // schema and evidence validation, while no logical document, fact,
+    // confidence score, page graph or terminal run state has been persisted.
+    await afterProviderRead?.({
+      classification,
+      instances,
+      extractions,
+      classificationLineage: cls.lineage,
+      simulated: cls.simulated || extractions.some((extraction) => extraction.simulated),
+    });
 
     return withDocumentWorkflowLock(document.id, async (currentDocument, isCurrentVersion, transaction) => {
       await beforePersist?.(transaction);

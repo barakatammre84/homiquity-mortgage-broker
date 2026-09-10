@@ -95,7 +95,7 @@ describe("cron-jobs.yml schedules", () => {
       expect(workflow).toContain(`- ${job}`);
     }
     expect(workflow).toContain(
-      'core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary) method="POST"',
+      'core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary|core-tax-packet-restart-seed|core-tax-packet-restart-verify) method="POST"',
     );
     const routes = jobs.slice(
       jobs.indexOf('app.post("/api/jobs/core-extraction-restart-seed"'),
@@ -109,7 +109,7 @@ describe("cron-jobs.yml schedules", () => {
     expect(jobs).toContain('app.post("/api/jobs/core-tax-packet-canary"');
     expect(workflow).toContain("- core-tax-packet-canary");
     expect(workflow).toContain(
-      'core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary) method="POST"',
+      'core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary|core-tax-packet-restart-seed|core-tax-packet-restart-verify) method="POST"',
     );
     const routes = jobs.slice(
       jobs.indexOf('app.post("/api/jobs/core-tax-packet-canary"'),
@@ -122,12 +122,26 @@ describe("cron-jobs.yml schedules", () => {
     expect(workflow).toContain('-H "X-Homiquity-Expected-Commit: ${EXPECTED_COMMIT}"');
   });
 
+  it("offers two isolated exact-build legs for the 100-page restart proof", () => {
+    for (const job of ["core-tax-packet-restart-seed", "core-tax-packet-restart-verify"]) {
+      expect(jobs).toContain(`app.post("/api/jobs/${job}"`);
+      expect(workflow).toContain(`- ${job}`);
+    }
+    const routes = jobs.slice(
+      jobs.indexOf('app.post("/api/jobs/core-tax-packet-restart-seed"'),
+      jobs.indexOf("const taxPacketCanaryError"),
+    );
+    expect(routes).toContain("kickCoreTaxPacketRestartWorker()");
+    expect(routes).toContain("assertExpectedTaxRestartCommit(req)");
+    expect(routes).not.toContain("kickDocumentExtractionWorker()");
+  });
+
   it("prints only redacted provider diagnostics before failing a canary sweep", () => {
     const canaryBlock = workflow.slice(
       workflow.indexOf('# Core proofs are state-changing POSTs.'),
       workflow.indexOf('# Read-only sweeps retain transient retries.'),
     );
-    expect(workflow).toContain('core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary)');
+    expect(workflow).toContain('core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary|core-tax-packet-restart-seed|core-tax-packet-restart-verify)');
     expect(workflow).toContain("results.map((result) => ({");
     for (const field of ["capabilityId", "provider", "operation", "status", "latencyMs", "failureClass", "commitSha", "completedAt"]) {
       expect(workflow).toContain(`${field}: result.${field}`);

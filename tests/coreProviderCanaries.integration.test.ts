@@ -149,6 +149,35 @@ describe.sequential("core provider canary ledger", () => {
     });
   });
 
+  it("retains the two-deployment tax restart proof with its dedicated operation", async () => {
+    const { runCoreTaxPacketRestartVerification } = await import("../server/services/coreProviderCanaries");
+    const proof = {
+      status: "verified" as const,
+      sourceCommitSha: "d".repeat(40),
+      currentCommitSha: "d".repeat(40),
+      seededAt: "2026-09-10T04:00:00.000Z",
+      providerReadyAt: "2026-09-10T04:01:20.000Z",
+      completedAt: "2026-09-10T04:03:20.000Z",
+      ageMs: 200_000,
+      attemptCount: 2,
+      pageCount: 100,
+      formCount: 4,
+      factRows: 28,
+      exactFactRows: 8,
+      groundedFactRows: 28,
+      cleanedUp: true as const,
+    };
+    const result = await runCoreTaxPacketRestartVerification(userId, async () => proof);
+
+    expect(result.proof).toEqual(proof);
+    expect(result.canary).toMatchObject({
+      capabilityId: "document_extraction",
+      provider: "Anthropic Claude vision",
+      operation: "synthetic_tax_packet_restart_recovery",
+      status: "success",
+    });
+  });
+
   it("executes the real mixed-income and underwriting engines with repeatable results", async () => {
     const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
     const financial = await runCoreProviderCanary("financial_analysis", userId);

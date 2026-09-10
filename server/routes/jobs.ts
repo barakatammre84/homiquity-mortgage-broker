@@ -17,6 +17,7 @@ import {
   runCoreProviderCanarySweep,
   runCoreStorageRestartVerification,
   runCoreTaxPacketCanaryVerification,
+  runCoreTaxPacketRestartVerification,
 } from "../services/coreProviderCanaries";
 import {
   CoreExtractionRestartProofError,
@@ -26,12 +27,20 @@ import {
 import {
   kickCoreExtractionRestartWorker,
   kickCoreTaxPacketCanaryWorker,
+  kickCoreTaxPacketRestartWorker,
 } from "../services/documentExtractionJobs";
 import {
   assertCoreTaxPacketCanaryExpectedCommit,
   CoreTaxPacketCanaryError,
   prepareCoreTaxPacketCanary,
 } from "../services/coreTaxPacketCanary";
+import {
+  assertCoreTaxPacketRestartExpectedCommit,
+  assertCoreTaxPacketRestartReplacementDeployment,
+  CoreTaxPacketRestartProofError,
+  prepareCoreTaxPacketRestartProof,
+  waitForCoreTaxPacketRestartProviderReady,
+} from "../services/coreTaxPacketRestartProof";
 import {
   ObjectStorageService,
   PrivateStorageRestartProofError,
@@ -261,6 +270,116 @@ export function registerJobRoutes(app: Express) {
         return res.status(result.ok ? 200 : 503).json(result);
       } catch (error) {
         const safe = extractionRestartProofError(error, "verify");
+        return res.status(safe.status).json(safe.body);
+      }
+    });
+  });
+
+  const taxPacketRestartError = (error: unknown, phase: "seed" | "verify") => {
+    if (error instanceof CoreTaxPacketRestartProofError) {
+      const status = error.code === "proof_cooldown"
+        ? 429
+        : ["proof_in_progress", "release_mismatch", "restart_not_observed"].includes(error.code) ? 409 : 503;
+      return { status, body: { ok: false, phase, failureClass: error.code } };
+    }
+    return { status: 500, body: { ok: false, phase, failureClass: "unknown" } };
+  };
+
+  const assertExpectedTaxRestartCommit = (req: Request) => {
+    const header = req.headers["x-homiquity-expected-commit"];
+    assertCoreTaxPacketRestartExpectedCommit(Array.isArray(header) ? header[0] ?? "" : header ?? "");
+  };
+
+  // Attempt one completes and validates every real tax-provider read, records
+  // only redacted proof metadata, then holds before any evidence persistence.
+  app.post("/api/jobs/core-tax-packet-restart-seed", async (req, res) => {
+    const seed = async () => {
+      assertExpectedTaxRestartCommit(req);
+      const prepared = await prepareCoreTaxPacketRestartProof();
+      kickCoreTaxPacketRestartWorker();
+      const ready = await waitForCoreTaxPacketRestartProviderReady(prepared.reused);
+      return { ok: true, phase: "seed" as const, ...ready };
+    };
+    if (isCronRequest(req)) {
+      try { return res.json(await seed()); }
+      catch (error) {
+        const safe = taxPacketRestartError(error, "seed");
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const result = await seed();
+        await logAudit(req, "jobs.core_tax_packet_restart_seed", "system", "document_extraction", {
+          sourceCommitSha: result.sourceCommitSha,
+          seededAt: result.seededAt,
+          providerReadyAt: result.providerReadyAt,
+          reused: result.reused,
+        });
+        return res.json(result);
+      } catch (error) {
+        const safe = taxPacketRestartError(error, "seed");
+        return res.status(safe.status).json(safe.body);
+      }
+    });
+  });
+
+  // A different deployment on the same commit must reclaim attempt two,
+  // close the abandoned run, repeat the provider read and file one evidence graph.
+  app.post("/api/jobs/core-tax-packet-restart-verify", async (req, res) => {
+    const verify = async (triggeredByUserId: string | null) => {
+      assertExpectedTaxRestartCommit(req);
+      await assertCoreTaxPacketRestartReplacementDeployment();
+      kickCoreTaxPacketRestartWorker();
+      const result = await runCoreTaxPacketRestartVerification(triggeredByUserId);
+      return {
+        ok: result.canary.status === "success",
+        phase: "verify" as const,
+        status: result.proof?.status ?? "failed",
+        sourceCommitSha: result.proof?.sourceCommitSha ?? null,
+        currentCommitSha: result.proof?.currentCommitSha ?? result.canary.commitSha,
+        seededAt: result.proof?.seededAt ?? null,
+        providerReadyAt: result.proof?.providerReadyAt ?? null,
+        completedAt: result.proof?.completedAt ?? null,
+        ageMs: result.proof?.ageMs ?? null,
+        attemptCount: result.proof?.attemptCount ?? null,
+        pageCount: result.proof?.pageCount ?? null,
+        formCount: result.proof?.formCount ?? null,
+        factRows: result.proof?.factRows ?? null,
+        exactFactRows: result.proof?.exactFactRows ?? null,
+        groundedFactRows: result.proof?.groundedFactRows ?? null,
+        cleanedUp: result.proof?.cleanedUp ?? false,
+        canary: result.canary,
+      };
+    };
+    if (isCronRequest(req)) {
+      try {
+        const result = await verify(null);
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = taxPacketRestartError(error, "verify");
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await verify(user.id);
+        await logAudit(req, "jobs.core_tax_packet_restart_verify", "system", "document_extraction", {
+          status: result.status,
+          sourceCommitSha: result.sourceCommitSha,
+          currentCommitSha: result.currentCommitSha,
+          attemptCount: result.attemptCount,
+          pageCount: result.pageCount,
+          formCount: result.formCount,
+          factRows: result.factRows,
+          exactFactRows: result.exactFactRows,
+          groundedFactRows: result.groundedFactRows,
+          cleanedUp: result.cleanedUp,
+        });
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = taxPacketRestartError(error, "verify");
         return res.status(safe.status).json(safe.body);
       }
     });
