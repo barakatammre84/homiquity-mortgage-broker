@@ -185,12 +185,21 @@ capacity still needs confirmation against the deployed container memory limit.
 four exact 25-page provider excerpts. The field-extraction page workload fell from 400 pages (the
 whole source repeated for every form) to 100 pages. Original-page offsets were 0, 25, 50 and 75;
 the source SHA-256 remained unchanged; the four excerpts were 3.17–3.26 MB; and the final run
-completed in 14.3 seconds with 517.6 MB peak process RSS and a 345.8 MB increase during the excerpt
-stage. Rendering is serial while up to three provider calls may be in flight, so memory-heavy page
+completed in 36.6 seconds with 535.1 MB peak process RSS and a 375.2 MB increase during the excerpt
+stage; the earlier warm run completed in 14.3 seconds at 517.6 MB peak RSS. Rendering is serial
+while up to three provider calls may be in flight, so memory-heavy page
 work remains bounded. Tax jobs also use a separate serial database lane, preventing a large return
 from blocking pay stubs, W-2s, bank statements, leases or Autopilot. Provider-pass errors now fail
 the durable job, and a valid response with missing or unreadable page evidence cannot receive a
-hands-off confidence result. This synthetic harness does not measure provider accuracy, provider
+hands-off confidence result. A security re-audit then found that model-selected overlapping or
+oversized ranges could repeat raster work; every form excerpt is now limited to 25 pages and the
+manifest must use non-overlapping source ranges before any field pass begins. This synthetic
+Security review also found that revocation blocked final persistence without preventing a later
+provider handoff from a job already in progress. Classification and each form extraction now hold
+a shared borrower-consent fence for the full external call. Calls already dispatched finish before
+revocation succeeds; after it succeeds, no later provider callback runs. This bounded protection
+uses at most three database connections during concurrent form reads. This synthetic harness does
+not measure provider accuracy, provider
 latency, production memory or production cost.
 
 **Production proof still required:** run a representative provider-classified 100-page packet,
@@ -527,13 +536,16 @@ missed escalation or time to a useful human response.
     bottleneck. The post-restart five-capability sweep passed; tax-package capacity, labeled model
     accuracy and external mortgage provider/lender acceptance remain open.
 42. Loaded each tax source once and replaced repeated full-packet field calls with exact classified
-    page excerpts, preserving original-page evidence while reducing the synthetic 100-page
+    non-overlapping page excerpts of at most 25 pages, preserving original-page evidence while reducing the synthetic 100-page
     field-pass workload from 400 pages to 100.
 43. Separated tax-package and ordinary extraction workers so a complex return cannot delay normal
     borrower documents; proved both lane selectors against Postgres while keeping each paid lane
     serial.
 44. Made per-form provider failures fail the durable tax job and forced incomplete page-backed
     evidence into human review instead of allowing an empty analysis to look complete.
+45. Closed the tax-consent provider race with a shared borrower fence around classification and
+    every form extraction. Revocation waits for already-dispatched calls, then prevents every later
+    external use as well as final persistence.
 
 ## Sources
 

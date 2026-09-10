@@ -163,6 +163,8 @@ export function classifyTaxPackageFailure(error?: string): ExtractionFailure {
     normalized.includes("unsupported tax packet source type") ||
     (normalized.includes("outside the") && normalized.includes("-page source")) ||
     (normalized.includes("pages for a") && normalized.includes("-page source")) ||
+    normalized.includes("provider excerpt limit") ||
+    normalized.includes("tax form page ranges overlap") ||
     normalized.includes("split the source packet before provider extraction")
   ) {
     return { code: "tax_package_validation_failed", retryable: false };

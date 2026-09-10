@@ -21,6 +21,15 @@ async function lockTaxConsentWorkflow(
   );
 }
 
+async function lockTaxConsentProviderUse(
+  transaction: TaxConsentTransaction,
+  userId: string,
+): Promise<void> {
+  await transaction.execute(
+    sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${`tax-consent:${userId}`}, 0))`,
+  );
+}
+
 async function hasActiveTaxDocumentConsent(
   transaction: TaxConsentTransaction,
   userId: string,
@@ -63,6 +72,25 @@ export async function withActiveTaxDocumentConsent<T>(
     return { authorized: true, value: await run(activeTransaction) };
   };
   return transaction ? execute(transaction) : db.transaction(execute);
+}
+
+/**
+ * Hold a shared borrower consent lock for one external tax-document use.
+ * Concurrent form reads may proceed together, while revocation takes the
+ * exclusive version of this lock and cannot complete until those reads finish.
+ * Once revocation succeeds, later provider calls observe inactive consent.
+ */
+export async function withActiveTaxDocumentConsentUse<T>(
+  userId: string,
+  run: () => Promise<T>,
+): Promise<ActiveTaxConsentResult<T>> {
+  return db.transaction(async (transaction) => {
+    await lockTaxConsentProviderUse(transaction, userId);
+    if (!(await hasActiveTaxDocumentConsent(transaction, userId))) {
+      return { authorized: false, value: null };
+    }
+    return { authorized: true, value: await run() };
+  });
 }
 
 export async function revokeTaxDocumentConsentAndPurge(

@@ -138,5 +138,17 @@ describe("durable document extraction job policy", () => {
       code: "tax_package_validation_failed",
       retryable: false,
     });
+    expect(classifyTaxPackageFailure(
+      "Tax form page range 1-26 exceeds the 25-page provider excerpt limit",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
+    expect(classifyTaxPackageFailure(
+      "Tax form page ranges overlap at source page 10",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
   });
 });

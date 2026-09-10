@@ -390,6 +390,57 @@ describe.sequential("document extraction restart recovery", () => {
     expect(afterRevocation).toEqual({ authorized: false, value: null });
   });
 
+  it("lets concurrent provider uses finish before revocation and blocks every later use", async () => {
+    await pool.query(
+      `INSERT INTO borrower_consents
+         (user_id,consent_type,consent_given,consent_method,is_revoked)
+       VALUES ($1,'tax_document_use',true,'click',false)`,
+      [userId],
+    );
+    const {
+      revokeTaxDocumentConsentAndPurge,
+      withActiveTaxDocumentConsentUse,
+    } = await import("../server/services/taxConsentWorkflow");
+
+    let enteredCount = 0;
+    let allEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+    let releaseUses!: () => void;
+    const release = new Promise<void>((resolve) => { releaseUses = resolve; });
+    const providerUse = (value: string) => withActiveTaxDocumentConsentUse(userId, async () => {
+      enteredCount += 1;
+      if (enteredCount === 2) allEntered();
+      await release;
+      return value;
+    });
+
+    const uses = [providerUse("classification"), providerUse("form")];
+    await entered;
+    let revocationSettled = false;
+    const revocation = revokeTaxDocumentConsentAndPurge(userId).then((result) => {
+      revocationSettled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(revocationSettled).toBe(false);
+
+    releaseUses();
+    const [useResults, revoked] = await Promise.all([Promise.all(uses), revocation]);
+    expect(useResults).toEqual([
+      { authorized: true, value: "classification" },
+      { authorized: true, value: "form" },
+    ]);
+    expect(revoked.revoked).toHaveLength(1);
+
+    let calledAfterRevocation = false;
+    const afterRevocation = await withActiveTaxDocumentConsentUse(userId, async () => {
+      calledAfterRevocation = true;
+      return "provider-called";
+    });
+    expect(afterRevocation).toEqual({ authorized: false, value: null });
+    expect(calledAfterRevocation).toBe(false);
+  });
+
   it("locks a live claim through persistence and rejects the old token after takeover", async () => {
     const claimA = `worker-a:${randomUUID()}`;
     const claimB = `worker-b:${randomUUID()}`;

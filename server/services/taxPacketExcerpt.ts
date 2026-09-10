@@ -6,6 +6,7 @@ import { fileToBase64, getMimeType } from "../extractionCore";
 const PROVIDER_RENDER_MAX_DIMENSION = 1_568;
 const PROVIDER_RENDER_MAX_SCALE = 2;
 const MAX_EXCERPT_BYTES = 20 * 1024 * 1024;
+export const MAX_TAX_FORM_EXCERPT_PAGES = 25;
 
 export class TaxPacketExcerptError extends Error {
   constructor(message: string) {
@@ -53,6 +54,28 @@ function assertRange(pageStart: number, pageEnd: number, pageCount: number): voi
     throw new TaxPacketExcerptError(
       `Tax form page range ${pageStart}-${pageEnd} is outside the ${pageCount}-page source`,
     );
+  }
+  if (pageEnd - pageStart + 1 > MAX_TAX_FORM_EXCERPT_PAGES) {
+    throw new TaxPacketExcerptError(
+      `Tax form page range ${pageStart}-${pageEnd} exceeds the ${MAX_TAX_FORM_EXCERPT_PAGES}-page provider excerpt limit`,
+    );
+  }
+}
+
+export function assertNonOverlappingTaxFormRanges(
+  ranges: Array<{ pageStart: number; pageEnd: number }>,
+  pageCount: number,
+): void {
+  const ordered = [...ranges].sort((a, b) => a.pageStart - b.pageStart || a.pageEnd - b.pageEnd);
+  let previousEnd = 0;
+  for (const range of ordered) {
+    assertRange(range.pageStart, range.pageEnd, pageCount);
+    if (range.pageStart <= previousEnd) {
+      throw new TaxPacketExcerptError(
+        `Tax form page ranges overlap at source page ${range.pageStart}`,
+      );
+    }
+    previousEnd = range.pageEnd;
   }
 }
 

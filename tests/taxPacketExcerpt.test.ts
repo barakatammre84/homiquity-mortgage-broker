@@ -5,6 +5,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import {
   TaxPacketExcerptError,
   TaxPacketExcerptSession,
+  assertNonOverlappingTaxFormRanges,
 } from "../server/services/taxPacketExcerpt";
 
 async function syntheticPdf(pageCount: number): Promise<Buffer> {
@@ -64,6 +65,20 @@ describe("tax packet provider excerpts", () => {
     } finally {
       await session.close();
     }
+  });
+
+  it("bounds each form and rejects a manifest that repeats source pages", async () => {
+    expect(() => assertNonOverlappingTaxFormRanges([
+      { pageStart: 1, pageEnd: 25 },
+      { pageStart: 26, pageEnd: 50 },
+    ], 100)).not.toThrow();
+    expect(() => assertNonOverlappingTaxFormRanges([
+      { pageStart: 1, pageEnd: 26 },
+    ], 100)).toThrow(/25-page provider excerpt limit/);
+    expect(() => assertNonOverlappingTaxFormRanges([
+      { pageStart: 1, pageEnd: 10 },
+      { pageStart: 10, pageEnd: 15 },
+    ], 100)).toThrow(/ranges overlap/);
   });
 
   it("keeps a one-page image byte-identical and rejects work after close", async () => {

@@ -36,8 +36,14 @@ import {
   type DatabaseTransaction,
 } from "./documentLineage";
 import { currentDocumentEvidencePredicate } from "./currentDocumentEvidence";
-import { withActiveTaxDocumentConsent } from "./taxConsentWorkflow";
-import { TaxPacketExcerptSession } from "./taxPacketExcerpt";
+import {
+  withActiveTaxDocumentConsent,
+  withActiveTaxDocumentConsentUse,
+} from "./taxConsentWorkflow";
+import {
+  TaxPacketExcerptSession,
+  assertNonOverlappingTaxFormRanges,
+} from "./taxPacketExcerpt";
 
 /**
  * Tax Document Intelligence orchestrator (UAL P2a — Situation Identification
@@ -290,7 +296,14 @@ export async function runTaxDocumentIntelligence(
     );
 
     // Pass 1 — classification.
-    const cls = await classifyTaxDocument(packet.sourceBytes, packet.sourceMimeType);
+    const classificationUse = await withActiveTaxDocumentConsentUse(
+      borrowerUserId,
+      () => classifyTaxDocument(packet!.sourceBytes, packet!.sourceMimeType),
+    );
+    if (!classificationUse.authorized) {
+      return failRunWithClaim("Tax document authorization was revoked before provider processing");
+    }
+    const cls = classificationUse.value;
     if (!cls.classification) {
       return failRunWithClaim(cls.failureReason ?? "Classification produced no usable result", {
         modelId: cls.lineage.modelId,
@@ -323,22 +336,44 @@ export async function runTaxDocumentIntelligence(
     if (instances.length === 0) {
       return failRunWithClaim("Tax document classification found no form with a valid source-page range");
     }
+    // A model-controlled manifest must not make the web process rasterize the
+    // same source pages repeatedly or create an unbounded single form input.
+    assertNonOverlappingTaxFormRanges(
+      instances.map((instance) => ({
+        pageStart: instance.pageStart!,
+        pageEnd: instance.pageEnd!,
+      })),
+      packet.pageCount,
+    );
 
     // Pass 2 — per-instance field extraction (bounded concurrency).
     const extractions = await mapWithConcurrency(instances, EXTRACTION_CONCURRENCY, async (instance) => {
-      if (cls.simulated) {
-        return extractTaxFormInstanceFields(packet!.sourceBytes, instance, packet!.sourceMimeType);
-      }
-      const excerpt = await packet!.excerpt(instance.pageStart!, instance.pageEnd!);
-      return extractTaxFormInstanceFields(
-        excerpt.bytes,
-        instance,
-        excerpt.mimeType,
-        {
-          sourcePageOffset: excerpt.sourcePageOffset,
-          attachedPageCount: excerpt.pageCount,
-        },
+      const excerpt = cls.simulated
+        ? { bytes: packet!.sourceBytes, mimeType: packet!.sourceMimeType }
+        : await packet!.excerpt(instance.pageStart!, instance.pageEnd!);
+      const extractionUse = await withActiveTaxDocumentConsentUse(
+        borrowerUserId,
+        () => extractTaxFormInstanceFields(
+          excerpt.bytes,
+          instance,
+          excerpt.mimeType,
+          "sourcePageOffset" in excerpt
+            ? {
+                sourcePageOffset: excerpt.sourcePageOffset,
+                attachedPageCount: excerpt.pageCount,
+              }
+            : undefined,
+        ),
       );
+      if (!extractionUse.authorized) {
+        throw new TaxDocumentIntelligenceError(
+          "Tax document authorization was revoked before provider processing",
+          409,
+          "TAX_CONSENT_REVOKED",
+          run.id,
+        );
+      }
+      return extractionUse.value;
     });
     const extractionQuality = assessTaxFormExtractions(extractions);
     if (extractionQuality.failureReason) {

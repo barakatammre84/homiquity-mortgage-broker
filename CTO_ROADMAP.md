@@ -58,9 +58,10 @@ context builder, requires the real status tool schema, grounds the reply in fixe
 passes outbound compliance lint without reading a borrower file.
 
 The intelligence release following that proof removes two large-packet bottlenecks. Tax work now
-loads a source once, sends each field pass only the classifier's exact page range and maps every
-retained field back to the original source page. A separate serial tax worker prevents a long return
-from delaying ordinary borrower documents, while keeping paid tax work bounded. Provider-pass
+loads a source once, sends each field pass only the classifier's exact non-overlapping page range
+of at most 25 pages and maps every retained field back to the original source page. A separate
+serial tax worker prevents a long return from delaying ordinary borrower documents, while keeping
+paid tax work bounded. Provider-pass
 failures fail the durable job instead of becoming an empty “completed” analysis; incomplete
 page-backed evidence requires human review.
 
@@ -110,7 +111,9 @@ processor, underwriter and closer also remain unproven.
    private storage, mixed-income analysis and underwriting remain operable across a controlled
    process replacement. A provider-backed ordinary-document job now survives interruption before
    persistence and produces one evidence set after reclaim. Large tax work now runs independently
-   from ordinary documents, and each field pass receives only its classified form pages. Keep the
+   from ordinary documents, and each field pass receives no more than 25 non-overlapping classified
+   form pages. Every tax-provider handoff also holds the borrower's active consent through the call,
+   so completed revocation blocks any later external use. Keep the
    recovery proof current and repeat it on a representative provider-classified tax packet while
    measuring deployed latency, memory and provider cost.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
