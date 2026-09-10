@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production `f84adce7ab153ca0c1a7426c9744bae0ceaa4aa9`
+**Code reviewed:** production `9267ad963e48853fce8a4259b13faef8960bb29a`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -26,8 +26,9 @@ staff output for Homi, ordinary document extraction, tax-package intelligence, f
 underwriting, credit, AUS, pricing and lender delivery. The complete server and client suites,
 focused journey tests, real local HTTP flow and database restart-recovery proof pass. Exact-build
 production canaries also prove the Anthropic-backed Homi and pay-statement paths plus private cloud
-storage, mixed-income analysis and deterministic underwriting. The result does not prove measured
-model accuracy, live mortgage-decision providers or a lender receiver.
+storage, mixed-income analysis and deterministic underwriting. A controlled production proof also
+shows a provider-backed pay-statement job recovering after interruption before persistence. The
+result does not prove measured model accuracy, live mortgage-decision providers or a lender receiver.
 
 ## Verdict
 
@@ -51,9 +52,9 @@ combination as a configuration error.
 The current production build also closes the internal decision-delivery gaps: every URLA borrower becomes
 a separate schema-valid MISMO party with correctly attributed employment and declarations, and the
 submitted package retains hash-verifiable MISMO, income-analysis and dual-AUS findings artifacts.
-Accuracy calibration, a provider-classified large-packet production run, interrupted extraction
-recovery and a real lender receiver remain open. Credit, DU, LPA, executable pricing provenance and
-lender delivery remain simulated or unproven.
+Accuracy calibration, a provider-classified large-packet production run, interrupted multi-form
+tax-package recovery and a real lender receiver remain open. Credit, DU, LPA, executable pricing
+provenance and lender delivery remain simulated or unproven.
 
 Better demonstrates the experience standard: one central file, tasks generated from the file,
 24-hour help and a fast underwriting promise after the required evidence arrives.[1][2][3] Its
@@ -66,8 +67,8 @@ for the borrowers that a standardized fast lane handles poorly.
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
 | Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
-| Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path passes in production | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
-| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, production model canary and interrupted in-flight extraction recovery are not yet recorded | Strong complex-income logic with one visual evidence model |
+| Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path and provider-before-persist restart recovery pass in production | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
+| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, protected labeled accuracy run and interrupted multi-form recovery are not yet recorded | Strong complex-income logic with one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
@@ -116,7 +117,7 @@ gap is measured performance and error on a protected labeled set.
 
 ## Verified gaps
 
-### P0 — in-flight production extraction recovery is unproven
+### P0 — in-flight production extraction recovery is proven for an ordinary document
 
 **Built in the current production build:** the document version and extraction job commit together.
 Workers claim due jobs with database row locks and expiring leases, heartbeat while working, retry
@@ -126,9 +127,26 @@ stubs, bank statements, leases and consented multi-form tax packages use this pa
 database test stopped the prior claimant, expired its lease and proved that a new worker reclaimed
 the same job and recorded the terminal result.
 
-**Production proof still required:** interrupt one controlled provider-backed extraction during a
-deployment, verify that the next production worker resumes it, and inspect the single resulting
-fact set and confidence record.
+**Production proof completed 2026-09-10:** workflow run
+[`34427653700`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34427653700)
+seeded the fixed borrower-free pay-statement job on exact build
+`9267ad963e48853fce8a4259b13faef8960bb29a`. Attempt one completed the real provider read, validated
+the expected values and page evidence, and entered `provider_read_complete` before any page, fact,
+confidence or readiness persistence. Railway then replaced the process with deployment
+`cef8b877-29f1-4683-944f-82caec441c2b` on the same exact commit. After the 30-second lease expired,
+workflow run
+[`34427794818`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34427794818)
+caused the new process to reclaim the same job on attempt two, repeat the provider read and finish
+through the normal persistence path. Verification found one page graph, one confidence row and ten
+unique grounded facts, including the five required monetary facts. It then deleted every temporary
+database row plus the source and derived private objects; the redacted recovery ledger remains.
+
+The first implementation review found that a deliberate ten-minute hold could occupy the single
+ordinary borrower worker. The released design excludes the fixed proof job from that worker and
+uses a dedicated proof claimant that can select only the fixed job, so the canary cannot delay
+borrower documents. This closes ordinary-document provider recovery without claiming tax-package
+capacity or accuracy. Repeat the interruption proof on a representative provider-classified
+multi-form tax packet after its production capacity and labeled evaluation paths are ready.
 
 ### P0 — uploads now split, route and retain page-level evidence
 
@@ -163,8 +181,9 @@ normalization, persistence, segmentation, source immutability and idempotency on
 capacity still needs confirmation against the deployed container memory limit.
 
 **Production proof still required:** run a representative provider-classified 100-page packet,
-grade its financial fields against the protected labeled set, and interrupt/restart the production
-worker while retaining one result and durable cloud pages.
+confirm it fits the deployed capacity envelope, grade its financial fields against the protected
+labeled set, and repeat the interruption/recovery proof on that tax path while retaining one result
+and durable cloud pages.
 
 Claude's PDF pipeline itself converts PDFs page by page and warns that dense or large files may
 need splitting and normalization.[11] Citations can identify PDF page ranges when text is
@@ -257,9 +276,22 @@ the storage operation took 0.382 s. A same deployment, changed commit, stale or 
 missing runtime identity or missing bytes fails closed. The post-restart sweep
 [`34420484805`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34420484805)
 again passed all five checks on the same commit in 4.079 s, 9.645 s, 0.483 s, 0.004 s and 0.552 s.
-This closes generic private-object survival across process replacement. It does not show that an
-in-flight provider-backed extraction resumes or that a full 100-page packet fits the production
-container.
+That `f84adce7` result closed generic private-object survival across process replacement. At that
+point it did not show that an in-flight provider-backed extraction resumes or that a full 100-page
+packet fits the production container; the next proof closes the ordinary-document recovery half.
+
+**Provider-backed restart proof completed 2026-09-10:** the seed and verification runs above proved
+that exact build `9267ad963e48853fce8a4259b13faef8960bb29a` can lose its process after a real
+pay-statement provider result but before evidence persistence, then have a different deployment on
+the same commit reclaim the expired job and commit one result. Verification completed in 23.019 s
+after the lease became recoverable, found attempt count two, one page graph, one confidence row and
+ten unique facts, and removed all temporary rows and private objects. Post-restart sweep
+[`34427874922`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34427874922)
+then passed all five core checks on the same commit: grounded Homi in 5.069 s, pay-statement
+extraction in 11.393 s, private storage in 0.451 s, mixed-income repeatability in 0.005 s and
+underwriting repeatability in 0.743 s. This closes interrupted ordinary-document recovery. A
+provider-classified 100-page tax packet, measured extraction accuracy and external decision and
+lender paths remain open.
 
 ### P0 — decision freshness and final findings delivery are enforced internally
 
@@ -325,11 +357,13 @@ borrowers finish faster.
 ### 1. Make document work durable and observable
 
 - Keep the deployed durable extraction job, lease recovery and failure queue under observation.
-- Run the controlled production interruption proof for an ordinary document and a multi-form tax package.
+- Keep the completed ordinary-document interruption proof current and repeat it for a representative
+  provider-classified multi-form tax package.
 - Keep the exact-build provider and storage canaries current with latency and failure class.
 
-**Exit:** kill the worker during extraction, restart it, and receive one complete result with no
-duplicate facts or confidence rows.
+**Ordinary-document exit met 2026-09-10:** the provider result was reached before persistence, the
+process was replaced, and attempt two produced one complete result with no duplicate facts or
+confidence rows. **Remaining exit:** repeat that result on the multi-form tax path.
 
 ### 2. Calibrate the page and field evidence model
 
@@ -467,9 +501,17 @@ missed escalation or time to a useful human response.
 40. Proved the strengthened five-capability sweep on exact production build `f84adce7`: all five
     checks passed before and after a controlled same-build Railway process replacement. The
     two-phase private marker was CRC-validated by the new deployment after 109.370 seconds and then
-    deleted. This closes generic private-object restart durability; it leaves in-flight extraction
-    recovery, production large-packet capacity, measured extraction accuracy and external mortgage
-    provider/lender acceptance open.
+    deleted. That result closed generic private-object restart durability; at that point it left
+    in-flight extraction recovery, production large-packet capacity, measured extraction accuracy
+    and external mortgage provider/lender acceptance open.
+41. Proved in-flight provider recovery on exact production build `9267ad96`: attempt one completed
+    the real synthetic pay-statement provider read and stopped before persistence; a different
+    Railway deployment on the same commit reclaimed the expired job on attempt two and persisted
+    exactly one page graph, one confidence row and ten unique grounded facts. The proof then deleted
+    every temporary database row and private object. A dedicated fixed-job claimant and explicit
+    exclusion from the borrower worker removed the ten-minute canary hold as a borrower-throughput
+    bottleneck. The post-restart five-capability sweep passed; tax-package capacity, labeled model
+    accuracy and external mortgage provider/lender acceptance remain open.
 
 ## Sources
 
