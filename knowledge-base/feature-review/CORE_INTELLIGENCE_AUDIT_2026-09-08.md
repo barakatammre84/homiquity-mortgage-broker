@@ -670,6 +670,10 @@ missed escalation or time to a useful human response.
     borrower income, approval transitions, pipeline advancement, the borrower graph, loan options
     and loan-officer controls. The proof requires current approved financial artifacts and a
     completed, unexpired, unarchived, non-simulated bureau report.
+56. Re-audited every remaining verification display and income-loader seam. Borrower, staff and
+    Homi income/asset/credit states now use the same current-evidence dimensions, stale profile
+    evidence is labeled for refresh, and the generic income loader cannot apply positive rental
+    income unless its caller explicitly opts in after resolving decision-grade proof.
 
 ## Sources
 

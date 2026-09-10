@@ -407,6 +407,7 @@ export function registerApplicationRoutes(
       res.json({
         application,
         currentDecisionGrade: currentGrade.isDecisionGrade,
+        currentVerification: currentGrade.verification,
         decisionGradeBlockers: currentGrade.reasons,
         options,
         // Ciphertext trio never ships; reviewedByUserId is staff-only —

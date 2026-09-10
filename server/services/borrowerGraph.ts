@@ -1221,9 +1221,15 @@ export async function buildBorrowerGraph(
     activeApplicationId: activeApp?.id || null,
 
     financialVerification: {
-      income: activeApp?.incomeVerified === true,
-      assets: activeApp?.assetsVerified === true,
-      credit: activeApp?.creditVerified === true,
+      income: currentDecisionGradeResult.status === "fulfilled"
+        ? currentDecisionGradeResult.value?.verification.income ?? false
+        : false,
+      assets: currentDecisionGradeResult.status === "fulfilled"
+        ? currentDecisionGradeResult.value?.verification.assets ?? false
+        : false,
+      credit: currentDecisionGradeResult.status === "fulfilled"
+        ? currentDecisionGradeResult.value?.verification.credit ?? false
+        : false,
       decisionGrade: currentDecisionGradeResult.status === "fulfilled"
         ? currentDecisionGradeResult.value?.isDecisionGrade ?? false
         : false,

@@ -60,7 +60,7 @@ sites actually use it.
 | `nestedInteractive` — nested interactive control (a link wrapping a button) | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `rawHexLiterals` — raw hex colour literal | ratcheting down | **11** occurrence(s) |
 | `arbitraryColorValues` — arbitrary colour value (bg-[#…], to-[hsl(…)]) | ratcheting down | **3** occurrence(s) |
-| `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **149** occurrence(s) |
+| `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **147** occurrence(s) |
 | `blindSpotPaletteClasses` — palette class in a shape the token guard cannot see | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `subMinTouchTarget` — Button size="sm" (h-9 = 36px) with no .touch-target | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **57** occurrence(s) |

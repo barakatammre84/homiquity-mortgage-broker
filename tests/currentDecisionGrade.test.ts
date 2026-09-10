@@ -26,18 +26,36 @@ describe("current decision-grade evidence", () => {
       "The approved financial memo is missing or stale.",
       "The approved income workpaper is missing or stale.",
     ]));
+    expect(stale.verification).toEqual({ income: false, assets: false, credit: true });
   });
 
   it("rejects simulated credit even when every sticky application flag is true", () => {
     const result = assessCurrentDecisionGrade(verified as never, { ...complete, creditPullIsSimulated: true });
     expect(result.isDecisionGrade).toBe(false);
     expect(result.reasons).toContain("A current real bureau credit report is required.");
+    expect(result.verification.credit).toBe(false);
   });
 
   it("rejects expired or archived credit even when every sticky application flag is true", () => {
     const result = assessCurrentDecisionGrade(verified as never, { ...complete, creditPullIsCurrent: false });
     expect(result.isDecisionGrade).toBe(false);
     expect(result.reasons).toContain("A current real bureau credit report is required.");
+  });
+
+  it("reports each current dimension independently without promoting the whole file", () => {
+    const result = assessCurrentDecisionGrade({
+      financialDataProvenance: "self_reported",
+      incomeVerified: true,
+      assetsVerified: false,
+      creditVerified: false,
+    } as never, {
+      ...complete,
+      assetWorkpaperId: null,
+      creditPullId: null,
+      creditPullIsCurrent: false,
+    });
+    expect(result.isDecisionGrade).toBe(false);
+    expect(result.verification).toEqual({ income: true, assets: false, credit: false });
   });
 
   it("derives credit freshness from completion, expiry, archive, and simulation state", () => {

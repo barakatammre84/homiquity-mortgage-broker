@@ -13,7 +13,6 @@ import {
   type IncomePathResult,
   type IncomePathId,
 } from "@shared/incomePaths";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { storage } from "../../storage";
 import { calculateSubjectPropertyQualifyingRent } from "../underwritingNuance";
 import { estimateMonthlyPITI } from "../preUnderwriting";
@@ -41,8 +40,8 @@ import {
  * but not auto-applied — see rental.ts). Alternative methods carry their own
  * program authority (P4): DSCR computes the cited Rent-Divided-PITIA ratio
  * over declared rentals (no in-repo qualifying threshold — always review);
- * bank-statement math is cited and available but has no capture surface until
- * P5. Same inputs → same result → same evaluation fingerprint.
+ * bank-statement math is cited and has a staff capture surface. Same inputs →
+ * same result → same evaluation fingerprint.
  */
 
 export interface IncomePathsCoreInput {
@@ -346,7 +345,10 @@ export function estimateSubjectPitia(
  * analysis, URLA liabilities (double-count guard), and the subject-property
  * facts (B3-3.8-01 2–4-unit owner-occupied rent).
  */
-export async function evaluateIncomePaths(app: LoanApplication): Promise<EvaluatedIncomePaths> {
+export async function evaluateIncomePaths(
+  app: LoanApplication,
+  options: { applyRentalToDti: boolean } = { applyRentalToDti: false },
+): Promise<EvaluatedIncomePaths> {
   const [employment, otherIncome, bankStatementAnalysis, liabilities, propertyInfo] =
     await Promise.all([
       storage.getEmploymentHistory(app.id),
@@ -365,7 +367,9 @@ export async function evaluateIncomePaths(app: LoanApplication): Promise<Evaluat
     rentalProperties,
     fallbackAnnualIncome: app.annualIncome,
     bankStatementAnalysis,
-    applyRentalToDti: isDecisionGrade(app.financialDataProvenance as DataProvenance),
+    // Callers must explicitly opt into positive rental income after resolving
+    // current decision evidence. A sticky application label is not enough.
+    applyRentalToDti: options.applyRentalToDti,
     hasMortgageLiabilityRows: hasMortgageTypeLiability(liabilities),
     subjectProperty: propertyInfo
       ? {

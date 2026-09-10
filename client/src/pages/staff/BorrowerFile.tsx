@@ -211,15 +211,12 @@ export default function BorrowerFile() {
   // Mirrors the evidence-backed per-dimension verification routes — closer,
   // broker, and lender are 403'd there. Both sides read the shared role list.
   const canVerifyFinancials = FINANCIAL_VERIFICATION_ROLES.includes(user?.role || "");
-  const financialVerificationCount = [
-    application.incomeVerified,
-    application.assetsVerified,
-    application.creditVerified,
-  ].filter(Boolean).length;
+  const currentVerification = appData?.currentVerification ?? { income: false, assets: false, credit: false };
+  const financialVerificationCount = Object.values(currentVerification).filter(Boolean).length;
   const currentDecisionGrade = appData?.currentDecisionGrade === true;
   const isPreliminaryReview = application.status === "pre_approved" && !currentDecisionGrade;
-  const hasVerifiedCredit = currentDecisionGrade;
-  const hasVerifiedIncome = currentDecisionGrade;
+  const hasVerifiedCredit = currentVerification.credit;
+  const hasVerifiedIncome = currentVerification.income;
   const propertyLocation = [application.propertyCity, application.propertyState]
     .filter(Boolean)
     .join(", ");
