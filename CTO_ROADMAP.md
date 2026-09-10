@@ -160,7 +160,10 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    current fully approved workpaper package as approved, and excludes raw OCR, filenames, account
    identifiers, borrower notes and staff review notes. Low confidence routes to staff review and
    does not create a borrower re-upload request unless the real checklist says the document was
-   rejected. The staff report separates legacy turns, measurement coverage and operational
+   rejected. Evidence and shared file reads are bounded and reused within a turn, and a file with
+   more documents than the response window is labeled as a bounded view so Homi cannot mistake an
+   omitted older return, statement or lease for an absent document. The staff report separates
+   legacy turns, measurement coverage and operational
    exceptions and refuses a reduced-friction claim without at least 30 measured turns across 10
    borrowers and a comparison cohort defined in advance. Collect that cohort; change guidance only
    when the measured journey shows less borrower or loan-officer effort.

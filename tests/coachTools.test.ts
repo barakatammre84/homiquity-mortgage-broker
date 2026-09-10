@@ -502,4 +502,26 @@ describe("executeCoachTool: get_document_evidence", () => {
 
     expect(loadCoachDocumentEvidence).toHaveBeenCalledTimes(1);
   });
+
+  it("discloses a bounded document view instead of implying omitted files are absent", async () => {
+    loadCoachDocumentEvidence.mockResolvedValue({
+      documents: [{
+        documentType: "pay_stub",
+        label: "Pay stub",
+        documentReviewStatus: "accepted",
+        evidenceStatus: "not_extracted",
+        omittedFactCount: 0,
+        facts: [],
+      }],
+      summary: { documentCount: 1, extractedFactCount: 0, humanVerifiedFactCount: 0, factsNeedingHumanReview: 0, omittedDocumentCount: 3 },
+      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved" },
+    });
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+
+    const result = await executeCoachTool(ctx, "get_document_evidence", {});
+
+    expect(result.content).toContain("1 current document(s) shown; 3 additional current document(s) omitted");
+    expect(result.content).toMatch(/do not claim that an unlisted document is absent/i);
+    expect(result.content).toMatch(/get_document_checklist for receipt status/i);
+  });
 });

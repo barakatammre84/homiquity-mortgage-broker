@@ -2,7 +2,8 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production `d65007bcffd3ac89f4a77d4fa809739576a89492`
+**Code reviewed:** production base `3a666a3a7745a39d5e60306f12dec38ac6f7bfaf` plus the Homi
+document-evidence candidate through `92e4717a965fa81049c989eab3df0500bb70afc9`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -415,6 +416,17 @@ review labels, avoided an unnecessary application-status call after prompt refin
 medium-confidence evidence to staff review without asking the borrower to upload the document
 again.
 
+The first security review found that the response cap was applied after the extracted-field read
+and that repeated model tool calls reloaded the same file. The corrected path selects at most the
+12 newest current documents before querying their facts, reuses document evidence and shared file
+truth within the turn, and invalidates affected caches after a successful write. The exact
+post-fix diff security review found no reportable issue. A second product pass found that the tool
+did not tell the model when older documents fell outside the bounded window; the response now
+states the omitted count and forbids treating an unlisted document as absent. Receipt questions
+route to the real checklist. The post-fix live Sonnet grounding run again called the evidence tool
+and repeated all four synthetic mixed-income figures with the correct review labels and no
+approval claim.
+
 **Production proof still required:** collect at least 30 current-format turns across 10 distinct
 borrowers, define a comparison cohort before reading its result and compare completion,
 exact-repeat, handoff and response-time measures. Phone calls and work outside secure Messages need
@@ -629,7 +641,10 @@ missed escalation or time to a useful human response.
 52. Connected Homi to bounded server-written document evidence. The tool re-authorizes the workable
     file, exposes only allowlisted numeric OCR/tax facts, distinguishes machine-read values from
     human-verified fields and current approved workpapers, excludes raw text and identifiers, and
-    prevents OCR uncertainty from becoming an unnecessary borrower re-upload request.
+    prevents OCR uncertainty from becoming an unnecessary borrower re-upload request. A follow-up
+    audit bounded fact reads before the query, cached read-only snapshots within one turn, invalidated
+    them after writes and made omitted documents explicit so Homi cannot confuse a bounded response
+    with a complete file inventory.
 
 ## Sources
 

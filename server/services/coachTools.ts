@@ -1145,13 +1145,17 @@ export async function executeCoachTool(
       const packageLine = evidence.financialReview.status === "approved_for_lender_package"
         ? `Financial review: approved for lender presentation (income ${evidence.financialReview.income}; assets ${evidence.financialReview.assets}).`
         : "Financial review: no current fully approved lender-package memo. Extracted figures remain evidence for review, not qualifying income or an approval decision.";
+      const documentScope = evidence.summary.omittedDocumentCount > 0
+        ? `${evidence.summary.documentCount} current document(s) shown; ${evidence.summary.omittedDocumentCount} additional current document(s) omitted from this bounded view`
+        : `${evidence.summary.documentCount} current document(s) shown`;
       return {
         content:
-          `${evidence.summary.documentCount} current document(s); ${evidence.summary.extractedFactCount} safe financial fact(s); ` +
+          `${documentScope}; ${evidence.summary.extractedFactCount} safe financial fact(s); ` +
           `${evidence.summary.humanVerifiedFactCount} human verified; ${evidence.summary.factsNeedingHumanReview} need human review.\n` +
           `${lines.join("\n")}\n${packageLine}\n` +
           "State each value with the exact review label above. Confidence measures extraction certainty only. " +
           "A low-confidence fact needs STAFF review; do not ask the borrower to replace the document unless get_document_checklist says it was rejected. " +
+          "When additional documents were omitted from this bounded view, do not claim that an unlisted document is absent; use get_document_checklist for receipt status. " +
           "Never turn gross income, AGI, gross pay, deposits, or rent into qualifying income unless a current approved workpaper explicitly supplies that conclusion.",
       };
     }
