@@ -6,7 +6,7 @@ import { BASE_URL } from "./setup";
 const applicationId = randomUUID();
 const outsideApplicationId = randomUUID();
 let borrowerId = randomUUID();
-const documentTypes = ["w2", "schedule_k1", "business_bank_statement", "lease_agreement", "bank_statement_checking", "credit_report", "business_bank_statement"];
+const documentTypes = ["pay_stub", "schedule_k1", "business_bank_statement", "lease_agreement", "bank_statement_checking", "credit_report", "business_bank_statement"];
 const documentIds = documentTypes.map(() => randomUUID());
 const businessEntityId = randomUUID();
 const otherBusinessEntityId = randomUUID();
@@ -51,7 +51,7 @@ beforeAll(async () => {
 
   const rental = [{ type: "rental", annualAmount: "0", rentalProperties: [{ address: "10 Rental Way", monthlyRentalIncome: "3000", monthlyDebtPayment: "1800" }] }];
   await pool.query(
-    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources) VALUES ($1,$3,'processing','purchase','conventional','650000','130000','160000','verified',$4::jsonb),($2,$3,'draft','purchase','conventional','400000','80000','90000','stated','[]'::jsonb)",
+    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources) VALUES ($1,$3,'processing','purchase','conventional','650000','130000','160000','self_reported',$4::jsonb),($2,$3,'draft','purchase','conventional','400000','80000','90000','self_reported','[]'::jsonb)",
     [applicationId, outsideApplicationId, borrowerId, JSON.stringify(rental)],
   );
   await pool.query("INSERT INTO deal_team_members (application_id,user_id,team_role,is_active) VALUES ($1,'test-lo','loan_officer',true)", [applicationId]);
@@ -90,6 +90,12 @@ beforeAll(async () => {
     await pool.query("INSERT INTO document_lineage (application_id,document_id,lineage_id,version_number,content_sha256,subject_type,subject_id,recorded_by_user_id) VALUES ($1,$2,$2,1,$3,$4,$5,'test-lo')", [applicationId, id, `${index + 1}`.padStart(64, "a"), businessDocument ? "business" : "application", subjectId]);
     await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,$2,'1000','currency','0.99','fixture',true,'test-lo',now())", [id, `${type}_amount`]);
   }
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'monthly_income_ytd_avg','6000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'employer_name','Fictional Hospital','string','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'closing_balance','90000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[4]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'account_number_last4','1234','string','0.99','fixture',true,'test-lo',now())", [documentIds[4]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'monthly_rent','3000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[3]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'property_address','10 Rental Way','string','0.99','fixture',true,'test-lo',now())", [documentIds[3]]);
 });
 
 afterAll(async () => {
@@ -135,6 +141,9 @@ describe.sequential("financial workpapers and cited memo", () => {
     expect(assetPaper.sources.some((source: { documentId: string }) => [documentIds[2], documentIds[6]].includes(source.documentId))).toBe(false);
     expect(JSON.stringify(current.workpapers.map((row: { input: unknown }) => row.input))).not.toContain("1234");
     expect(JSON.stringify(current.workpapers.map((row: { input: unknown }) => row.input))).not.toContain("9999");
+    expect(income.input.evidenceComparisons).toContainEqual(expect.objectContaining({ kind: "income", status: "match", evidenceValue: 6000, calculationValue: 6000 }));
+    expect(assetPaper.input.evidenceComparisons).toContainEqual(expect.objectContaining({ kind: "asset", status: "match", evidenceValue: 90000, calculationValue: 90000 }));
+    expect(rentalPaper.input.evidenceComparisons).toContainEqual(expect.objectContaining({ kind: "rental", status: "match", evidenceValue: 3000, calculationValue: 3000 }));
   });
 
   it("requires dependency approval, then builds and approves a memo with exact version references", async () => {
@@ -172,6 +181,44 @@ describe.sequential("financial workpapers and cited memo", () => {
     const approved = await call("lo", `/api/loan-applications/${applicationId}/financial-review/memo/${memoId}/review`, { action: "approve", reason: "Approved for lender presentation after complete review.", expectedFingerprint: current.memo.inputFingerprint });
     expect(approved.status).toBe(201);
     expect((await workspace()).memo.review.action).toBe("approve");
+  });
+
+  it("keeps the approved review current when its verification promotes application provenance", async () => {
+    await pool.query("UPDATE loan_applications SET financial_data_provenance='verified',income_verified=true,assets_verified=true,credit_verified=true WHERE id=$1", [applicationId]);
+    const promoted = await workspace();
+    expect(promoted.currentApprovedCount).toBe(6);
+    expect(promoted.memo.isCurrent).toBe(true);
+    expect(promoted.workpapers.find((row: { kind: string }) => row.kind === "rental_cash_flow").output.result.appliedMonthlyIncome).toBe(450);
+  });
+
+  it("invalidates approved workpapers when a reviewer corrects a fact without changing its ID", async () => {
+    await pool.query(
+      "UPDATE extracted_fields SET human_corrected_value='6500',verified_at=now() WHERE document_id=$1 AND field_name='monthly_income_ytd_avg'",
+      [documentIds[0]],
+    );
+    const changed = await workspace();
+    const income = changed.workpapers.find((row: { kind: string }) => row.kind === "income_summary");
+    expect(income.isCurrent).toBe(false);
+    expect(income.blockers).toContainEqual(expect.objectContaining({ code: "stale_version" }));
+    expect(changed.memo.isCurrent).toBe(false);
+    expect(changed.currentApprovedCount).toBe(5);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const refreshed = await workspace();
+    const refreshedIncome = refreshed.workpapers.find((row: { kind: string }) => row.kind === "income_summary");
+    const comparison = refreshedIncome.input.evidenceComparisons.find((row: { kind: string }) => row.kind === "income");
+    expect(comparison).toMatchObject({ status: "variance", evidenceValue: 6500, calculationValue: 6000, variance: 500 });
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${refreshedIncome.id}/review`, {
+      action: "approve",
+      reason: "Reviewed variable pay treatment.",
+      expectedFingerprint: refreshedIncome.inputFingerprint,
+    })).status).toBe(409);
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${refreshedIncome.id}/review`, {
+      action: "approve",
+      reason: "Reviewed variable pay treatment.",
+      expectedFingerprint: refreshedIncome.inputFingerprint,
+      acknowledgedComparisonIds: [comparison.id],
+    })).status).toBe(201);
   });
 
   it("marks the household workpaper and memo stale when a co-borrower figure changes", async () => {

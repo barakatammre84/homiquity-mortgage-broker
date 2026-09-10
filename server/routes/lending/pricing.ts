@@ -26,7 +26,7 @@ import { activeFeeSchedule } from "../../services/platformFeeSchedule";
 import { computePaymentProjection, type PaymentProjection } from "../../services/loanEstimate";
 import { hasBorrowerConsent } from "../../consentGate";
 import * as creditService from "../../services/creditService";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
+import { getCurrentDecisionGrade } from "../../services/currentDecisionGrade";
 import { computeOffers, type BorrowerPricingProfile } from "../../services/pricingAdapter";
 import { toBorrowerOfferViews } from "@shared/borrowerOfferView";
 import { routeParam } from "../../http/routeParams";
@@ -464,7 +464,7 @@ export function registerPricingRoutes(
         return res.status(404).json({ error: "Application not found" });
       }
 
-      const qualifier = isDecisionGrade(application.financialDataProvenance as DataProvenance)
+      const qualifier = (await getCurrentDecisionGrade(application)).isDecisionGrade
         ? "VERIFIED"
         : "PRELIMINARY";
       const pricedAt = new Date().toISOString();

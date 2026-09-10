@@ -14,6 +14,7 @@ import {
   type LoanApplication,
 } from "@shared/schema";
 import { routeParam } from "../http/routeParams";
+import { getCurrentDecisionGrade } from "../services/currentDecisionGrade";
 
 /**
  * LO Command Center cockpit routes (LO Advisor Program prompt LO-1).
@@ -177,13 +178,14 @@ export function registerCockpitRoutes(app: Express, storage: IStorage) {
           return res.status(404).json({ error: "Application not found" });
         }
 
-        const [borrower, incomeRow, conditions, documents, messages, activity] = await Promise.all([
+        const [borrower, incomeRow, conditions, documents, messages, activity, currentGrade] = await Promise.all([
           storage.getUser(application.userId),
           getLatestIncomePathEvaluation(applicationId),
           storage.getLoanConditionsByApplication(applicationId),
           storage.getDocumentsByApplication(applicationId),
           storage.getMessages(user.id, application.userId),
           getUserActivitySummary(application.userId),
+          getCurrentDecisionGrade(application),
         ]);
 
         const borrowerName =
@@ -245,6 +247,8 @@ export function registerCockpitRoutes(app: Express, storage: IStorage) {
             propertyState: application.propertyState,
             propertyType: application.propertyType,
             financialDataProvenance: application.financialDataProvenance,
+            currentDecisionGrade: currentGrade.isDecisionGrade,
+            decisionGradeBlockers: currentGrade.reasons,
             isVeteran: application.isVeteran ?? false,
             closingDate: application.closingDate ?? null,
             createdAt: application.createdAt,

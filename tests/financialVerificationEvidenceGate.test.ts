@@ -9,6 +9,7 @@ describe("financial verification evidence gate", () => {
       approvedAssetWorkpaperId: null,
       creditPullId: "pull-1",
       creditPullIsSimulated: false,
+      creditPullIsCurrent: true,
     };
     expect(financialVerificationEvidenceError("income", missing)).toMatch(/Approve the current financial workpapers/i);
     expect(financialVerificationEvidenceError("assets", missing)).toMatch(/Approve the current financial workpapers/i);
@@ -30,14 +31,18 @@ describe("financial verification evidence gate", () => {
       approvedAssetWorkpaperId: "wp-assets",
       creditPullId: null,
       creditPullIsSimulated: false,
+      creditPullIsCurrent: false,
     };
     expect(financialVerificationEvidenceError("credit", noPull)).toMatch(/real bureau credit report/i);
 
     const simulated = { ...noPull, creditPullId: "pull-sim", creditPullIsSimulated: true };
-    expect(financialVerificationEvidenceError("credit", simulated)).toMatch(/simulated credit cannot/i);
+    expect(financialVerificationEvidenceError("credit", simulated)).toMatch(/simulated, expired, or archived/i);
 
-    const real = { ...simulated, creditPullId: "pull-real", creditPullIsSimulated: false };
+    const real = { ...simulated, creditPullId: "pull-real", creditPullIsSimulated: false, creditPullIsCurrent: true };
     expect(financialVerificationEvidenceError("credit", real)).toBeNull();
+
+    const expired = { ...real, creditPullIsCurrent: false };
+    expect(financialVerificationEvidenceError("credit", expired)).toMatch(/expired/i);
   });
 
   it("does not let an income-only approved memo verify assets", () => {
@@ -47,6 +52,7 @@ describe("financial verification evidence gate", () => {
       approvedAssetWorkpaperId: null,
       creditPullId: "pull-real",
       creditPullIsSimulated: false,
+      creditPullIsCurrent: true,
     };
     expect(financialVerificationEvidenceError("income", incomeOnly)).toBeNull();
     expect(financialVerificationEvidenceError("assets", incomeOnly)).toMatch(/asset reconciliation/i);

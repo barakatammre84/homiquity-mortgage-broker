@@ -5,7 +5,6 @@ import { storage } from "../storage";
 import { db } from "../db";
 import { consolidatedUnderwritingEngine, UnderwritingError, type UnderwritingInput, type AssetProfile, type ResolvedPolicy } from "../underwritingEngine";
 import { computePaymentProjection } from "./loanEstimate";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { isExcludedAsPaidByOtherParty, type PaidByOtherPartyFacts } from "@shared/liabilityExclusions";
 import { decisionSnapshots, incomePathEvaluations, type LoanApplication, type IncomeSourceEntry } from "@shared/schema";
 import {
@@ -19,6 +18,7 @@ import {
   type IncomePathsCoreInput,
 } from "./income/orchestrator";
 import type { IncomeOrchestrationResult } from "@shared/incomePaths";
+import { getCurrentDecisionGrade } from "./currentDecisionGrade";
 
 // =============================================================================
 // INSTANT DECISION ORCHESTRATOR (Tinman-style)
@@ -82,7 +82,7 @@ export interface InstantDecision {
   } | null;
 }
 
-const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v1";
+const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v2";
 
 function decisionInputFingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -253,7 +253,7 @@ export function summarizeDeclaredDerogatoryEvents(
   return events;
 }
 
-async function aggregateBorrowerFinancials(app: LoanApplication): Promise<AggregatedFinancials> {
+async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: boolean): Promise<AggregatedFinancials> {
   const [employment, otherIncome, liabilities, urlaAssets, bankStatementAnalysis, propertyInfo, declarations] =
     await Promise.all([
       storage.getEmploymentHistory(app.id),
@@ -293,7 +293,7 @@ async function aggregateBorrowerFinancials(app: LoanApplication): Promise<Aggreg
     // B3-3.8-01 rental application (docs/fannie-mae/rental-income-reference.md):
     // positive offsets and subject-property rent only on decision-grade
     // provenance; losses always (platform-rental-preliminary-asymmetry).
-    applyRentalToDti: isDecisionGrade(app.financialDataProvenance as DataProvenance),
+    applyRentalToDti: decisionGrade,
     hasMortgageLiabilityRows: hasMortgageTypeLiability(liabilities),
     subjectProperty: propertyInfo
       ? {
@@ -345,10 +345,11 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     throw new Error("Application not found");
   }
 
-  const isVerified = isDecisionGrade(app.financialDataProvenance as DataProvenance);
+  const currentGrade = await getCurrentDecisionGrade(app);
+  const isVerified = currentGrade.isDecisionGrade;
   const qualifier: InstantDecision["qualifier"] = isVerified ? "VERIFIED" : "PRELIMINARY";
 
-  const fin = await aggregateBorrowerFinancials(app);
+  const fin = await aggregateBorrowerFinancials(app, isVerified);
 
   // A policy fingerprint proves which rules were used; this separate digest
   // proves which borrower facts were evaluated. Keep the payload explicit so
@@ -379,6 +380,10 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     },
     incomeInputsFingerprint: fin.incomeInputsFingerprint,
     incomeEvaluationFingerprint: fin.incomeEvaluationFingerprint,
+    currentVerification: {
+      isDecisionGrade: currentGrade.isDecisionGrade,
+      evidence: currentGrade.evidence,
+    },
   };
   const prePricingInputsFingerprint = decisionInputFingerprint(decisionEvidence);
 

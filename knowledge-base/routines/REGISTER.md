@@ -44,7 +44,7 @@ that `main` cannot show until work lands.
 
 Humans claim too — a routine cannot see your editor.
 
-| codex core financial-analysis audit 2026-09-10 | `server/services/financialReview.ts`, `server/services/decisionEngine.ts`, underwriting decision-grade routes/helpers, `shared/financialReview.ts`, `client/src/pages/staff/borrowerFile/FinancialReviewTab.tsx`, focused tests and roadmap evidence | `/Users/ammrebarakat/Developer/homiquity-worktrees/raster-document-proof` · `codex/financial-analysis-evidence` · 2026-09-10 22:18 UTC | Trace verified OCR/tax facts into financial workpapers, reconcile calculation inputs, and make underwriting derive VERIFIED status from current approved evidence, then re-audit. No overlap with open dependency PRs. |
+| codex core financial-analysis audit 2026-09-10 | `server/services/financialReview.ts`, `server/services/decisionEngine.ts`, underwriting decision-grade routes/helpers and current-grade application/dashboard/cockpit response fields, `shared/financialReview.ts`, financial-review plus decision-status client surfaces, focused tests and roadmap evidence | `/Users/ammrebarakat/Developer/homiquity-worktrees/raster-document-proof` · `codex/financial-analysis-evidence` · 2026-09-10 22:18 UTC | Trace verified OCR/tax facts into financial workpapers, reconcile calculation inputs, and make every binding or displayed VERIFIED status derive from current approved evidence, then re-audit. No overlap with open dependency PRs. |
 
 ## Before you touch someone else's PR — the check `gh` cannot do
 

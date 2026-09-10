@@ -24,6 +24,8 @@ function cockpit(status: string, financialDataProvenance: string): CockpitData {
       propertyState: "IL",
       propertyType: "single_family",
       financialDataProvenance,
+      currentDecisionGrade: financialDataProvenance === "verified",
+      decisionGradeBlockers: financialDataProvenance === "verified" ? [] : ["The approved financial memo is missing or stale."],
       isVeteran: false,
       closingDate: null,
       createdAt: null,
@@ -56,12 +58,21 @@ describe("ActionsRail pre-approval integrity", () => {
   it("blocks a letter while the pre-approval is still based on self-reported financials", () => {
     renderRail(cockpit("pre_approved", "self_reported"));
     expect((screen.getByTestId("action-preapproval-letter") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId("preapproval-letter-blocked-reason").textContent).toMatch(/verify income, assets, and credit/i);
+    expect(screen.getByTestId("preapproval-letter-blocked-reason").textContent).toMatch(/missing or stale/i);
   });
 
   it("enables a letter only for a verified pre-approved file", () => {
     renderRail(cockpit("pre_approved", "verified"));
     expect((screen.getByTestId("action-preapproval-letter") as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByTestId("preapproval-letter-blocked-reason")).toBeNull();
+  });
+
+  it("blocks a letter when the stored verified label has stale evidence", () => {
+    const data = cockpit("pre_approved", "verified");
+    data.application.currentDecisionGrade = false;
+    data.application.decisionGradeBlockers = ["The approved financial memo is missing or stale."];
+    renderRail(data);
+    expect((screen.getByTestId("action-preapproval-letter") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("preapproval-letter-blocked-reason").textContent).toMatch(/missing or stale/i);
   });
 });

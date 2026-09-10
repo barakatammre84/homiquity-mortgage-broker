@@ -16,6 +16,7 @@ import { assertStageRequirements } from "@shared/stageRequirements";
 import { evaluateTridTrigger, tridHardStopError } from "../../services/trid";
 import { routeParams } from "../../http/routeParams";
 import { incomeBreakdownExceedsHouseholdTotal } from "@shared/preApprovalForm";
+import { getCurrentDecisionGrade, isCurrentRealCreditPull } from "../../services/currentDecisionGrade";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -27,6 +28,7 @@ export type FinancialVerificationEvidence = {
   approvedAssetWorkpaperId: string | null;
   creditPullId: string | null;
   creditPullIsSimulated: boolean;
+  creditPullIsCurrent: boolean;
 };
 
 /** The proof required before a staff attestation may become decision-grade. */
@@ -35,8 +37,8 @@ export function financialVerificationEvidenceError(
   evidence: FinancialVerificationEvidence,
 ): string | null {
   if (dimension === "credit") {
-    return !evidence.creditPullId || evidence.creditPullIsSimulated
-      ? "A completed real bureau credit report is required; simulated credit cannot be marked verified."
+    return !evidence.creditPullId || evidence.creditPullIsSimulated || !evidence.creditPullIsCurrent
+      ? "A current completed real bureau credit report is required; simulated, expired, or archived credit cannot be marked verified."
       : null;
   }
   if (!evidence.approvedMemoId) {
@@ -269,6 +271,14 @@ export function registerStatusDecisionRoutes(
             error: guardErr instanceof Error ? guardErr.message : "Financial data must be verified",
           });
         }
+        const currentGrade = await getCurrentDecisionGrade(application);
+        if (!currentGrade.isDecisionGrade) {
+          return res.status(422).json({
+            error: "The approved financial or credit evidence is missing or stale. Refresh the financial review before recording an approval.",
+            code: "decision_evidence_not_current",
+            blockers: currentGrade.reasons,
+          });
+        }
       }
 
       // Every amount-bearing status must carry a coherent loan amount — a
@@ -486,6 +496,7 @@ export function registerStatusDecisionRoutes(
           approvedAssetWorkpaperId: financialEvidence.assetWorkpaperId,
           creditPullId: creditPull?.id ?? null,
           creditPullIsSimulated: creditPull?.isSimulated ?? false,
+          creditPullIsCurrent: isCurrentRealCreditPull(creditPull),
         };
         const blockers = [
           financialVerificationEvidenceError("income", evidence),
@@ -553,6 +564,7 @@ export function registerStatusDecisionRoutes(
             approvedAssetWorkpaperId: null,
             creditPullId: creditPull?.id ?? null,
             creditPullIsSimulated: creditPull?.isSimulated ?? false,
+            creditPullIsCurrent: isCurrentRealCreditPull(creditPull),
           });
           if (evidenceError) {
             return res.status(422).json({ error: evidenceError });
@@ -567,6 +579,7 @@ export function registerStatusDecisionRoutes(
             approvedAssetWorkpaperId: financialEvidence.assetWorkpaperId,
             creditPullId: null,
             creditPullIsSimulated: false,
+            creditPullIsCurrent: false,
           });
           if (evidenceError) {
             return res.status(422).json({ error: evidenceError });

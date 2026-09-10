@@ -1,5 +1,4 @@
 import type { LoanApplication, DealActivity, LoanAppStatus } from "@shared/schema";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import {
   AlertCircle,
   AlertTriangle,
@@ -97,9 +96,9 @@ export function getPreUwFlags(application: LoanApplication | null | undefined): 
   return raw as PreUwFlagsPayload;
 }
 
-export function getExpirationInfo(application: LoanApplication): { label: string; daysLeft: number; urgency: "expired" | "urgent" | "normal" } | null {
+export function getExpirationInfo(application: LoanApplication, decisionGrade: boolean): { label: string; daysLeft: number; urgency: "expired" | "urgent" | "normal" } | null {
   if (application.status !== "pre_approved") return null;
-  if (!isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)) return null;
+  if (!decisionGrade) return null;
   if (!application.createdAt) return null;
   const createdDate = new Date(application.createdAt);
   if (isNaN(createdDate.getTime())) return null;
@@ -133,6 +132,7 @@ export function getReadinessPercent(
   verificationStatus?: { hasCreditConsent: boolean; hasIdVerification: boolean; hasBankConnected: boolean; hasRateLocked: boolean },
   hasCoachSession?: boolean,
   hasBrowsedProperties?: boolean,
+  decisionGrade = false,
 ): number {
   if (!application) {
     let score = 10;
@@ -162,7 +162,7 @@ export function getReadinessPercent(
     suspended: 25,
   };
   let base = statusWeights[status as LoanAppStatus] || 30;
-  if (status === "pre_approved" && !isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)) {
+  if (status === "pre_approved" && !decisionGrade) {
     base = statusWeights.under_review;
   }
   if (verificationStatus) {
@@ -176,7 +176,7 @@ export function getReadinessPercent(
   return Math.min(base, 100);
 }
 
-export function getPersonalizedGreeting(user: { firstName?: string | null } | null | undefined, application: LoanApplication | null): { title: string; subtitle: string } {
+export function getPersonalizedGreeting(user: { firstName?: string | null } | null | undefined, application: LoanApplication | null, decisionGrade = false): { title: string; subtitle: string } {
   const name = user?.firstName || "";
   const greeting = name ? `Hi, ${name}` : "Welcome back";
 
@@ -191,7 +191,7 @@ export function getPersonalizedGreeting(user: { firstName?: string | null } | nu
     case "analyzing":
       return { title: greeting, subtitle: "Your application is being reviewed. We'll have an answer shortly." };
     case "pre_approved":
-      return isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined)
+      return decisionGrade
         ? { title: greeting, subtitle: "You're pre-approved. Time to find your home." }
         : { title: greeting, subtitle: "Your initial review is ready. Complete verification to confirm your borrowing range." };
     case "doc_collection":
@@ -218,6 +218,7 @@ export function getPersonalizedGreeting(user: { firstName?: string | null } | nu
 }
 
 export interface BorrowerGraphData {
+  activeApplicationId: string | null;
   financialVerification: {
     income: boolean;
     assets: boolean;

@@ -27,7 +27,7 @@ import { computeNextAction } from "./nextAction";
 import { pickActiveLoanApplication } from "@shared/schema";
 import { annuityFactor, monthlyPrincipalAndInterest } from "@shared/lib/amortization";
 import { currentDocumentEvidencePredicate } from "./currentDocumentEvidence";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
+import { getCurrentDecisionGrade } from "./currentDecisionGrade";
 
 export interface IncomeSource {
   source: "document" | "application" | "coach" | "goal";
@@ -399,7 +399,7 @@ export async function buildBorrowerGraph(
   // messages, property views, milestone count), which added four extra
   // round-trips of latency to the dashboard's hero section.
   const wave2GoalData = goalRows[0] || null;
-  const [empHistoryResult, coachMsgsResult, propActivitiesResult, milestoneCountResult] =
+  const [empHistoryResult, coachMsgsResult, propActivitiesResult, milestoneCountResult, currentDecisionGradeResult] =
     await Promise.allSettled([
       activeApp
         ? db.select().from(employmentHistory).where(eq(employmentHistory.applicationId, activeApp.id))
@@ -425,6 +425,7 @@ export async function buildBorrowerGraph(
             .from(journeyMilestones)
             .where(eq(journeyMilestones.goalId, wave2GoalData.id))
         : Promise.resolve([]),
+      activeApp ? getCurrentDecisionGrade(activeApp) : Promise.resolve(null),
     ]);
 
   let empHistory: any[] = [];
@@ -1223,7 +1224,9 @@ export async function buildBorrowerGraph(
       income: activeApp?.incomeVerified === true,
       assets: activeApp?.assetsVerified === true,
       credit: activeApp?.creditVerified === true,
-      decisionGrade: isDecisionGrade(activeApp?.financialDataProvenance as DataProvenance | undefined),
+      decisionGrade: currentDecisionGradeResult.status === "fulfilled"
+        ? currentDecisionGradeResult.value?.isDecisionGrade ?? false
+        : false,
     },
 
     income: incomeSources,

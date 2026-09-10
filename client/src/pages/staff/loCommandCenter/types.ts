@@ -64,6 +64,8 @@ export interface CockpitData {
     propertyState: string | null;
     propertyType: string | null;
     financialDataProvenance: string | null;
+    currentDecisionGrade: boolean;
+    decisionGradeBlockers: string[];
     isVeteran: boolean;
     closingDate: string | null;
     createdAt: string | null;

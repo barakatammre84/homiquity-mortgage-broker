@@ -17,6 +17,8 @@ const cockpit = (paths: CockpitData["income"] extends null ? never : NonNullable
     loanPurpose: "purchase", purchasePrice: "500000", downPayment: "100000",
     propertyState: "IL", propertyType: "multi_family", isVeteran: false,
     financialDataProvenance: "verified",
+    currentDecisionGrade: true,
+    decisionGradeBlockers: [],
     closingDate: null, createdAt: null,
   },
   income: {
@@ -94,6 +96,8 @@ describe("ActiveBorrowerPane — the qualifying-income list reconciles", () => {
     ]);
     data.application.status = "pre_approved";
     data.application.financialDataProvenance = "self_reported";
+    data.application.currentDecisionGrade = false;
+    data.application.decisionGradeBlockers = ["Application financial provenance is not verified."];
     renderPane(data);
 
     await waitFor(() => expect(screen.getByTestId("cockpit-active-borrower")).toBeTruthy());
@@ -117,6 +121,8 @@ describe("ActiveBorrowerPane — the qualifying-income list reconciles", () => {
       },
     ]);
     data.application.financialDataProvenance = "self_reported";
+    data.application.currentDecisionGrade = false;
+    data.application.decisionGradeBlockers = ["Application financial provenance is not verified."];
     data.conditions = {
       total: 6,
       open: 6,

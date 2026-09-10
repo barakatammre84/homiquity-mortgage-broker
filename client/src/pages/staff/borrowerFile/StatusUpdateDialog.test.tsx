@@ -23,7 +23,7 @@ function renderDialog(props?: Partial<Parameters<typeof StatusUpdateDialog>[0]>)
     <QueryClientProvider client={client}>
       <StatusUpdateDialog
         applicationId="app-1"
-        financialDataProvenance="verified"
+        currentDecisionGrade={true}
         canSetCreditDecisions={true}
         {...props}
       />
@@ -79,18 +79,18 @@ describe("StatusUpdateDialog", () => {
 
   it("blocks approval outcomes while financials are unverified, mirroring the server 422", async () => {
     const user = userEvent.setup();
-    renderDialog({ financialDataProvenance: "self_reported" });
+    renderDialog({ currentDecisionGrade: false });
     const approvalStatus = STAFF_SETTABLE_STATUSES.find((s) => isApprovalOutcomeStatus(s));
     expect(approvalStatus, "vocabulary contains at least one approval outcome").toBeDefined();
     const listbox = await openStatusSelect(user);
     await user.click(within(listbox).getByTestId(`option-status-${approvalStatus}`));
-    expect(screen.getByText(/Financials must be verified/)).toBeTruthy();
+    expect(screen.getByText(/Current approved financial and credit evidence is required/)).toBeTruthy();
     expect(screen.getByTestId("button-confirm-status-update").hasAttribute("disabled")).toBe(true);
   });
 
   it("enables an approval outcome once financials are verified", async () => {
     const user = userEvent.setup();
-    renderDialog(); // provenance defaults to "verified"
+    renderDialog(); // current decision evidence defaults to verified
     const approvalStatus = STAFF_SETTABLE_STATUSES.find((s) => isApprovalOutcomeStatus(s));
     const listbox = await openStatusSelect(user);
     await user.click(within(listbox).getByTestId(`option-status-${approvalStatus}`));

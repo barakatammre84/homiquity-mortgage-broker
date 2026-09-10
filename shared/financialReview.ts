@@ -58,13 +58,45 @@ export type FinancialSourceReference = {
   subjectId: string | null;
   pages: number[];
   verifiedFactIds: string[];
+  /** Changes whenever any linked fact is re-reviewed, without exposing private string values. */
+  verifiedFactReviewFingerprint?: string;
+  /**
+   * Human-reviewed numeric facts frozen into the workpaper version. Keeping
+   * the effective value here means a correction to an existing fact ID
+   * changes the workpaper fingerprint instead of leaving an approved memo
+   * current over superseded dollars.
+   */
+  verifiedFacts?: FinancialVerifiedFact[];
+};
+
+export type FinancialVerifiedFact = {
+  id: string;
+  fieldName: string;
+  value: number;
+  valueType: "currency" | "number";
+  pageNumber: number | null;
+};
+
+export type FinancialEvidenceComparison = {
+  id: string;
+  kind: "income" | "asset" | "rental";
+  status: "match" | "variance" | "unlinked";
+  documentId: string;
+  verifiedFactIds: string[];
+  label: string;
+  evidenceValue: number;
+  calculationValue: number | null;
+  variance: number | null;
+  tolerance: number;
+  detail: string;
 };
 
 export type FinancialWorkpaperInput = {
-  dataVersion: 1;
+  dataVersion: 1 | 2;
   subject: Record<string, unknown>;
   evidenceDocumentIds: string[];
   verifiedFactIds: string[];
+  evidenceComparisons?: FinancialEvidenceComparison[];
 };
 
 export type BusinessLiquidityOutput = {
@@ -155,10 +187,25 @@ export type FinancialReviewWorkspace = {
   memo: CreditMemoView | null;
   canBuildMemo: boolean;
   memoBlockedReason: string | null;
+  bankStatementAnalysis: {
+    id: string;
+    months: 12 | 24;
+    totalEligibleDeposits: number;
+    expenseFactor: number | null;
+    hasThirdPartyExpenseStatement: boolean;
+    notes: string | null;
+    createdAt: string;
+  } | null;
+  bankStatementEvidence: {
+    documentCount: number;
+    reviewedDepositFactCount: number;
+    observedTotalDeposits: number;
+  };
 };
 
 export const reviewFinancialArtifactSchema = z.object({
   action: z.enum(["approve", "reject"]),
   reason: z.string().trim().min(8).max(1000),
   expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  acknowledgedComparisonIds: z.array(z.string().min(1).max(1000)).max(100).optional(),
 });

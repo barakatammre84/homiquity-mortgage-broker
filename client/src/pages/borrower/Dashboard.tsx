@@ -26,7 +26,6 @@ import { ContactCard } from "@/components/dashboard/ContactCard";
 import { LoanTeamCard } from "@/components/dashboard/LoanTeamCard";
 import { RenterHome } from "@/pages/borrower/RenterHome";
 import { isStaffRole } from "@shared/roles";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import PredictionInsights from "@/components/borrower/PredictionInsights";
 import type { LoanApplication, DealActivity, LoanAppStatus } from "@shared/schema";
 import {
@@ -198,9 +197,11 @@ export default function Dashboard() {
   // matched a value no backend path ever wrote, so this link never appeared.)
   const hasClosedLoan = applications.some((app) => app.status === "funded");
 
-  const approvalVerified = isDecisionGrade(activeApplication?.financialDataProvenance as DataProvenance | undefined);
+  const approvalVerified = !!activeApplication
+    && borrowerGraph?.activeApplicationId === activeApplication.id
+    && borrowerGraph.financialVerification.decisionGrade;
   const isPreApproved = activeApplication?.status === "pre_approved" && approvalVerified;
-  const expirationInfo = activeApplication && approvalVerified ? getExpirationInfo(activeApplication) : null;
+  const expirationInfo = activeApplication ? getExpirationInfo(activeApplication, approvalVerified) : null;
 
   const offerCount = activeApplication ? (data?.loanOptionCounts?.[activeApplication.id] || 0) : 0;
   const hasOffers = offerCount > 0;
@@ -238,6 +239,7 @@ export default function Dashboard() {
     verificationStatus,
     hasCoachSession,
     browsedProperties,
+    approvalVerified,
   );
 
   // Incubator gate: no workable file and no funded loan → RenterHome (see
@@ -255,6 +257,7 @@ export default function Dashboard() {
   const { title: greetingTitle, subtitle: greetingSubtitle } = getPersonalizedGreeting(
     user,
     activeApplication || null,
+    approvalVerified,
   );
 
   // Server-computed next action — one source of truth for "what should the

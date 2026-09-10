@@ -9,6 +9,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +22,13 @@ import type {
   FinancialWorkpaperOutput,
   FinancialWorkpaperView,
 } from "@shared/financialReview";
+
+function evidenceFactLabel(fieldName: string) {
+  return fieldName
+    .replaceAll("_", " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, value => value.toUpperCase());
+}
 
 function outputLines(output: FinancialWorkpaperOutput) {
   if (output.kind === "income_summary") {
@@ -91,11 +102,15 @@ function WorkpaperCard({
   onOpenEvidence: (documentId: string, pageNumber?: number) => void;
 }) {
   const { toast } = useToast();
+  const [acknowledgedComparisons, setAcknowledgedComparisons] = useState<string[]>([]);
+  const comparisons = workpaper.input.evidenceComparisons ?? [];
+  const comparisonsNeedingAttention = comparisons.filter(comparison => comparison.status !== "match");
+  const allComparisonsAcknowledged = comparisonsNeedingAttention.every(comparison => acknowledgedComparisons.includes(comparison.id));
   const review = useMutation({
     mutationFn: async (action: "approve" | "reject") => apiRequest(
       "POST",
       `/api/loan-applications/${applicationId}/financial-review/workpapers/${workpaper.id}/review`,
-      { action, reason, expectedFingerprint: workpaper.inputFingerprint },
+      { action, reason, expectedFingerprint: workpaper.inputFingerprint, acknowledgedComparisonIds: acknowledgedComparisons },
     ),
     onSuccess: () => {
       setReason("");
@@ -124,6 +139,40 @@ function WorkpaperCard({
             </div>
           ))}
         </dl>
+        {comparisons.length > 0 && (
+          <div className="space-y-2" data-testid={`evidence-reconciliation-${workpaper.key}`}>
+            <p className="text-sm font-medium">Document-to-calculation checks</p>
+            {comparisons.map(comparison => {
+              const needsAttention = comparison.status !== "match";
+              return (
+                <div key={comparison.id} className="rounded-md border p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{comparison.label}</span>
+                    <Badge variant={comparison.status === "match" ? "secondary" : "destructive"}>
+                      {comparison.status === "match" ? "Matches" : comparison.status === "variance" ? "Variance" : "Needs link"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    Document {formatCurrency(comparison.evidenceValue)} · Calculation {comparison.calculationValue === null ? "not linked" : formatCurrency(comparison.calculationValue)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{comparison.detail}</p>
+                  {needsAttention && (
+                    <label className="mt-3 flex cursor-pointer items-start gap-2">
+                      <Checkbox
+                        checked={acknowledgedComparisons.includes(comparison.id)}
+                        onCheckedChange={checked => setAcknowledgedComparisons(current => checked
+                          ? [...new Set([...current, comparison.id])]
+                          : current.filter(id => id !== comparison.id))}
+                        aria-label={`Acknowledge ${comparison.label}`}
+                      />
+                      <span className="text-xs">I reviewed this difference and explained the treatment in my approval reason.</span>
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {workpaper.blockers.length > 0 && (
           <Alert variant="destructive">
                 <Icons.warning className="h-4 w-4" />
@@ -138,17 +187,35 @@ function WorkpaperCard({
         <div className="space-y-1 text-sm">
           <p className="font-medium">Evidence used</p>
           {workpaper.sources.length ? workpaper.sources.map(source => (
-            <Button
-              key={source.documentId}
-              type="button"
-              variant="link"
-              size="sm"
-              className="touch-target h-auto justify-start whitespace-normal p-0 text-left font-normal text-muted-foreground"
-              onClick={() => onOpenEvidence(source.documentId, source.pages[0])}
-              data-testid={`open-workpaper-source-${source.documentId}`}
-            >
-              {source.documentName} · v{source.versionNumber}{source.pages.length ? ` · page ${source.pages.join(", ")}` : ""} · Open source
-            </Button>
+            <div key={source.documentId} className="rounded-md border p-3">
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="touch-target h-auto justify-start whitespace-normal p-0 text-left font-normal text-muted-foreground"
+                onClick={() => onOpenEvidence(source.documentId, source.pages[0])}
+                data-testid={`open-workpaper-source-${source.documentId}`}
+              >
+                {source.documentName} · v{source.versionNumber}{source.pages.length ? ` · page ${source.pages.join(", ")}` : ""} · Open source
+              </Button>
+              {(source.verifiedFacts?.length ?? 0) > 0 && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs font-medium text-foreground">
+                    {source.verifiedFacts!.length} human-reviewed financial {source.verifiedFacts!.length === 1 ? "figure" : "figures"}
+                  </summary>
+                  <dl className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                    {source.verifiedFacts!.map(fact => (
+                      <div key={fact.id} className="flex flex-wrap justify-between gap-2">
+                        <dt>{evidenceFactLabel(fact.fieldName)}{fact.pageNumber ? ` · page ${fact.pageNumber}` : ""}</dt>
+                        <dd className="font-medium text-foreground">
+                          {fact.valueType === "currency" ? formatCurrency(fact.value) : fact.value.toLocaleString("en-US")}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              )}
+            </div>
           )) : <p className="text-muted-foreground">No accepted source evidence is linked yet.</p>}
         </div>
         {workpaper.review ? (
@@ -165,7 +232,7 @@ function WorkpaperCard({
               <Button
                 size="sm" className="touch-target"
                 onClick={() => review.mutate("approve")}
-                disabled={review.isPending || reason.trim().length < 8 || workpaper.blockers.length > 0}
+                disabled={review.isPending || reason.trim().length < 8 || workpaper.blockers.length > 0 || !allComparisonsAcknowledged}
                 data-testid={`approve-${workpaper.key}`}
               >
                 <Icons.done className="mr-2 h-4 w-4" />Approve
@@ -259,6 +326,102 @@ function MemoCard({
             </div>
           </div>
         ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BankStatementAnalysisCard({
+  applicationId,
+  existing,
+  evidence,
+  onSaved,
+}: {
+  applicationId: string;
+  existing: FinancialReviewWorkspace["bankStatementAnalysis"];
+  evidence: FinancialReviewWorkspace["bankStatementEvidence"];
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [months, setMonths] = useState<"12" | "24">(String(existing?.months ?? 12) as "12" | "24");
+  const [eligibleDeposits, setEligibleDeposits] = useState(existing ? String(existing.totalEligibleDeposits) : "");
+  const [expenseFactorPercent, setExpenseFactorPercent] = useState(existing?.expenseFactor === null || existing?.expenseFactor === undefined ? "" : String(existing.expenseFactor * 100));
+  const [hasThirdPartyStatement, setHasThirdPartyStatement] = useState(existing?.hasThirdPartyExpenseStatement ?? false);
+  const [notes, setNotes] = useState(existing?.notes ?? "");
+  const parsedDeposits = Number(eligibleDeposits.replace(/[,$\s]/g, ""));
+  const parsedExpensePercent = expenseFactorPercent.trim() === "" ? null : Number(expenseFactorPercent);
+  const valid = Number.isFinite(parsedDeposits) && parsedDeposits > 0
+    && (parsedExpensePercent === null || (Number.isFinite(parsedExpensePercent) && parsedExpensePercent >= 0 && parsedExpensePercent < 100));
+  const save = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/applications/${applicationId}/bank-statement-analysis`, {
+      months: Number(months),
+      totalEligibleDeposits: parsedDeposits,
+      ...(parsedExpensePercent === null ? {} : { expenseFactor: parsedExpensePercent / 100 }),
+      hasThirdPartyExpenseStatement: hasThirdPartyStatement,
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+    }),
+    onSuccess: () => {
+      onSaved();
+      toast({ title: "Bank-statement analysis saved", description: "Income workpapers now need a fresh version and review." });
+    },
+    onError: (error: unknown) => toast({ title: "Could not save bank-statement analysis", description: friendlyApiError(error, "Check the figures and try again."), variant: "destructive" }),
+  });
+
+  return (
+    <Card data-testid="bank-statement-analysis">
+      <CardHeader>
+        <CardTitle>Bank-statement income analysis</CardTitle>
+        <CardDescription>
+          Screen deposits, record the eligible total, and let the cited calculator apply the selected expense factor. The observed OCR total is a starting point, not an eligible-income conclusion.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+          <p className="font-medium">Reviewed statement evidence</p>
+          <p className="mt-1 text-muted-foreground">
+            {evidence.documentCount} accepted statement{evidence.documentCount === 1 ? "" : "s"} · {evidence.reviewedDepositFactCount} human-reviewed deposit total{evidence.reviewedDepositFactCount === 1 ? "" : "s"} · {formatCurrency(evidence.observedTotalDeposits)} observed
+          </p>
+          {evidence.observedTotalDeposits > 0 && (
+            <Button type="button" size="sm" variant="outline" className="touch-target mt-3" onClick={() => setEligibleDeposits(String(evidence.observedTotalDeposits))}>
+              Use observed total as a draft
+            </Button>
+          )}
+        </div>
+        <Alert>
+          <Icons.warning className="h-4 w-4" />
+          <AlertDescription>Remove transfers, refunds, duplicate deposits, and other ineligible activity before saving. The current lender reference still requires officer review.</AlertDescription>
+        </Alert>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label>Statement period</Label>
+            <Select value={months} onValueChange={value => setMonths(value as "12" | "24")}>
+              <SelectTrigger aria-label="Bank statement period"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="12">12 months</SelectItem><SelectItem value="24">24 months</SelectItem></SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="eligible-deposits">Eligible deposits</Label>
+            <Input id="eligible-deposits" inputMode="decimal" value={eligibleDeposits} onChange={event => setEligibleDeposits(event.target.value)} placeholder="$0" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="expense-factor">Expense factor %</Label>
+            <Input id="expense-factor" inputMode="decimal" value={expenseFactorPercent} onChange={event => setExpenseFactorPercent(event.target.value)} placeholder="50 (program default)" />
+          </div>
+        </div>
+        <label className="flex items-start gap-2 text-sm">
+          <Checkbox checked={hasThirdPartyStatement} onCheckedChange={checked => setHasThirdPartyStatement(checked === true)} aria-label="Third-party expense statement on file" />
+          <span>A CPA, tax preparer, or bookkeeper expense statement is on file.</span>
+        </label>
+        <div className="space-y-2">
+          <Label htmlFor="bank-analysis-notes">Screening notes</Label>
+          <Textarea id="bank-analysis-notes" value={notes} onChange={event => setNotes(event.target.value)} placeholder="Record excluded transfers, unusual deposits, and the source of the expense factor." />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => save.mutate()} disabled={!valid || save.isPending} data-testid="save-bank-statement-analysis">
+            {save.isPending ? "Saving…" : existing ? "Save new analysis version" : "Save analysis"}
+          </Button>
+          {existing && <p className="text-xs text-muted-foreground">Current: {existing.months} months · {formatCurrency(existing.totalEligibleDeposits)} eligible deposits</p>}
+        </div>
       </CardContent>
     </Card>
   );
@@ -361,6 +524,16 @@ export function FinancialReviewTab({
           </div>
         </CardContent>
       </Card>
+
+      {(data.bankStatementEvidence.documentCount > 0 || data.bankStatementAnalysis) && (
+        <BankStatementAnalysisCard
+          key={data.bankStatementAnalysis?.id ?? "new"}
+          applicationId={applicationId}
+          existing={data.bankStatementAnalysis}
+          evidence={data.bankStatementEvidence}
+          onSaved={refresh}
+        />
+      )}
 
       {data.workpapers.map(workpaper => (
         <WorkpaperCard

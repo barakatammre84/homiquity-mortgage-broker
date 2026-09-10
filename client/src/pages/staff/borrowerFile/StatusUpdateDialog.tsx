@@ -32,11 +32,13 @@ import { HMDA_DENIAL_REASONS } from "./model";
  */
 export function StatusUpdateDialog({
   applicationId,
-  financialDataProvenance,
+  currentDecisionGrade,
+  decisionGradeBlockers = [],
   canSetCreditDecisions,
 }: {
   applicationId: string;
-  financialDataProvenance: string | null | undefined;
+  currentDecisionGrade: boolean;
+  decisionGradeBlockers?: string[];
   canSetCreditDecisions: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -136,11 +138,14 @@ export function StatusUpdateDialog({
         {/* Same set the server 422s on via assertVerifiedForDecisioning:
             every approval outcome, not just pre_approved. */}
         {isApprovalOutcomeStatus(statusUpdate.status) &&
-          financialDataProvenance !== "verified" && (
+          !currentDecisionGrade && (
             <div className="rounded-md border border-border bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
-              Financials must be verified before an approval outcome can be set. Use
-              "Mark Financials Verified" above once the borrower's income, assets, and
-              credit are backed by documentation.
+              Current approved financial and credit evidence is required before an approval outcome can be set.
+              {decisionGradeBlockers.length > 0 && (
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {decisionGradeBlockers.map(blocker => <li key={blocker}>{blocker}</li>)}
+                </ul>
+              )}
             </div>
           )}
         <DialogFooter>
@@ -153,7 +158,7 @@ export function StatusUpdateDialog({
               statusUpdateMutation.isPending ||
               (statusUpdate.status === "denied" && statusUpdate.denialReasons.length < 2) ||
               (isApprovalOutcomeStatus(statusUpdate.status) &&
-                financialDataProvenance !== "verified")
+                !currentDecisionGrade)
             }
             onClick={() => statusUpdateMutation.mutate({
               status: statusUpdate.status,

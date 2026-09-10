@@ -11,7 +11,6 @@ import { SubmissionReadinessDialog } from "@/components/SubmissionReadinessDialo
 import { CallPrepDialog } from "./CallPrepDialog";
 import type { StaffSignal } from "./types";
 import type { CockpitData } from "./types";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { friendlyApiError } from "@/lib/errorMessage";
 
 // -----------------------------------------------------------------------------
@@ -36,9 +35,7 @@ export function ActionsRail({
     queryKey: ["/api/staff/applications", applicationId, "cockpit"],
   });
   const letterStatusReady = cockpit?.application.status === "pre_approved";
-  const letterFinancialsReady = isDecisionGrade(
-    cockpit?.application.financialDataProvenance as DataProvenance | null | undefined,
-  );
+  const letterFinancialsReady = cockpit?.application.currentDecisionGrade === true;
   const canGenerateLetter = letterStatusReady && letterFinancialsReady;
 
   const handleGenerateLetter = async () => {
@@ -97,7 +94,7 @@ export function ActionsRail({
       {!canGenerateLetter && cockpit && (
         <p className="px-1 text-xs text-muted-foreground" data-testid="preapproval-letter-blocked-reason">
           {letterStatusReady
-            ? "Verify income, assets, and credit before issuing a pre-approval letter."
+            ? cockpit.application.decisionGradeBlockers[0] ?? "Refresh and approve the current income, asset, and credit evidence before issuing a pre-approval letter."
             : "A letter becomes available after the file reaches pre-approval with verified financials."}
         </p>
       )}
