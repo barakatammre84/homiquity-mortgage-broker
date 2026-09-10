@@ -6,6 +6,8 @@ import {
 import { eq, and, gte, sql, desc, avg } from "drizzle-orm";
 import { emitEvent } from "./analyticsEventPipeline";
 import type { DatabaseTransaction } from "./documentLineage";
+import { getReviewThreshold } from "./documentConfidencePolicy";
+export { getReviewThreshold } from "./documentConfidencePolicy";
 
 export interface FieldConfidence {
   fieldName: string;
@@ -132,21 +134,6 @@ export async function recordCoarseExtraction(options: {
 
 // Exported for unit testing: the per-doc-type review gate that decides whether a
 // coarse extractor confidence auto-verifies or lands on the human-review queue.
-export function getReviewThreshold(documentType: string): number {
-  const thresholds: Record<string, number> = {
-    tax_return: 0.85,
-    w2: 0.80,
-    pay_stub: 0.80,
-    bank_statement: 0.80,
-    government_id: 0.90,
-    appraisal: 0.85,
-    title_report: 0.85,
-    insurance: 0.75,
-    other: 0.80,
-  };
-  return thresholds[documentType] || 0.80;
-}
-
 /**
  * One-click review completion — the verify/reject route's stamp. Records WHO
  * reviewed and WHEN on the confidence row, deliberately WITHOUT the field

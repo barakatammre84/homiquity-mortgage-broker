@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { isAuthenticated } from "../auth";
 import { storage } from "../storage";
-import { runCoachTurn, CoachTurnError, isCoachConfigured, type CoachTurnResult, type CoachEmit, type VerifiedUserContext, type CoachIntakeData, type DocumentExtractedData, deriveUserType, deriveReadinessState, deriveCompletionPercentage, deriveCompletedSteps, coachIntakeSchema, coachActionPlanSchema, coachDocumentChecklistSchema, coachProfileSchema } from "../services/coachingService";
+import { runCoachTurn, CoachTurnError, isCoachConfigured, type CoachTurnResult, type CoachEmit, type VerifiedUserContext, type CoachIntakeData, deriveUserType, deriveReadinessState, deriveCompletionPercentage, deriveCompletedSteps, coachIntakeSchema, coachActionPlanSchema, coachDocumentChecklistSchema, coachProfileSchema } from "../services/coachingService";
 import { buildBorrowerGraph } from "../services/borrowerGraph";
 import { getCoachIntakeSnapshots } from "../services/coachIntake";
 import { loadFileTruth, EMPTY_LOAN_STATUS } from "../services/coachFileTruth";
@@ -199,15 +199,10 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
     }
 
     let uploadedDocuments: VerifiedUserContext["uploadedDocuments"] = [];
-    let documentExtractedData: DocumentExtractedData[] = [];
     try {
       const docs = await storage.getDocumentsByApplication(activeApp.id);
       uploadedDocuments = docs.map(d => {
-        let extractedName: string | null = null;
-        let extractedEmployer: string | null = null;
         let extractionConfidence: "high" | "medium" | "low" | null = null;
-        let extractionIssues: string[] | null = null;
-        let documentDate: string | null = null;
 
         // Only `confidence` is read here, and only because it is one of the
         // keys the extraction writers actually emit. The other reads that used
@@ -243,28 +238,9 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
           documentType: d.documentType,
           status: d.status || "uploaded",
           uploadDate: d.createdAt ? new Date(d.createdAt).toISOString().split("T")[0] : null,
-          documentDate,
-          fileName: d.fileName || null,
-          extractedName,
-          extractedEmployer,
           extractionConfidence,
-          extractionIssues,
         };
       });
-
-      // documentExtractedData intentionally stays EMPTY. It fed the coach's
-      // "TIER 1: DOCUMENT-VERIFIED DATA (HIGHEST TRUST)" prompt block, and it
-      // was populated by reading extracted VALUES out of documents.notes —
-      // values no extractor in this repo has ever written there (F-028). The
-      // only way that block was ever non-empty was a borrower typing JSON into
-      // the upload description box, which landed verbatim in `notes` and came
-      // back as "document-verified" fact overriding their real application
-      // data (F-027).
-      //
-      // Restoring this block properly means reading server-persisted extraction
-      // values (the tax_insights table already does this for tax returns) — not
-      // re-parsing `notes`. Tracked as F-028; deliberately left empty rather
-      // than left forgeable in the meantime.
     } catch (e) {
       console.warn("[Coach] Could not fetch documents:", e);
     }
@@ -291,7 +267,6 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
       loanPurpose: activeApp.loanPurpose,
       employmentHistory,
       uploadedDocuments,
-      documentExtractedData: documentExtractedData.length > 0 ? documentExtractedData : undefined,
       userName: user.firstName && user.lastName
         ? `${user.firstName} ${user.lastName}`
         : (user.email?.split("@")[0] || undefined),

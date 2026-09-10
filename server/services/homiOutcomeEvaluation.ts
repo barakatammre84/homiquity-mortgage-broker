@@ -8,6 +8,7 @@ const SERVER_TRUTH_TOOLS = new Set([
   "get_loan_status",
   "get_document_checklist",
   "get_borrower_tasks",
+  "get_document_evidence",
 ]);
 
 const SERVER_ACTION_TOOLS = new Set([

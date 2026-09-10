@@ -31,24 +31,6 @@ export interface CoachResponse {
   borrowerPackage?: BorrowerPackage;
 }
 
-export interface DocumentExtractedData {
-  documentType: string;
-  confidence: "high" | "medium" | "low";
-  grossIncome?: number | null;
-  adjustedGrossIncome?: number | null;
-  taxableIncome?: number | null;
-  filingStatus?: string | null;
-  documentYear?: string | null;
-  grossPay?: number | null;
-  netPay?: number | null;
-  ytdGross?: number | null;
-  employerName?: string | null;
-  employeeName?: string | null;
-  closingBalance?: number | null;
-  totalDeposits?: number | null;
-  accountType?: string | null;
-}
-
 export type UserType = "renter" | "first_time_buyer" | "current_homeowner" | "affluent_borrower" | "investor";
 export type ReadinessState = "not_started" | "intake_started" | "intake_complete" | "docs_uploaded" | "docs_validated" | "package_ready";
 
@@ -93,14 +75,8 @@ export interface VerifiedUserContext {
     documentType: string;
     status: string;
     uploadDate?: string | null;
-    documentDate?: string | null;
-    fileName?: string | null;
-    extractedName?: string | null;
-    extractedEmployer?: string | null;
     extractionConfidence?: "high" | "medium" | "low" | null;
-    extractionIssues?: string[] | null;
   }>;
-  documentExtractedData?: DocumentExtractedData[];
   userName?: string;
   userType?: UserType;
   readinessState?: ReadinessState;
@@ -167,11 +143,6 @@ export function deriveCompletedSteps(ctx: VerifiedUserContext): string[] {
   if (ctx.uploadedDocuments && ctx.uploadedDocuments.length > 0) {
     for (const doc of ctx.uploadedDocuments) {
       steps.push(`doc_uploaded:${doc.documentType}`);
-    }
-  }
-  if (ctx.documentExtractedData && ctx.documentExtractedData.length > 0) {
-    for (const doc of ctx.documentExtractedData) {
-      steps.push(`doc_verified:${doc.documentType}`);
     }
   }
   return steps;
@@ -302,54 +273,6 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
   lines.push(buildUserProfileHeader(ctx));
   lines.push(buildToneDirective(ctx));
 
-  if (ctx.documentExtractedData && ctx.documentExtractedData.length > 0) {
-    lines.push("\n\n=== TIER 3: PROVISIONAL MACHINE-EXTRACTED DOCUMENT DATA ===");
-    lines.push("This data was machine-read from uploaded documents. It is provisional until an authorized reviewer confirms or corrects it. Confidence measures extraction certainty, not truth or eligibility. Do not let it override an approved workpaper or describe it as verified.");
-
-    const taxReturns = ctx.documentExtractedData.filter(d => d.documentType === "tax_return" || d.documentType === "tax_returns");
-    const payStubs = ctx.documentExtractedData.filter(d => d.documentType === "pay_stub" || d.documentType === "pay_stubs");
-    const bankStatements = ctx.documentExtractedData.filter(d => d.documentType === "bank_statement" || d.documentType === "bank_statements");
-
-    if (taxReturns.length > 0) {
-      lines.push("\nTax return data (machine-read from an uploaded filing — provisional):");
-      for (const tr of taxReturns) {
-        const parts = [];
-        if (tr.documentYear) parts.push(`Year: ${tr.documentYear}`);
-        if (tr.grossIncome) parts.push(`Gross Income: $${tr.grossIncome.toLocaleString()}`);
-        if (tr.adjustedGrossIncome) parts.push(`AGI: $${tr.adjustedGrossIncome.toLocaleString()}`);
-        if (tr.taxableIncome) parts.push(`Taxable Income: $${tr.taxableIncome.toLocaleString()}`);
-        if (tr.filingStatus) parts.push(`Filing Status: ${tr.filingStatus}`);
-        parts.push(`Extraction Confidence: ${tr.confidence}`);
-        lines.push(`  - ${parts.join(" | ")}`);
-      }
-    }
-
-    if (payStubs.length > 0) {
-      lines.push("\nPay stub data (machine-read from an uploaded pay statement — provisional):");
-      for (const ps of payStubs) {
-        const parts = [];
-        if (ps.employerName) parts.push(`Employer: ${ps.employerName}`);
-        if (ps.grossPay) parts.push(`Gross Pay: $${ps.grossPay.toLocaleString()}`);
-        if (ps.netPay) parts.push(`Net Pay: $${ps.netPay.toLocaleString()}`);
-        if (ps.ytdGross) parts.push(`YTD Gross: $${ps.ytdGross.toLocaleString()}`);
-        parts.push(`Extraction Confidence: ${ps.confidence}`);
-        lines.push(`  - ${parts.join(" | ")}`);
-      }
-    }
-
-    if (bankStatements.length > 0) {
-      lines.push("\nBank statement data (machine-read from an uploaded statement — provisional):");
-      for (const bs of bankStatements) {
-        const parts = [];
-        if (bs.accountType) parts.push(`Account: ${bs.accountType}`);
-        if (bs.closingBalance) parts.push(`Balance: $${bs.closingBalance.toLocaleString()}`);
-        if (bs.totalDeposits) parts.push(`Total Deposits: $${bs.totalDeposits.toLocaleString()}`);
-        parts.push(`Extraction Confidence: ${bs.confidence}`);
-        lines.push(`  - ${parts.join(" | ")}`);
-      }
-    }
-  }
-
   lines.push("\n\n=== TIER 2: APPLICATION DATA (MEDIUM TRUST) ===");
   lines.push("This data comes from the user's loan application form. It is self-reported but formally submitted. Compare it with available source documents and prefer a human-reviewed workpaper for any qualifying figure.");
   lines.push(`Application Status: ${ctx.applicationStatus}`);
@@ -397,59 +320,16 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
         parts.push(`uploaded ${daysSinceUpload} days ago (${doc.uploadDate})`);
       }
 
-      const typeNorm = doc.documentType.toLowerCase().replace(/s$/, "").replace(/-/g, "_");
-      const recencyThresholds: Record<string, number> = {
-        pay_stub: 30, bank_statement: 60, profit_loss: 90,
-      };
-      const threshold = recencyThresholds[typeNorm];
-
-      if (threshold) {
-        if (doc.documentDate) {
-          const docDate = new Date(doc.documentDate);
-          const daysSinceDocDate = Math.floor((today.getTime() - docDate.getTime()) / (1000 * 60 * 60 * 24));
-          parts.push(`document date: ${doc.documentDate} (${daysSinceDocDate} days ago)`);
-          if (daysSinceDocDate > threshold) {
-            parts.push(`⚠ RECENCY: document is ${daysSinceDocDate} days old, exceeds ${threshold}-day requirement`);
-          }
-        } else {
-          parts.push(`⚠ RECENCY: unable to determine document date — ask user to confirm the document period or upload a version with a visible date`);
-        }
-      }
-
       if (doc.extractionConfidence) {
         parts.push(`extraction: ${doc.extractionConfidence}`);
         if (doc.extractionConfidence === "low") {
-          parts.push("⚠ LEGIBILITY: low extraction confidence — may be blurry, cropped, or damaged");
+          parts.push("⚠ STAFF REVIEW: low extraction confidence; borrower action is needed only if the real checklist reports this document rejected");
         }
-      }
-
-      if (doc.extractedName && ctx.userName) {
-        const extractedNorm = doc.extractedName.toLowerCase().trim();
-        const declaredNorm = ctx.userName.toLowerCase().trim();
-        if (extractedNorm !== declaredNorm) {
-          parts.push(`⚠ CONSISTENCY: name on document "${doc.extractedName}" does not match application name "${ctx.userName}"`);
-        }
-      }
-
-      if (doc.extractedEmployer && ctx.employerName) {
-        const extractedEmpNorm = doc.extractedEmployer.toLowerCase().trim();
-        const declaredEmpNorm = ctx.employerName.toLowerCase().trim();
-        if (extractedEmpNorm !== declaredEmpNorm) {
-          parts.push(`⚠ CONSISTENCY: employer on document "${doc.extractedEmployer}" does not match application employer "${ctx.employerName}"`);
-        }
-      }
-
-      if (doc.extractionIssues && doc.extractionIssues.length > 0) {
-        parts.push(`⚠ ISSUES: ${doc.extractionIssues.join("; ")}`);
-      }
-
-      if (doc.fileName) {
-        parts.push(`file: ${doc.fileName}`);
       }
 
       lines.push(`  - ${parts.join(" | ")}`);
     }
-    lines.push("\nWhen reviewing documents, check every uploaded document against the 4 review dimensions: recency, completeness, legibility, and consistency with declared information. Flag any ⚠ signals found above.");
+    lines.push("\nUse get_document_evidence before stating what OCR found or whether a value was verified. Low extraction confidence routes to staff review; request another upload only when get_document_checklist reports a rejection and its reason.");
   }
 
   lines.push("\n\n=== TIER 4: CHAT INPUT (LOWEST TRUST — TREAT WITH CAUTION) ===");

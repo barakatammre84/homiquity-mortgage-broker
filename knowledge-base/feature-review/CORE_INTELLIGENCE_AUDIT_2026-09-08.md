@@ -2,7 +2,8 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production `d65007bcffd3ac89f4a77d4fa809739576a89492`
+**Code reviewed:** production base `3a666a3a7745a39d5e60306f12dec38ac6f7bfaf` plus the Homi
+document-evidence candidate through `92e4717a965fa81049c989eab3df0500bb70afc9`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -67,7 +68,7 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, current server-snapshot outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | The 30-turn/10-borrower floor, pre-registered comparison cohort and explicit accounting for phone/off-platform work remain uncollected | Strong assistant foundation; grounded production operability and a truthful measurement rail are built while production usefulness remains unproven |
+| Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Deploy and verify the document-evidence read, then collect the 30-turn/10-borrower floor, pre-register a comparison cohort and explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
@@ -403,6 +404,29 @@ turns, exact repeated wording, bounded response latency and degraded/lint-replac
 that write succeeds. The staff report measures the first later secure staff message to the same
 borrower and file; task completion is no longer mislabeled as a human response.
 
+**Built in this release:** `get_document_evidence` re-authorizes the current workable application,
+then reads only current, non-rejected documents and a bounded allowlist of server-persisted numeric
+facts. It includes Schedule C, Schedule E, W-2/pay-stub, bank and lease evidence while excluding raw
+OCR, filenames, account identifiers, taxpayer identifiers, borrower descriptions, reviewer notes
+and reviewer identities. Document acceptance and field verification remain separate states; only
+an individually confirmed or corrected field is called human verified, and only a current approved
+financial memo/workpaper set is called approved for lender presentation. A live Sonnet trigger and
+grounding run called the new tool, repeated the synthetic mixed-income figures with their exact
+review labels, avoided an unnecessary application-status call after prompt refinement, and routed
+medium-confidence evidence to staff review without asking the borrower to upload the document
+again.
+
+The first security review found that the response cap was applied after the extracted-field read
+and that repeated model tool calls reloaded the same file. The corrected path selects at most the
+12 newest current documents before querying their facts, reuses document evidence and shared file
+truth within the turn, and invalidates affected caches after a successful write. The exact
+post-fix diff security review found no reportable issue. A second product pass found that the tool
+did not tell the model when older documents fell outside the bounded window; the response now
+states the omitted count and forbids treating an unlisted document as absent. Receipt questions
+route to the real checklist. The post-fix live Sonnet grounding run again called the evidence tool
+and repeated all four synthetic mixed-income figures with the correct review labels and no
+approval claim.
+
 **Production proof still required:** collect at least 30 current-format turns across 10 distinct
 borrowers, define a comparison cohort before reading its result and compare completion,
 exact-repeat, handoff and response-time measures. Phone calls and work outside secure Messages need
@@ -614,6 +638,13 @@ missed escalation or time to a useful human response.
     borrower and file rather than task completion. The staff view shows coverage, sample floors and
     the comparison-cohort blocker, so it cannot present observed activity as proof that Homi caused
     less friction.
+52. Connected Homi to bounded server-written document evidence. The tool re-authorizes the workable
+    file, exposes only allowlisted numeric OCR/tax facts, distinguishes machine-read values from
+    human-verified fields and current approved workpapers, excludes raw text and identifiers, and
+    prevents OCR uncertainty from becoming an unnecessary borrower re-upload request. A follow-up
+    audit bounded fact reads before the query, cached read-only snapshots within one turn, invalidated
+    them after writes and made omitted documents explicit so Homi cannot confuse a bounded response
+    with a complete file inventory.
 
 ## Sources
 

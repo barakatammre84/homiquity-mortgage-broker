@@ -268,8 +268,11 @@ export interface DocumentFactRow {
   documentId: string;
   fieldName: string;
   fieldCategory: string | null;
+  valueType: string;
   valueNumeric: number | null;
   valueString: string | null;
+  confidence: number;
+  pageNumber: number | null;
   humanVerified: boolean;
   humanCorrectedValue: string | null;
 }
@@ -299,6 +302,7 @@ export async function getFactsForDocuments(documentIds: string[]): Promise<Docum
     documentId: (field.documentId ?? sourceDocumentId) as string,
     fieldName: field.fieldName,
     fieldCategory: field.fieldCategory,
+    valueType: field.valueType,
     valueNumeric:
       field.humanCorrectedValue !== null && ["currency", "number"].includes(field.valueType)
         ? Number(field.humanCorrectedValue)
@@ -309,6 +313,8 @@ export async function getFactsForDocuments(documentIds: string[]): Promise<Docum
       field.humanCorrectedValue !== null && !["currency", "number"].includes(field.valueType)
         ? field.humanCorrectedValue
         : field.valueString,
+    confidence: Number(field.confidence),
+    pageNumber: field.pageNumber,
     humanVerified: !!field.humanVerified,
     humanCorrectedValue: field.humanCorrectedValue,
   }));
