@@ -1,8 +1,8 @@
 # Core intelligence audit — Homi, documents, financial analysis and underwriting
 
-**Evidence date:** 2026-09-09
+**Evidence date:** 2026-09-10
 
-**Code reviewed:** production `bd6a48cd31557528fdf68873a6fa605f80663fe6` plus the current release candidate
+**Code reviewed:** production `f84adce7ab153ca0c1a7426c9744bae0ceaa4aa9`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -24,8 +24,10 @@ file with less borrower effort and less loan-officer rework than the market?
 The audit traced the user action, route, service, database record, calculation, evidence gate and
 staff output for Homi, ordinary document extraction, tax-package intelligence, financial review,
 underwriting, credit, AUS, pricing and lender delivery. The complete server and client suites,
-focused journey tests, real local HTTP flow and database restart-recovery proof pass. The result
-proves strong internal behavior; it does not prove any external provider or lender receiver.
+focused journey tests, real local HTTP flow and database restart-recovery proof pass. Exact-build
+production canaries also prove the Anthropic-backed Homi and pay-statement paths plus private cloud
+storage, mixed-income analysis and deterministic underwriting. The result does not prove measured
+model accuracy, live mortgage-decision providers or a lender receiver.
 
 ## Verdict
 
@@ -34,7 +36,7 @@ not decide mortgage eligibility. The underwriting and income engines are determi
 distinguishes evidence levels, complex-income figures require workpapers and human approval, and
 the lender package carries citations and hashes.
 
-The product is not yet an end-to-end live mortgage platform. The current release candidate closes
+The product is not yet an end-to-end live mortgage platform. The current production build closes
 the lost-work gap with database-backed extraction jobs, leased claims, bounded retries and restart
 recovery. It also moves the consent-gated tax experience onto the richer multi-form analyzer and
 feeds the borrower snapshot from that one result. Ordinary pay-stub, W-2, bank-statement and lease
@@ -46,11 +48,12 @@ write is retried without exposing a half-updated file. Demonstration extraction 
 production even when its environment flag is set, and the capability screen reports that
 combination as a configuration error.
 
-The release candidate also closes the internal decision-delivery gaps: every URLA borrower becomes
+The current production build also closes the internal decision-delivery gaps: every URLA borrower becomes
 a separate schema-valid MISMO party with correctly attributed employment and declarations, and the
 submitted package retains hash-verifiable MISMO, income-analysis and dual-AUS findings artifacts.
-Accuracy calibration, production provider evidence and a real lender receiver remain open. Credit,
-DU, LPA, executable pricing provenance and lender delivery remain simulated or unproven.
+Accuracy calibration, a provider-classified large-packet production run, interrupted extraction
+recovery and a real lender receiver remain open. Credit, DU, LPA, executable pricing provenance and
+lender delivery remain simulated or unproven.
 
 Better demonstrates the experience standard: one central file, tasks generated from the file,
 24-hour help and a fast underwriting promise after the required evidence arrives.[1][2][3] Its
@@ -62,13 +65,13 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful production provider proof and a mortgage regression/attack suite | The provider canary does not yet run a grounded Homi status turn; measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; production availability is proven while production usefulness remains unmeasured |
+| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path passes in production | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
-| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes | A representative provider-classified 100-page packet, production model canary and controlled production restart are not yet recorded | Strong complex-income logic with one visual evidence model |
+| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, production model canary and interrupted in-flight extraction recovery are not yet recorded | Strong complex-income logic with one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
-| External evidence | Plaid adapter and production guards exist | Production storage durability, real credit, live AUS, current lender pricing and receiver acceptance are not proven | Blocks a real live lifecycle |
+| External evidence | Plaid adapter and production guards exist; private object-storage read/write/delete and survival across a same-build process replacement are proven in production | Real credit, live AUS, current lender pricing and receiver acceptance are not proven | Blocks a real live lifecycle |
 
 ## What is structurally right
 
@@ -106,16 +109,16 @@ splitter example treats human review and threshold calibration as necessary cont
 AWS Analyze Lending likewise runs an asynchronous split, classify and extract job with completion
 notifications and a retrievable job result.[9][10]
 
-The release candidate now implements this reference shape for ordinary and consented tax
+The current production build implements this reference shape for ordinary and consented tax
 documents: normalize, classify/split, specialized extraction and human review all retain the
 original-page lineage. Tax fields without a valid source page are discarded. The remaining proof
 gap is measured performance and error on a protected labeled set.
 
 ## Verified gaps
 
-### P0 — document work can be lost after the upload succeeds
+### P0 — in-flight production extraction recovery is unproven
 
-**Fixed in this release candidate:** the document version and extraction job commit together.
+**Built in the current production build:** the document version and extraction job commit together.
 Workers claim due jobs with database row locks and expiring leases, heartbeat while working, retry
 transient failures with bounded backoff, record terminal outcomes and recover abandoned claims.
 The Core Systems staff view reports pending, processing, retry, failed and stale-lease counts. Pay
@@ -129,20 +132,20 @@ fact set and confidence record.
 
 ### P0 — uploads now split, route and retain page-level evidence
 
-**Fixed in this release candidate:** pay-stub, W-2, statement and lease extraction independently
+**Built in the current production build:** pay-stub, W-2, statement and lease extraction independently
 classifies every source page from visible content in the same provider call. Validation requires
 one taxonomy value for every consecutive page. The persistence gate compares the detected packet
 to the borrower-selected upload type and blocks mislabeled, mixed or low-confidence packets before
 their values enter readiness or the evidence graph. Staff sees the detected page ranges and the
 reason for correction; the original bytes remain unchanged.
 
-**Fixed in this release candidate:** source PDFs and images are normalized into private PNG pages;
+**Built in the current production build:** source PDFs and images are normalized into private PNG pages;
 contiguous classification ranges become logical documents; supported pay-stub, W-2, statement and
 lease segments are reassembled and sent to their specialized extractors; field evidence is remapped
 to the original source page; and staff can correct boundaries before accepted logical facts enter
 the borrower graph. The original upload remains unchanged and every derived page retains lineage.
 
-**Fixed in this release candidate:** the consented tax pipeline now requires a valid source page
+**Built in the current production build:** the consented tax pipeline now requires a valid source page
 for every retained field, normalizes the packet into private page images, links each logical tax
 form to its exact page range and links each field to its cited page. Queue retries reuse the page
 layer and links without duplicating logical documents.
@@ -176,12 +179,12 @@ Before this audit, one-click document approvals counted as “reviewed” in the
 even though no fields were graded. The staff screen also expected different response property
 names and multiplied an already-percent value by 100.
 
-**Fixed in this release candidate:** the API and staff screen now share one contract; it reports
+**Built in the current production build:** the API and staff screen now share one contract; it reports
 document reviews separately from field-graded reviews; a type with no graded fields is
 `insufficient_reviews`; zero accuracy is preserved; and displayed accuracy uses the correct
 percentage scale.
 
-**Fixed in this release candidate:** a versioned benchmark scorer grades exact values, missing
+**Built in the current production build:** a versioned benchmark scorer grades exact values, missing
 fields, false fields, document boundaries, original-page attribution and higher-impact mortgage
 fields. Results are segmented by document type and complex-borrower situation. It refuses to mark a
 synthetic dataset or a claimed segment with fewer than 30 human-labeled cases as eligible for a
@@ -197,13 +200,13 @@ until the sample, model/prompt version and grading method are visible.
 
 ### P0 — source-level review now includes rendered evidence and boundary controls
 
-**Fixed in this release candidate:** ordinary extractors persist field values with confidence,
+**Built in the current production build:** ordinary extractors persist field values with confidence,
 source page and normalized bounding box when available. The staff document panel opens the source
 beside the fields, jumps to the cited page, records accept/reject/correction per field and keeps
 document acceptance distinct from value verification. Human-reviewed facts survive re-extraction;
 a low-confidence reread clears stale machine facts without overwriting reviewed values.
 
-**Fixed in this release candidate:** the staff viewer renders the exact normalized page and source
+**Built in the current production build:** the staff viewer renders the exact normalized page and source
 box, follows field selection to its page, and exposes page classification and boundary correction.
 Rejected historical logical boundaries no longer leak facts into review or underwriting.
 
@@ -216,14 +219,14 @@ The public health endpoint proves the database, exact commit and email configura
 show Homi, extraction, private storage, Plaid, credit, DU, LPA, pricing or lender delivery. Staff
 could not distinguish a configured adapter from a simulation or a contradictory environment.
 
-**Fixed in this release candidate:** Staff Dashboard → Intelligence → Core Systems now shows every
+**Built in the current production build:** Staff Dashboard → Intelligence → Core Systems now shows every
 core capability as `live`, `simulated`, `disabled` or `configuration error`, without exposing
 secrets. It refuses to mark the lifecycle ready while a critical leg is not live. It also shows
 “not recorded” for last success rather than inventing proof from configuration. Production
 demonstration extraction is an explicit configuration error and fails before any sample value can
 enter a borrower file; the durable queue classifies it as permanent instead of wasting retries.
 
-**Fixed in this release candidate:** redacted Homi, extraction and object-storage canaries persist
+**Built in the current production build:** redacted Homi, extraction and object-storage canaries persist
 provider, operation, environment, deployment SHA, timestamp, latency, outcome and failure class.
 Core Systems treats configuration and a current successful canary as different facts and refuses a
 ready lifecycle when required production proof is absent.
@@ -233,17 +236,40 @@ ready lifecycle when required production proof is absent.
 Homi provider response in 1.303 s, the real synthetic pay-statement extraction path in 10.790 s,
 private storage write/read/delete in 0.588 s, mixed-income repeatability in 0.006 s and deterministic
 underwriting repeatability in 0.749 s. The Homi check in that build is provider availability, not a
-grounded application turn; the current candidate closes that distinction.
+grounded application turn.
+
+**Strengthened production proof completed 2026-09-10:** workflow run
+[`34420267104`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34420267104)
+passed all five checks against exact build `f84adce7ab153ca0c1a7426c9744bae0ceaa4aa9`:
+grounded Homi status turn in 4.104 s, real synthetic pay-statement extraction in 10.112 s, private
+storage write/read/delete in 0.591 s, mixed-income repeatability in 0.006 s and underwriting
+repeatability in 0.787 s. The grounded turn uses the production prompt/context builder and real
+status-tool schema, requires fixed server truth in the answer and passes outbound compliance lint.
+It does not execute a tool or read a borrower record.
+
+Workflow run
+[`34420317049`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34420317049)
+seeded a CRC-protected private marker. Railway replaced the running process with deployment
+`599e3605-8694-4d64-a21d-796b51850dc5` on the same commit. Workflow run
+[`34420451894`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34420451894)
+then read, validated and deleted that marker from the new deployment 109.370 seconds after seed;
+the storage operation took 0.382 s. A same deployment, changed commit, stale or malformed marker,
+missing runtime identity or missing bytes fails closed. The post-restart sweep
+[`34420484805`](https://github.com/barakatammre84/homiquity-mortgage-broker/actions/runs/34420484805)
+again passed all five checks on the same commit in 4.079 s, 9.645 s, 0.483 s, 0.004 s and 0.552 s.
+This closes generic private-object survival across process replacement. It does not show that an
+in-flight provider-backed extraction resumes or that a full 100-page packet fits the production
+container.
 
 ### P0 — decision freshness and final findings delivery are enforced internally
 
-**Fixed in this release candidate:** the deterministic decision, verified facts, current document
+**Built in the current production build:** the deterministic decision, verified facts, current document
 versions, verification reports, loan shape and resolved policy produce a canonical AUS input
 fingerprint. Material change marks recorded AUS output stale and blocks packaging until rerun.
 Pre-approval letters retain the decision and policy fingerprints and become unavailable when that
 decision is no longer current. Out-of-scope cases take an explicit manual-underwrite path.
 
-**Fixed in this release candidate:** lender submission freezes the full current DU and LPA findings
+**Built in the current production build:** lender submission freezes the full current DU and LPA findings
 as canonical JSON, hashes it independently, prevents package fields from later mutation and verifies
 the digest before staff downloads it. A package cannot be created without both AUS legs and current
 input lineage.
@@ -253,7 +279,7 @@ lineage, then prove invalidation and reproduction against the live path selected
 
 ### P0 — lender package completeness is internally built; receiver acceptance is not proven
 
-The release candidate builds a separate MISMO PARTY for every stored URLA borrower, uses the schema's
+The current production build creates a separate MISMO PARTY for every stored URLA borrower, uses the schema's
 verified `Primary` and `Secondary` classifications, filters employment and declarations by borrower
 sequence and includes each borrower's audited taxpayer identifier. The official committed XSD passes
 for both underwriting and loan-delivery shapes with multiple borrowers. The lender-submission row
@@ -278,7 +304,7 @@ path at a time; prove it with golden cases and a licensed review.
 
 ### P1 — Homi has a mortgage regression loop; production outcomes remain unmeasured
 
-**Fixed in this release candidate:** a redacted mortgage-specific scenario suite covers missing
+**Built in the current production build:** a redacted mortgage-specific scenario suite covers missing
 documents, changed evidence, mixed income, human escalation, stale conversation memory and
 prohibited claims. Prompt-attack tests treat borrower chat and document-derived text as untrusted.
 Homi uses current server state in preference to conversation memory, cannot invent application
@@ -286,7 +312,7 @@ status, document requests, qualifying income, timelines or score improvements, a
 decision. The 2026-09-09 live-model run passed all 12 scenarios: tool triggering 5/5, restraint
 2/2, grounding 3/3, honest-gap handling 1/1 and prompt-injection resistance 1/1.
 
-**Fixed in this release candidate:** Homi records grounded turns, repeated questions, completion
+**Built in the current production build:** Homi records grounded turns, repeated questions, completion
 movement, model latency, degraded/lint-replaced turns and human-help requests. `request_human_help`
 creates or reuses a real loan-officer task and will not claim success until that write succeeds.
 
@@ -298,9 +324,9 @@ borrowers finish faster.
 
 ### 1. Make document work durable and observable
 
-- Deploy the durable extraction job and recovery path.
-- Run the controlled production restart proof for an ordinary document and a multi-form tax package.
-- Record provider canaries with latency and failure class.
+- Keep the deployed durable extraction job, lease recovery and failure queue under observation.
+- Run the controlled production interruption proof for an ordinary document and a multi-form tax package.
+- Keep the exact-build provider and storage canaries current with latency and failure class.
 
 **Exit:** kill the worker during extraction, restart it, and receive one complete result with no
 duplicate facts or confidence rows.
@@ -325,7 +351,7 @@ until rerun; restore the fact and reproduce the same policy fingerprint and outp
 
 ### 4. Activate one real lender stack
 
-- Production storage acceptance.
+- Keep the proven production private-storage restart check current.
 - Real credit and selected verification paths.
 - Current approved rate sheet with provenance.
 - DU/LPA path required by the pilot lender.
@@ -336,7 +362,7 @@ file with no off-platform rekeying left undocumented.
 
 ### 5. Prove Homi from measured friction
 
-- Production canary ledger.
+- Keep the grounded production canary ledger current.
 - Measure question repetition, completion, handoff and response latency.
 - Add guidance only where a journey metric shows a problem.
 
@@ -426,7 +452,7 @@ missed escalation or time to a useful human response.
     now identifies the capability that needs repair without exposing its prompt or response.
 36. Proved all five canaries on production build `bd6a48cd` and retained their exact-build status,
     operation and latency without storing prompts, model output, extracted values or policy inputs.
-37. In the current candidate, replaced Homi's availability-only token check with a fixed synthetic
+37. In the current production build, replaced Homi's availability-only token check with a fixed synthetic
     status turn through the real prompt/context builder, server-truth tool schema, grounded reply
     and outbound lint rail; no tool executor or borrower record is touched.
 38. Rejected a proposed low-effort ordinary-document optimization after the four-type check caught
@@ -434,10 +460,16 @@ missed escalation or time to a useful human response.
     closed and the production inference settings remain unchanged. Extraction speed work now waits
     for the protected multi-document evaluation set so latency cannot be bought with silent accuracy
     or traceability loss.
-39. In the current candidate, added a controlled private-storage restart proof: one fixed private
+39. In the current production build, added a controlled private-storage restart proof: one fixed private
     synthetic marker must be read by a different Railway deployment running the same commit within
     one hour, then is deleted. A same-process check, changed commit, stale marker, malformed marker
     or missing runtime identity fails closed and cannot be reported as durability evidence.
+40. Proved the strengthened five-capability sweep on exact production build `f84adce7`: all five
+    checks passed before and after a controlled same-build Railway process replacement. The
+    two-phase private marker was CRC-validated by the new deployment after 109.370 seconds and then
+    deleted. This closes generic private-object restart durability; it leaves in-flight extraction
+    recovery, production large-packet capacity, measured extraction accuracy and external mortgage
+    provider/lender acceptance open.
 
 ## Sources
 
