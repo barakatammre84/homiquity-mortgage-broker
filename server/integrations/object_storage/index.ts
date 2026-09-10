@@ -1,7 +1,17 @@
 export {
   ObjectStorageService,
   ObjectNotFoundError,
+  PrivateStorageRestartProofError,
+  parsePrivateStorageRestartMarker,
+  validatePrivateStorageRestartTransition,
   objectStorageClient,
+} from "./objectStorage";
+
+export type {
+  PrivateStorageRestartProofFailure,
+  PrivateStorageRestartMarker,
+  PrivateStorageRestartSeedResult,
+  PrivateStorageRestartVerifyResult,
 } from "./objectStorage";
 
 export type {

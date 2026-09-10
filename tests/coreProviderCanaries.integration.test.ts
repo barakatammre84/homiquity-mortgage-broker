@@ -30,7 +30,7 @@ describe.sequential("core provider canary ledger", () => {
     expect(result).toMatchObject({
       capabilityId: "homi",
       provider: "Anthropic Claude",
-      operation: "text_response",
+      operation: "grounded_status_turn",
       environment: "non_production",
       status: "success",
       failureClass: null,
@@ -45,7 +45,7 @@ describe.sequential("core provider canary ledger", () => {
     expect(saved.rows[0]).toEqual({
       capability_id: "homi",
       provider: "Anthropic Claude",
-      operation: "text_response",
+      operation: "grounded_status_turn",
       status: "success",
       failure_class: null,
     });
@@ -77,6 +77,23 @@ describe.sequential("core provider canary ledger", () => {
     );
 
     expect(result).toMatchObject({ status: "failure", failureClass: "timeout" });
+  });
+
+  it("retains the stronger operation label for a completed restart proof", async () => {
+    const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
+    const result = await runCoreProviderCanary(
+      "object_storage",
+      userId,
+      async () => undefined,
+      30_000,
+      { provider: "Google Cloud Storage", operation: "private_restart_read_delete" },
+    );
+    expect(result).toMatchObject({
+      capabilityId: "object_storage",
+      provider: "Google Cloud Storage",
+      operation: "private_restart_read_delete",
+      status: "success",
+    });
   });
 
   it("executes the real mixed-income and underwriting engines with repeatable results", async () => {
