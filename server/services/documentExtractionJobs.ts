@@ -51,6 +51,7 @@ export const STANDARD_AUTO_EXTRACT_TYPES = [
 ] as const;
 
 export type DocumentExtractionMode = "standard" | "autopilot" | "tax_package";
+export type DocumentExtractionWorkerLane = "ordinary" | "tax_package";
 export type DocumentExtractionJobStatus =
   | "pending"
   | "processing"
@@ -65,6 +66,13 @@ const RECONCILE_MS = 5 * 60 * 1000;
 const RECONCILE_LOOKBACK_MS = 60 * 60 * 1000;
 const MAX_RECONCILE_ROWS = 100;
 const workerId = `${process.pid}-${randomUUID()}`;
+
+export function jobBelongsToWorkerLane(
+  mode: DocumentExtractionMode,
+  lane: DocumentExtractionWorkerLane,
+): boolean {
+  return lane === "tax_package" ? mode === "tax_package" : mode !== "tax_package";
+}
 
 export class StaleDocumentExtractionClaimError extends Error {
   readonly code = "STALE_DOCUMENT_EXTRACTION_CLAIM";
@@ -151,7 +159,11 @@ export function classifyTaxPackageFailure(error?: string): ExtractionFailure {
   if (
     normalized.includes("could not be validated") ||
     normalized.includes("failed schema validation") ||
-    normalized.includes("no usable result")
+    normalized.includes("no usable result") ||
+    normalized.includes("unsupported tax packet source type") ||
+    (normalized.includes("outside the") && normalized.includes("-page source")) ||
+    (normalized.includes("pages for a") && normalized.includes("-page source")) ||
+    normalized.includes("split the source packet before provider extraction")
   ) {
     return { code: "tax_package_validation_failed", retryable: false };
   }
@@ -247,6 +259,7 @@ export function nextFailureTransition(input: {
 async function claimNextJob(
   now = new Date(),
   proofJob: "exclude" | "only" = "exclude",
+  lane: DocumentExtractionWorkerLane = "ordinary",
 ): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
     const [candidate] = await transaction
@@ -256,6 +269,9 @@ async function claimNextJob(
         proofJob === "only"
           ? eq(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID)
           : ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
+        lane === "tax_package"
+          ? eq(documentExtractionJobs.mode, "tax_package")
+          : ne(documentExtractionJobs.mode, "tax_package"),
         lt(documentExtractionJobs.attemptCount, documentExtractionJobs.maxAttempts),
         or(
           and(
@@ -289,6 +305,14 @@ async function claimNextJob(
       .returning();
     return claimed ?? null;
   });
+}
+
+/** Database-backed lane selector, exported for the real queue integration proof. */
+export async function claimNextDocumentExtractionJobForLane(
+  lane: DocumentExtractionWorkerLane,
+  now = new Date(),
+): Promise<DocumentExtractionJob | null> {
+  return claimNextJob(now, "exclude", lane);
 }
 
 async function expireExhaustedLeases(now = new Date()): Promise<void> {
@@ -782,34 +806,46 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
   }
 }
 
-let workerRunning: Promise<void> | null = null;
+let ordinaryWorkerRunning: Promise<void> | null = null;
+let taxPackageWorkerRunning: Promise<void> | null = null;
 let coreRestartWorkerRunning: Promise<void> | null = null;
 let workerStarted = false;
 let pollTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
 
-async function drainAvailableJobs(): Promise<void> {
+async function drainAvailableJobs(lane: DocumentExtractionWorkerLane): Promise<void> {
   await expireExhaustedLeases();
   for (;;) {
-    const job = await claimNextJob();
+    const job = await claimNextDocumentExtractionJobForLane(lane);
     if (!job) return;
     await processClaimedJob(job);
   }
 }
 
-export function kickDocumentExtractionWorker(): void {
-  if (workerRunning) return;
-  workerRunning = drainAvailableJobs()
-    .catch((error) => console.error("[DocumentExtraction] Worker loop failed:", error))
+function kickWorkerLane(lane: DocumentExtractionWorkerLane): void {
+  const running = lane === "tax_package" ? taxPackageWorkerRunning : ordinaryWorkerRunning;
+  if (running) return;
+  const work = drainAvailableJobs(lane)
+    .catch((error) => console.error(`[DocumentExtraction] ${lane} worker loop failed:`, error))
     .finally(() => {
-      workerRunning = null;
+      if (lane === "tax_package") taxPackageWorkerRunning = null;
+      else ordinaryWorkerRunning = null;
     });
+  if (lane === "tax_package") taxPackageWorkerRunning = work;
+  else ordinaryWorkerRunning = work;
+}
+
+export function kickDocumentExtractionWorker(): void {
+  // A slow complex return must not delay pay stubs, W-2s, statements, leases,
+  // or Autopilot. Each lane remains serial so paid calls stay bounded.
+  kickWorkerLane("ordinary");
+  kickWorkerLane("tax_package");
 }
 
 async function drainCoreExtractionRestartJob(): Promise<void> {
   const deadline = Date.now() + CORE_EXTRACTION_RESTART_LEASE_MS + 10_000;
   for (;;) {
-    const job = await claimNextJob(new Date(), "only");
+    const job = await claimNextJob(new Date(), "only", "ordinary");
     if (job) {
       await processClaimedJob(job);
       return;
@@ -827,8 +863,8 @@ async function drainCoreExtractionRestartJob(): Promise<void> {
 
 /**
  * Run the controlled restart proof outside the serial borrower queue. The first
- * attempt may wait in memory for ten minutes, so sharing workerRunning would
- * otherwise delay every document queued behind this synthetic job.
+ * attempt may wait in memory for ten minutes, so sharing the ordinary lane
+ * would otherwise delay every document queued behind this synthetic job.
  */
 export function kickCoreExtractionRestartWorker(): void {
   if (coreRestartWorkerRunning) return;

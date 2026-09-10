@@ -152,6 +152,66 @@ describe("per-form field schemas", () => {
     const parsed = schema.parse({ taxYear: 2025, fields: "not an object" });
     expect(parsed.fields).toEqual({});
   });
+
+  it("remaps bounded excerpt pages to the original tax packet and drops invalid evidence", () => {
+    const retained = svc.retainTaxFieldsWithEvidence(
+      {
+        grossReceipts: { value: 125_000, confidence: 0.98, pageNumber: 1 },
+        netProfitOrLoss: { value: 48_000, confidence: 0.97, pageNumber: 2 },
+        totalExpenses: { value: 77_000, confidence: 0.4, pageNumber: 3 },
+        depreciation: { value: 6_000, confidence: 0.5 },
+        depletion: { value: null, confidence: 0.3, pageNumber: 1 },
+      },
+      {
+        formType: "schedule_c",
+        taxYear: 2025,
+        entityName: "Synthetic Consulting",
+        k1Variant: null,
+        pageStart: 25,
+        pageEnd: 26,
+        confidence: 0.99,
+      },
+      { sourcePageOffset: 24, attachedPageCount: 2 },
+    );
+
+    expect(retained.fields.grossReceipts.pageNumber).toBe(25);
+    expect(retained.fields.netProfitOrLoss.pageNumber).toBe(26);
+    expect(retained.fields.totalExpenses).toBeUndefined();
+    expect(retained.fields.depreciation).toBeUndefined();
+    expect(retained.fields.depletion).toBeUndefined();
+    expect(retained.missingEvidence).toBe(2);
+    expect(retained.unreadable).toBe(1);
+  });
+
+  it("fails a tax run on a provider-pass failure and requires review for incomplete evidence", () => {
+    const failed = svc.assessTaxFormExtractions([{
+      taxYear: 2025,
+      entityName: "Synthetic Consulting",
+      fields: {},
+      warnings: ["Provider unavailable"],
+      lineage: { modelId: "test-model" },
+      simulated: false,
+      failureReason: "Form extraction (schedule_c) call failed",
+      evidenceIncomplete: true,
+    }]);
+    expect(failed).toEqual({
+      failureReason: "Form extraction (schedule_c) call failed",
+      evidenceIncomplete: true,
+    });
+
+    const emptyButValidated = svc.assessTaxFormExtractions([{
+      taxYear: 2025,
+      entityName: null,
+      fields: {},
+      warnings: [],
+      lineage: { modelId: "test-model" },
+      simulated: false,
+    }]);
+    expect(emptyButValidated).toEqual({
+      failureReason: undefined,
+      evidenceIncomplete: true,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -322,6 +382,18 @@ describe("classifyTaxDocument (simulate path)", () => {
     expect(result.classification?.forms.length).toBeGreaterThan(0);
     expect(result.lineage.modelId).toBe(svc.SIMULATED_MODEL_ID);
     expect(result.classification?.warnings?.some((w) => /simulated/i.test(w))).toBe(true);
+  });
+
+  it("uses the same deterministic scenario when the orchestrator loads source bytes once", async () => {
+    const source = Buffer.from("synthetic tax packet bytes");
+    const classified = await svc.classifyTaxDocument(source, "application/pdf");
+    const target = classified.classification!.forms.find((form) => form.formType === "schedule_k1")!;
+    const extracted = await svc.extractTaxFormInstanceFields(source, target, "application/pdf");
+    expect(classified.simulated).toBe(true);
+    expect(extracted.simulated).toBe(true);
+    expect(extracted.fields.guaranteedPayments?.value).toBeGreaterThan(0);
+    expect(extracted.failureReason).toBeUndefined();
+    expect(extracted.evidenceIncomplete).toBeFalsy();
   });
 
   it("refuses tax-package simulation in production", async () => {

@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `9267ad963e48853fce8a4259b13faef8960bb29a` on 2026-09-10.
+**Audited production baseline:** `960a8c8d6cdf785eef9be4f6df2fbef65c028848` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -57,7 +57,14 @@ in 5.069 s, 11.393 s, 0.451 s, 0.005 s and 0.743 s. The Homi check uses the prod
 context builder, requires the real status tool schema, grounds the reply in fixed server truth and
 passes outbound compliance lint without reading a borrower file.
 
-The same build now proves recovery of an interrupted provider-backed ordinary-document job. The
+The intelligence release following that proof removes two large-packet bottlenecks. Tax work now
+loads a source once, sends each field pass only the classifier's exact page range and maps every
+retained field back to the original source page. A separate serial tax worker prevents a long return
+from delaying ordinary borrower documents, while keeping paid tax work bounded. Provider-pass
+failures fail the durable job instead of becoming an empty “completed” analysis; incomplete
+page-backed evidence requires human review.
+
+The recovery build proves recovery of an interrupted provider-backed ordinary-document job. The
 first deployment completed a real synthetic pay-statement provider read, verified exact values and
 page evidence, then stopped before persisting pages, facts, confidence or readiness. Railway
 replaced it with deployment `cef8b877-29f1-4683-944f-82caec441c2b` on the same exact commit. After
@@ -65,7 +72,7 @@ the lease expired, the replacement reclaimed the fixed job on attempt two, repea
 read, committed one page graph, one confidence row and ten unique grounded facts, and removed every
 temporary database row and private object. This proves ordinary-document provider recovery without
 duplicate evidence. It does not prove model accuracy on a protected labeled set, production
-capacity for a provider-classified 100-page tax packet or lender acceptance.
+provider accuracy, deployed large-packet performance or lender acceptance.
 
 The internal complex-borrower journey is proven. Fictional multi-business, rental and mixed W-2
 plus side-business borrowers moved through the public application, full URLA, database
@@ -102,8 +109,10 @@ processor, underwriter and closer also remain unproven.
    preserves unrelated work. The canary ledger is live; Homi, the real pay-statement pipeline,
    private storage, mixed-income analysis and underwriting remain operable across a controlled
    process replacement. A provider-backed ordinary-document job now survives interruption before
-   persistence and produces one evidence set after reclaim. Keep that proof current and repeat it
-   on a representative provider-classified tax packet while measuring the deployed capacity limit.
+   persistence and produces one evidence set after reclaim. Large tax work now runs independently
+   from ordinary documents, and each field pass receives only its classified form pages. Keep the
+   recovery proof current and repeat it on a representative provider-classified tax packet while
+   measuring deployed latency, memory and provider cost.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
    link logical documents, retain field-level source pages and support field and boundary review.
    A representative 100-page packet completes the local page pipeline inside the current capacity

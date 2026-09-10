@@ -9,6 +9,7 @@ const documentId = randomUUID();
 const persistedDocumentId = randomUUID();
 const rollbackDocumentId = randomUUID();
 const jobId = randomUUID();
+const taxLaneJobId = randomUUID();
 let fixturesCreated = false;
 
 beforeAll(async () => {
@@ -219,6 +220,39 @@ describe.sequential("document extraction restart recovery", () => {
       claimed_by: null,
       lease_expires_at: null,
     });
+  });
+
+  it("claims tax and ordinary jobs through independent database lanes", async () => {
+    await pool.query(
+      `UPDATE document_extraction_jobs
+          SET status='pending',attempt_count=0,available_at='2000-01-01T00:00:00Z',
+              claimed_at=null,lease_expires_at=null,claimed_by=null,completed_at=null,
+              last_error_code=null,last_error_at=null
+        WHERE id=$1`,
+      [jobId],
+    );
+    await pool.query(
+      `INSERT INTO document_extraction_jobs
+         (id,document_id,requested_by_user_id,mode,status,attempt_count,max_attempts,available_at)
+       VALUES ($1,$2,$3,'tax_package','pending',0,3,'2000-01-01T00:00:00Z')`,
+      [taxLaneJobId, documentId, userId],
+    );
+
+    const { claimNextDocumentExtractionJobForLane } = await import(
+      "../server/services/documentExtractionJobs"
+    );
+    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package");
+    expect(taxClaim).toMatchObject({ id: taxLaneJobId, mode: "tax_package", status: "processing" });
+
+    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary");
+    expect(ordinaryClaim).toMatchObject({ id: jobId, mode: "standard", status: "processing" });
+
+    await pool.query(
+      `UPDATE document_extraction_jobs
+          SET status='cancelled',claimed_by=null,lease_expires_at=null,completed_at=now()
+        WHERE id = ANY($1::varchar[])`,
+      [[jobId, taxLaneJobId]],
+    );
   });
 
   it("orders final tax persistence and consent revocation so revoked data stays purged", async () => {

@@ -68,7 +68,7 @@ for the borrowers that a standardized fast lane handles poorly.
 |---|---|---|---|
 | Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path and provider-before-persist restart recovery pass in production | No human-labeled production accuracy set | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
-| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, normalized private pages, field-level source-page evidence, logical page links, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; the mechanical 100-page pipeline proof passes; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, protected labeled accuracy run and interrupted multi-form recovery are not yet recorded | Strong complex-income logic with one visual evidence model |
+| Tax-package intelligence | Consent-gated durable processing, serialized revocation/final persistence, multi-form classification, bounded per-form provider excerpts, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; both 100-page mechanical proofs pass; private storage survives a controlled production process replacement | A representative provider-classified 100-page packet, protected labeled accuracy run and interrupted multi-form recovery are not yet recorded | Strong complex-income logic with bounded provider work and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
@@ -179,6 +179,19 @@ rows plus logical-document links now persist in transactional batches instead of
 sequential database round trips. The harness supplies ground-truth classifications, so this proves
 normalization, persistence, segmentation, source immutability and idempotency only. Production
 capacity still needs confirmation against the deployed container memory limit.
+
+**Provider-input capacity proof completed 2026-09-10:**
+`pnpm tsx scripts/tax-packet-excerpt-benchmark.ts` loaded one synthetic 100-page packet and emitted
+four exact 25-page provider excerpts. The field-extraction page workload fell from 400 pages (the
+whole source repeated for every form) to 100 pages. Original-page offsets were 0, 25, 50 and 75;
+the source SHA-256 remained unchanged; the four excerpts were 3.17–3.26 MB; and the final run
+completed in 14.3 seconds with 517.6 MB peak process RSS and a 345.8 MB increase during the excerpt
+stage. Rendering is serial while up to three provider calls may be in flight, so memory-heavy page
+work remains bounded. Tax jobs also use a separate serial database lane, preventing a large return
+from blocking pay stubs, W-2s, bank statements, leases or Autopilot. Provider-pass errors now fail
+the durable job, and a valid response with missing or unreadable page evidence cannot receive a
+hands-off confidence result. This synthetic harness does not measure provider accuracy, provider
+latency, production memory or production cost.
 
 **Production proof still required:** run a representative provider-classified 100-page packet,
 confirm it fits the deployed capacity envelope, grade its financial fields against the protected
@@ -356,7 +369,8 @@ borrowers finish faster.
 
 ### 1. Make document work durable and observable
 
-- Keep the deployed durable extraction job, lease recovery and failure queue under observation.
+- Keep the deployed durable extraction jobs, independent ordinary/tax lanes, lease recovery and
+  failure queue under observation.
 - Keep the completed ordinary-document interruption proof current and repeat it for a representative
   provider-classified multi-form tax package.
 - Keep the exact-build provider and storage canaries current with latency and failure class.
@@ -512,6 +526,14 @@ missed escalation or time to a useful human response.
     exclusion from the borrower worker removed the ten-minute canary hold as a borrower-throughput
     bottleneck. The post-restart five-capability sweep passed; tax-package capacity, labeled model
     accuracy and external mortgage provider/lender acceptance remain open.
+42. Loaded each tax source once and replaced repeated full-packet field calls with exact classified
+    page excerpts, preserving original-page evidence while reducing the synthetic 100-page
+    field-pass workload from 400 pages to 100.
+43. Separated tax-package and ordinary extraction workers so a complex return cannot delay normal
+    borrower documents; proved both lane selectors against Postgres while keeping each paid lane
+    serial.
+44. Made per-form provider failures fail the durable tax job and forced incomplete page-backed
+    evidence into human review instead of allowing an empty analysis to look complete.
 
 ## Sources
 

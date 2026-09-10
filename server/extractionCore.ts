@@ -40,7 +40,7 @@ export const EXTRACTION_MODEL_SINGLE_DOC = "claude-sonnet-5";
 export const EXTRACTION_MODEL_TAX_PACKAGE = "claude-opus-4-8";
 /** @deprecated Use the task-specific constants above; retained for back-compat. */
 export const EXTRACTION_MODEL_ID = EXTRACTION_MODEL_TAX_PACKAGE;
-export const EXTRACTION_PROMPT_VERSION = "2026-09-v7";
+export const EXTRACTION_PROMPT_VERSION = "2026-09-v8";
 /** Lineage marker for deterministic simulated extractions (I10: unmistakable). */
 export const SIMULATED_MODEL_ID = "simulated";
 
