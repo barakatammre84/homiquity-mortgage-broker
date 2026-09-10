@@ -5,7 +5,7 @@ import type { Express } from "express";
 import type { IStorage } from "../../storage";
 import { isAuthenticated } from "../../auth";
 import { isApprovedGradeLoanAppStatus, type User } from "@shared/schema";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
+import { getCurrentDecisionGrade } from "../../services/currentDecisionGrade";
 import {
   parsePersistedPaths,
   toBorrowerIncomeAnalyzingView,
@@ -38,7 +38,7 @@ export function registerIncomeSummaryRoutes(
       // live-math variant is a recorded binding rejection; MR-2, Reg N).
       const decisionReady =
         isApprovedGradeLoanAppStatus(application.status) &&
-        isDecisionGrade(application.financialDataProvenance as DataProvenance);
+        (await getCurrentDecisionGrade(application)).isDecisionGrade;
 
       // A non-owner (staff/deal-team) read of another borrower's file is
       // audited in BOTH states — the analyzing view's source labels are still

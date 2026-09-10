@@ -6,6 +6,7 @@ import { db } from "../db";
 import { auditLogs, pickActiveLoanApplication } from "@shared/schema";
 import type { LoanApplication, User } from "@shared/schema";
 import { getCoachIntakeSnapshots } from "../services/coachIntake";
+import { getCurrentDecisionGrade } from "../services/currentDecisionGrade";
 
 // Borrower-facing financial profile aggregate — backs the "My Profile" page.
 //
@@ -44,6 +45,7 @@ export function registerProfileRoutes(app: Express) {
       const draft = applications.find((a) => a.status === "draft");
       const active = pickActiveLoanApplication(applications);
       const display: LoanApplication | null = draft ?? active ?? applications[0] ?? null;
+      const currentGrade = display ? await getCurrentDecisionGrade(display) : null;
 
       const { conversations } = await getCoachIntakeSnapshots(user.id);
       const latestConversation = conversations[0] ?? null;
@@ -77,9 +79,10 @@ export function registerProfileRoutes(app: Express) {
               status: display.status,
               editable: display.status === "draft",
               financialDataProvenance: display.financialDataProvenance,
-              incomeVerified: !!display.incomeVerified,
-              assetsVerified: !!display.assetsVerified,
-              creditVerified: !!display.creditVerified,
+              currentDecisionGrade: currentGrade?.isDecisionGrade ?? false,
+              incomeVerified: currentGrade?.verification.income ?? false,
+              assetsVerified: currentGrade?.verification.assets ?? false,
+              creditVerified: currentGrade?.verification.credit ?? false,
               updatedAt: display.updatedAt,
               fields: Object.fromEntries(
                 PROFILE_APPLICATION_FIELDS.map((f) => [f, (display as Record<string, unknown>)[f] ?? null]),

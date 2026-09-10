@@ -16,6 +16,7 @@ import { tridHardStopError } from "../../services/trid";
 import * as creditService from "../../services/creditService";
 import { updateConditionMetrics } from "../../services/outcomeTracker";
 import { routeParams } from "../../http/routeParams";
+import { getCurrentDecisionGrade } from "../../services/currentDecisionGrade";
 
 /**
  * Checks whether a staff user is authorized to mutate a specific loan application.
@@ -329,6 +330,14 @@ export function registerPipelineRoutes(
         } catch (guardErr) {
           return res.status(422).json({
             error: guardErr instanceof Error ? guardErr.message : "Financial data must be verified",
+          });
+        }
+        const currentGrade = await getCurrentDecisionGrade(application);
+        if (!currentGrade.isDecisionGrade) {
+          return res.status(422).json({
+            error: "The approved financial or credit evidence is missing or stale. Refresh the financial review before advancing this file.",
+            code: "decision_evidence_not_current",
+            blockers: currentGrade.reasons,
           });
         }
 

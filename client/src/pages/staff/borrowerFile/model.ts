@@ -22,6 +22,9 @@ export interface LoanOption {
 
 export interface ApplicationData {
   application: LoanApplication;
+  currentDecisionGrade: boolean;
+  currentVerification: { income: boolean; assets: boolean; credit: boolean };
+  decisionGradeBlockers: string[];
   options: LoanOption[];
   documents: Document[];
   activities: ActivityItem[];

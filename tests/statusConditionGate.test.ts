@@ -75,6 +75,10 @@ vi.mock("../server/services/trid", () => ({
   evaluateTridTrigger: vi.fn(async () => null),
   tridHardStopError: vi.fn(() => null),
 }));
+vi.mock("../server/services/currentDecisionGrade", () => ({
+  getCurrentDecisionGrade: vi.fn(async () => ({ isDecisionGrade: true, reasons: [], evidence: {} })),
+  isCurrentRealCreditPull: vi.fn(() => true),
+}));
 
 const storageStub = {
   getLoanApplication: vi.fn(async (id: string) => ({

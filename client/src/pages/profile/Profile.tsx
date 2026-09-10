@@ -50,6 +50,7 @@ interface FinancialProfileResponse {
     status: string;
     editable: boolean;
     financialDataProvenance: string | null;
+    currentDecisionGrade: boolean;
     incomeVerified: boolean;
     assetsVerified: boolean;
     creditVerified: boolean;
@@ -263,10 +264,12 @@ export default function Profile() {
                   Financial Profile
                 </span>
                 <span className="flex items-center gap-1.5">
-                  {application?.financialDataProvenance === "verified" ? (
-                    <Badge className="gap-1 text-[10px]"><BadgeCheck className="h-3 w-3" />Verified</Badge>
+                  {application?.currentDecisionGrade ? (
+                    <Badge className="gap-1 text-xs"><BadgeCheck className="h-3 w-3" />Verified</Badge>
+                  ) : application?.financialDataProvenance === "verified" ? (
+                    <Badge variant="secondary" className="text-xs font-normal">Evidence needs refresh</Badge>
                   ) : (
-                    <Badge variant="outline" className="text-[10px] font-normal">Self-reported</Badge>
+                    <Badge variant="outline" className="text-xs font-normal">Self-reported</Badge>
                   )}
                   {application?.editable && !editing && (
                     <Button variant="outline" size="sm" className="touch-target gap-1 text-xs" onClick={startEditing} data-testid="button-edit-profile">

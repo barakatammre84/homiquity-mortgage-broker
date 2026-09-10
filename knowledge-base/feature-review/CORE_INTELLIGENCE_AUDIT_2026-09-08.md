@@ -2,8 +2,8 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production base `3a666a3a7745a39d5e60306f12dec38ac6f7bfaf` plus the Homi
-document-evidence candidate through `92e4717a965fa81049c989eab3df0500bb70afc9`
+**Code reviewed:** production base `2e0a098bc4d362b80adcdcb7b2f95844f5fa846d` plus the current
+financial-evidence and underwriting-freshness candidate
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -68,11 +68,11 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Deploy and verify the document-evidence read, then collect the 30-turn/10-borrower floor, pre-register a comparison cohort and explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
+| Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Collect the 30-turn/10-borrower floor, pre-register a comparison cohort and explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
-| Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
-| Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
+| Financial analysis | Self-employment worksheets, rental treatment, asset/liability review, append-only workpapers, cited memo and hashed lender package; human-reviewed pay, bank, lease, Schedule C and K-1 figures are frozen into the version and compared with the exact calculation input; mismatches require an officer explanation; bank-statement deposit screening is usable in the staff file; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement eligibility and DSCR rules still require the selected lender's matrices; measured review accuracy on real files is absent | Strong controlled analysis with visible judgment; not yet a measured hands-off result |
+| Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; VERIFIED is re-derived from a current approved memo, current income and asset workpapers, and an unexpired, unarchived real bureau report; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS and real credit are not live and no signed provider findings have been received | Strong internal engine with current-evidence gates; incomplete external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
 | External evidence | Plaid adapter and production guards exist; private object-storage read/write/delete and survival across a same-build process replacement are proven in production | Real credit, live AUS, current lender pricing and receiver acceptance are not proven | Blocks a real live lifecycle |
 
@@ -96,6 +96,19 @@ The underwriting engine, decision engine, rule engine, income paths and pricing 
 ordinary code with reproducible inputs. Decision snapshots include resolved policy. Complex-income
 packages require an approved workpaper and memo, preserve document manifests and carry citations.
 Simulated credit and AUS results are labeled and cannot quietly become verified evidence.
+
+The latest audit found that the application-level verified flags could remain true after an OCR
+fact or financial input changed. Binding routes now re-resolve the approved memo, income and asset
+workpapers, and real credit evidence before using the VERIFIED qualifier. Expired, archived or
+simulated credit does not qualify. Offers, borrower income, approval statuses, stage advancement,
+Homi's borrower graph and the loan-officer decision controls use that same current-evidence answer.
+
+Financial workpapers now fingerprint human review revisions and the effective numeric values, so
+correcting an existing fact ID invalidates the old workpaper and memo. Human-reviewed pay-statement
+income, bank balances, lease rent and supported Schedule C/K-1 figures are reconciled to the exact
+structured value used by the calculation. A match is visible; a variance or unlinked document must
+be acknowledged and explained by the reviewer. The system never silently replaces an application
+or worksheet value with OCR output.
 
 Fannie Mae's current Income Calculator reinforces this direction: self-employment and rental
 analysis can be standardized, but user-entered data does not receive the same data-integrity relief
@@ -645,6 +658,22 @@ missed escalation or time to a useful human response.
     audit bounded fact reads before the query, cached read-only snapshots within one turn, invalidated
     them after writes and made omitted documents explicit so Homi cannot confuse a bounded response
     with a complete file inventory.
+53. Made financial-review versions depend on effective human-reviewed numeric facts and every fact's
+    review revision. A correction on the same extracted-field row now invalidates the workpaper and
+    credit memo instead of leaving approved dollars current.
+54. Added document-to-calculation checks for pay-statement income, bank balances, lease rent and
+    supported Schedule C/K-1 worksheet fields. Variances and ambiguous links require an explicit
+    officer acknowledgment and explanation, enforced by the server. Added the missing staff surface
+    for append-only bank-statement deposit screening without treating OCR deposit totals as eligible
+    income.
+55. Replaced sticky VERIFIED decisions with a current-evidence proof across underwriting, offers,
+    borrower income, approval transitions, pipeline advancement, the borrower graph, loan options
+    and loan-officer controls. The proof requires current approved financial artifacts and a
+    completed, unexpired, unarchived, non-simulated bureau report.
+56. Re-audited every remaining verification display and income-loader seam. Borrower, staff and
+    Homi income/asset/credit states now use the same current-evidence dimensions, stale profile
+    evidence is labeled for refresh, and the generic income loader cannot apply positive rental
+    income unless its caller explicitly opts in after resolving decision-grade proof.
 
 ## Sources
 

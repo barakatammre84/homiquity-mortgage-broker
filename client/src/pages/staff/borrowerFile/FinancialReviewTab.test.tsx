@@ -22,6 +22,8 @@ function fixture(): FinancialReviewWorkspace {
     prepareBlockedReason: null,
     canBuildMemo: false,
     memoBlockedReason: "Approve every current workpaper before building the memo.",
+    bankStatementAnalysis: null,
+    bankStatementEvidence: { documentCount: 0, reviewedDepositFactCount: 0, observedTotalDeposits: 0 },
     workpapers: [{
       id: "wp-1",
       key: "income_summary:a",
@@ -45,7 +47,7 @@ function fixture(): FinancialReviewWorkspace {
         },
         borrowerBreakdown: [{ borrowerSequenceNumber: 1, monthlyIncome: 6000 }, { borrowerSequenceNumber: 2, monthlyIncome: 6000 }],
       },
-      sources: [{ documentId: "doc-1", documentName: "Accepted W-2.pdf", documentType: "w2", lineageId: "lineage-1", versionNumber: 2, contentFingerprint: "b".repeat(64), status: "verified", subjectType: "borrower", subjectId: "borrower-1", pages: [1, 2], verifiedFactIds: ["fact-1"] }],
+      sources: [{ documentId: "doc-1", documentName: "Accepted W-2.pdf", documentType: "w2", lineageId: "lineage-1", versionNumber: 2, contentFingerprint: "b".repeat(64), status: "verified", subjectType: "borrower", subjectId: "borrower-1", pages: [1, 2], verifiedFactIds: ["fact-1"], verifiedFacts: [{ id: "fact-1", fieldName: "w2_box_1_wages", value: 72000, valueType: "currency", pageNumber: 1 }] }],
       dependencyVersionIds: [],
       createdAt: "2026-09-04T00:00:00.000Z",
       isCurrent: true,
@@ -92,6 +94,9 @@ describe("Financial Review in the existing officer workspace", () => {
     expect(screen.getByTestId("open-workpaper-source-doc-1").textContent).toContain(
       "Accepted W-2.pdf · v2 · page 1, 2",
     );
+    expect(screen.getByText("1 human-reviewed financial figure")).toBeTruthy();
+    await userEvent.click(screen.getByText("1 human-reviewed financial figure"));
+    expect(screen.getByText("$72,000")).toBeTruthy();
     await userEvent.click(screen.getByText("Review evidence"));
     expect(navigate).toHaveBeenCalledWith("documents");
     await userEvent.click(screen.getByText("Review tax figures"));
@@ -108,6 +113,54 @@ describe("Financial Review in the existing officer workspace", () => {
     expect(button.hasAttribute("disabled")).toBe(false);
   });
 
+  it("requires the officer to acknowledge a document variance before approval", async () => {
+    request.mockClear();
+    request.mockResolvedValue(new Response(null, { status: 201 }));
+    const data = fixture();
+    data.workpapers[0].input.evidenceComparisons = [{
+      id: "income:doc-1:fact-1",
+      kind: "income",
+      status: "variance",
+      documentId: "doc-1",
+      verifiedFactIds: ["fact-1"],
+      label: "Pay statement · Fictional Hospital",
+      evidenceValue: 6500,
+      calculationValue: 6000,
+      variance: 500,
+      tolerance: 65,
+      detail: "The reviewed document differs from the calculation input.",
+    }];
+    setup(data);
+    const button = screen.getByTestId("approve-income_summary:a");
+    await userEvent.type(screen.getByLabelText("Review reason for Household qualifying income"), "Confirmed variable pay treatment.");
+    expect(button.hasAttribute("disabled")).toBe(true);
+    await userEvent.click(screen.getByLabelText("Acknowledge Pay statement · Fictional Hospital"));
+    expect(button.hasAttribute("disabled")).toBe(false);
+    await userEvent.click(button);
+    expect(request).toHaveBeenCalledWith(
+      "POST",
+      "/api/loan-applications/a/financial-review/workpapers/wp-1/review",
+      expect.objectContaining({ acknowledgedComparisonIds: ["income:doc-1:fact-1"] }),
+    );
+  });
+
+  it("turns reviewed statement deposits into a staff-screened analysis draft", async () => {
+    request.mockClear();
+    request.mockResolvedValue(new Response(null, { status: 201 }));
+    const data = fixture();
+    data.bankStatementEvidence = { documentCount: 12, reviewedDepositFactCount: 12, observedTotalDeposits: 240000 };
+    setup(data);
+    expect(screen.getByText(/12 accepted statements/)).toBeTruthy();
+    await userEvent.click(screen.getByText("Use observed total as a draft"));
+    await userEvent.type(screen.getByLabelText("Screening notes"), "Excluded transfers and duplicate deposits.");
+    await userEvent.click(screen.getByTestId("save-bank-statement-analysis"));
+    expect(request).toHaveBeenCalledWith(
+      "POST",
+      "/api/applications/a/bank-statement-analysis",
+      expect.objectContaining({ months: 12, totalEligibleDeposits: 240000 }),
+    );
+  });
+
   it("shows a versioned memo and opens a cited source", async () => {
     const data = approvedMemoFixture();
     data.canBuildMemo = true;
@@ -121,6 +174,7 @@ describe("Financial Review in the existing officer workspace", () => {
   });
 
   it("turns an approved current memo into evidence-backed income and asset verification", async () => {
+    request.mockClear();
     request.mockResolvedValue(new Response(null, { status: 200 }));
     const data = approvedMemoFixture();
     data.requiredCount = 2;

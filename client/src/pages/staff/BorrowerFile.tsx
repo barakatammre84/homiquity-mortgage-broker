@@ -211,18 +211,16 @@ export default function BorrowerFile() {
   // Mirrors the evidence-backed per-dimension verification routes — closer,
   // broker, and lender are 403'd there. Both sides read the shared role list.
   const canVerifyFinancials = FINANCIAL_VERIFICATION_ROLES.includes(user?.role || "");
-  const financialVerificationCount = [
-    application.incomeVerified,
-    application.assetsVerified,
-    application.creditVerified,
-  ].filter(Boolean).length;
-  const isPreliminaryReview = application.status === "pre_approved" && application.financialDataProvenance !== "verified";
+  const currentVerification = appData?.currentVerification ?? { income: false, assets: false, credit: false };
+  const financialVerificationCount = Object.values(currentVerification).filter(Boolean).length;
+  const currentDecisionGrade = appData?.currentDecisionGrade === true;
+  const isPreliminaryReview = application.status === "pre_approved" && !currentDecisionGrade;
+  const hasVerifiedCredit = currentVerification.credit;
+  const hasVerifiedIncome = currentVerification.income;
   const propertyLocation = [application.propertyCity, application.propertyState]
     .filter(Boolean)
     .join(", ");
-  const hasVerifiedCredit = application.creditVerified === true;
-  const hasVerifiedIncome = application.incomeVerified === true;
-  const hasDecisionGradeDti = hasVerifiedCredit && hasVerifiedIncome;
+  const hasDecisionGradeDti = currentDecisionGrade;
 
   // Pre-underwriting validator flags (loan_applications.pre_uw_flags) — the
   // machine-readable signal staff should see before opening any tab.
@@ -300,7 +298,7 @@ export default function BorrowerFile() {
                   <Badge variant="outline">
                     {application.preferredLoanType?.toUpperCase() || "CONVENTIONAL"}
                   </Badge>
-                  {application.financialDataProvenance === "verified" ? (
+                  {currentDecisionGrade ? (
                     <Badge
                       className="bg-success-subtle text-success-subtle-foreground"
                       data-testid="badge-financials-verified"
@@ -322,7 +320,8 @@ export default function BorrowerFile() {
                   )}
                   <StatusUpdateDialog
                     applicationId={applicationId}
-                    financialDataProvenance={application.financialDataProvenance}
+                    currentDecisionGrade={currentDecisionGrade}
+                    decisionGradeBlockers={appData?.decisionGradeBlockers ?? []}
                     canSetCreditDecisions={canSetCreditDecisions}
                   />
                 </div>

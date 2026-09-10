@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `d65007bcffd3ac89f4a77d4fa809739576a89492` on 2026-09-10.
+**Audited production baseline:** `2e0a098bc4d362b80adcdcb7b2f95844f5fa846d` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -52,10 +52,26 @@ route returned successfully, and the service reported SendGrid email configured.
 has a strict required test gate, automatic production migrations and post-deploy commit
 verification. On that exact build, a borrower-data-free sweep passed Homi's grounded status turn,
 the real image-only pay-statement extraction path with page evidence, private object-storage
-write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 5.443 s,
-9.587 s, 0.675 s, 0.006 s and 0.955 s. The Homi check uses the production prompt and
-context builder, requires the real status tool schema, grounds the reply in fixed server truth and
-passes outbound compliance lint without reading a borrower file.
+write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 5.467 s,
+9.388 s, 0.652 s, 0.006 s and 0.853 s. The Homi check uses the production prompt and context
+builder, requires the real status tool schema, grounds the reply in fixed server truth and passes
+outbound compliance lint without reading a borrower file.
+
+The current build closes the most important gap between extraction and a mortgage decision.
+Financial workpapers cite the exact human-reviewed numeric facts and their source pages, and a
+correction to one of those facts invalidates the affected workpaper and memo. Pay-statement income,
+bank balances, leases and supported tax figures are reconciled against the structured values the
+calculation actually uses. A difference is visible to the reviewer and must be acknowledged with a
+reason; it cannot be accepted silently. Staff can create an append-only bank-statement analysis
+from reviewed deposit evidence while explicitly removing transfers, refunds, duplicates and other
+ineligible deposits.
+
+Every binding or customer-visible verified status is now recalculated from current proof. Pricing,
+loan options, Homi, approval statuses and underwriting advancement require a current approved
+financial memo, current approved income and asset workpapers, and a completed real bureau report
+that is neither simulated, archived nor expired. Stored flags remain audit history; they cannot keep
+a file verified after its supporting evidence changes. Income, asset and credit progress counts are
+derived from those same current proofs so staff, the borrower and Homi receive one answer.
 
 The intelligence release following that proof removes two large-packet bottlenecks. Tax work now
 loads a source once, sends each field pass only the classifier's exact non-overlapping page range
@@ -106,11 +122,11 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Live · production canary proven · outcome collection and document-evidence read built** | Verify the new evidence read on the deployed build; then collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
+| Guide the borrower with Homi | **Live · production canary and bounded document-evidence read proven** | Collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
-| Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
-| Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
+| Review complicated income | **Built · exact evidence lineage, reconciliation and production engine repeatability proven** | Populate the protected extraction benchmark; then a licensed reviewer must reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
+| Explain options and decisions | **Built · stale and simulated evidence fails closed** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision and the first lender accepts the result. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built · XSD proven internally** | One approved lender accepts the multi-borrower MISMO, income and final AUS artifacts and completes an acknowledgement/correction exchange. |
 | Close, fund and service | **Built** | One real closing, funding record, borrower update sequence and post-close handoff. |
@@ -148,7 +164,10 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    multi-borrower MISMO plus final dual-AUS artifact passes the committed XSD. Retain provider-native
    findings and reproduce the package through the live path before receiver certification. The
    scheduled core proof now checks mixed W-2, Schedule C and rental analysis plus repeatable
-   underwriting against deployed policy rows; it does not replace a live AUS result.
+   underwriting against deployed policy rows. Current workpapers cite the reviewed numeric facts,
+   reconcile them to the calculation inputs, and invalidate downstream decisions when evidence
+   changes. Pricing, options, approval and stage advancement independently re-resolve that proof.
+   This does not replace a live credit report, AUS result, rate sheet or lender acknowledgement.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.
 5. **Prove Homi's value:** production response canaries pass and the mortgage scenario and

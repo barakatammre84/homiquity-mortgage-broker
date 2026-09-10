@@ -18,11 +18,11 @@ import { MarketPricingSection, type MarketOffersResponse } from "./loanOptions/M
 import { LoanOptionCard } from "./loanOptions/LoanOptionCard";
 import { LoanLetterButton } from "./loanOptions/LoanLetterButton";
 import { WhatIfPanel } from "./loanOptions/WhatIfPanel";
-import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { getLoanOptionsPresentation, isIntakeStillFinalizing } from "./loanOptions/loanOptionsPresentation";
 
 interface LoanOptionsData {
   application: LoanApplication;
+  currentDecisionGrade: boolean;
   options: LoanOption[];
 }
 
@@ -122,7 +122,7 @@ export default function LoanOptions() {
   }
 
   const { application, options } = data;
-  const financialsVerified = isDecisionGrade(application.financialDataProvenance as DataProvenance | undefined);
+  const financialsVerified = data.currentDecisionGrade;
   const preApprovalAmount = application.preApprovalAmount
     ? formatCurrency(application.preApprovalAmount)
     : formatCurrency(application.purchasePrice || "0");

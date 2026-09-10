@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getLoanAppStatusMeta } from "@shared/loanApplicationStatus";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import { isDecisionGrade } from "@shared/dataProvenance";
 import { DocRequestDraftDialog } from "./DocRequestDraftDialog";
 import { SIGNAL_META, prettyPathId, type CockpitData, type PipelineSummary, type StaffSignal } from "./types";
 
@@ -74,7 +73,7 @@ export function ActiveBorrowerPane({
 
   const { application: app, income, conditions, documents, messages } = data;
   const statusMeta = getLoanAppStatusMeta(app.status);
-  const financialsVerified = isDecisionGrade(app.financialDataProvenance as Parameters<typeof isDecisionGrade>[0]);
+  const financialsVerified = app.currentDecisionGrade;
   const isPreliminaryReview = app.status === "pre_approved" && !financialsVerified;
   const topSignal = signals[0];
   const nextAction = loanOfficerNextAction(data);

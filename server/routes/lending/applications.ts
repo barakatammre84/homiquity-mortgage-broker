@@ -20,6 +20,7 @@ import { prelaunchGate } from "../../services/prelaunchGate";
 import { updatePipelineStage } from "../../pipelineEngine";
 import { routeParam } from "../../http/routeParams";
 import { clientIpForRecord } from "../../clientIp";
+import { getCurrentDecisionGrade } from "../../services/currentDecisionGrade";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -396,14 +397,18 @@ export function registerApplicationRoutes(
         return res.status(404).json({ error: "Application not found" });
       }
       
-      const [options, documents, activities] = await Promise.all([
+      const [options, documents, activities, currentGrade] = await Promise.all([
         storage.getLoanOptionsByApplication(routeParam(req, "id")),
         storage.getDocumentsByApplication(routeParam(req, "id")),
         storage.getDealActivitiesByApplication(routeParam(req, "id")),
+        getCurrentDecisionGrade(application),
       ]);
 
       res.json({
         application,
+        currentDecisionGrade: currentGrade.isDecisionGrade,
+        currentVerification: currentGrade.verification,
+        decisionGradeBlockers: currentGrade.reasons,
         options,
         // Ciphertext trio never ships; reviewedByUserId is staff-only —
         // see shared/borrowerDocumentView.ts.
@@ -433,10 +438,14 @@ export function registerApplicationRoutes(
         return res.status(404).json({ error: "Application not found" });
       }
 
-      const options = await storage.getLoanOptionsByApplication(routeParam(req, "id"));
+      const [options, currentGrade] = await Promise.all([
+        storage.getLoanOptionsByApplication(routeParam(req, "id")),
+        getCurrentDecisionGrade(application),
+      ]);
       
       res.json({
         application,
+        currentDecisionGrade: currentGrade.isDecisionGrade,
         options,
       });
     } catch (error) {
