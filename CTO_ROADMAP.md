@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `513ab8c1a7abb67d3bb2163336006f8f8fd29313` on 2026-09-10.
+**Audited production baseline:** `d65007bcffd3ac89f4a77d4fa809739576a89492` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -97,8 +97,8 @@ workpaper. Homiquity correctly refuses to present self-reported or simulated evi
 qualifying income, an approval or a lender-ready submission.
 
 No approved wholesale lender, current lender receiver, production credit/AUS/verification suite,
-real lender acceptance or funded Homiquity loan has been proven. A protected human-labeled
-extraction evaluation, including scanned returns, and the complete operating handoff between
+real lender acceptance or funded Homiquity loan has been proven. A completed protected human-labeled
+extraction evaluation, including representative real scanned returns, and the complete operating handoff between
 licensed loan officer, processor, underwriter and closer also remain unproven.
 
 ## Core capability map
@@ -108,7 +108,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
 | Guide the borrower with Homi | **Live · production canary proven** | Prove from journey outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
-| Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; calibrate born-digital and real scanned-document accuracy with the protected labeled set. |
+| Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
 | Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
@@ -137,8 +137,11 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    link logical documents, retain field-level source pages and support field and boundary review.
    A representative 100-page packet completes both the local page pipeline and the live
    provider/restart path inside the current capacity envelope, and a clean text-free one-page raster
-   pay statement completes the live provider/restart path. Populate the protected independently
-   reviewed labeled set across born-digital and varied real scanned/raster documents, then set review thresholds
+   pay statement completes the live provider/restart path. The protected evaluator now runs the exact
+   production adapters outside the product database, verifies private source/label hashes, reserves
+   a bounded provider-call budget before each call, resumes from private checkpoints and blocks a
+   claim when any case, lineage or threshold is incomplete. Populate its independently reviewed set
+   across born-digital and varied real scanned/raster documents, run it, then set review thresholds
    from measured errors before treating extraction as hands-off.
 3. **Prove decision delivery:** underwriting, AUS and pre-approval letters carry input/policy
    fingerprints; stale output is blocked; out-of-scope files take a manual-underwrite path; and the
