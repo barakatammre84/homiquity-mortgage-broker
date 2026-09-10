@@ -2,13 +2,14 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   auditLogs,
   borrowerConsents,
+  coreProviderCanaryRuns,
   documentExtractionJobs,
   documents,
   users,
   type DocumentExtractionJob,
 } from "@shared/schema";
 import { EXTRACTION_MODEL_TAX_PACKAGE } from "../extractionCore";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { ObjectStorageService } from "../integrations/object_storage";
 import {
   buildSyntheticTaxPacketPdf,
@@ -24,10 +25,16 @@ const CANARY_AUTH_PROVIDER = "operational_canary";
 const SEEDED_ACTION = "core.tax_packet_canary_seeded";
 const PROOF_TIMEOUT_MS = 105_000;
 const POLL_MS = 1_000;
+const RECLAIM_PENDING_AFTER_MS = 2 * 60 * 1_000;
+const RERUN_COOLDOWN_MS = 15 * 60 * 1_000;
+const LIFECYCLE_LOCK_KEY = "core-tax-packet-canary:lifecycle:v1";
+const CANARY_OPERATION = "synthetic_tax_packet_pipeline";
 
 export type CoreTaxPacketCanaryFailure =
   | "runtime_identity_missing"
+  | "release_mismatch"
   | "proof_in_progress"
+  | "proof_cooldown"
   | "proof_missing"
   | "processing_failed"
   | "proof_timeout"
@@ -111,6 +118,33 @@ function runtimeIdentity(): { commitSha: string; deploymentId: string } {
   return { commitSha, deploymentId };
 }
 
+/** Bind a release proof request to the exact revision the caller intended. */
+export function assertCoreTaxPacketCanaryExpectedCommit(expectedCommitSha: string): void {
+  const runtime = runtimeIdentity();
+  if (
+    !/^[0-9a-f]{40}$/i.test(expectedCommitSha) ||
+    expectedCommitSha.toLowerCase() !== runtime.commitSha.toLowerCase()
+  ) {
+    throw new CoreTaxPacketCanaryError("release_mismatch");
+  }
+}
+
+async function withLifecycleLock<T>(run: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [LIFECYCLE_LOCK_KEY]);
+    locked = true;
+    return await run();
+  } finally {
+    if (locked) {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [LIFECYCLE_LOCK_KEY])
+        .catch(() => undefined);
+    }
+    client.release();
+  }
+}
+
 function parseSeedMetadata(value: unknown): SeedMetadata {
   const metadata = value as Partial<SeedMetadata>;
   if (
@@ -190,14 +224,23 @@ async function fixtureObjectPaths(): Promise<string[]> {
 }
 
 /** Remove every private object and row created for the fixed synthetic package. */
-export async function cleanupCoreTaxPacketCanary(
+async function cleanupCoreTaxPacketCanaryUnlocked(
   objectStorage: CoreTaxPacketObjectStore = new ObjectStorageService(),
 ): Promise<void> {
   await assertFixtureOwnership();
-  for (const path of await fixtureObjectPaths()) {
-    await objectStorage.deleteObjectEntity(path);
-  }
+  const objectPaths = await fixtureObjectPaths();
   await db.transaction(async (transaction) => {
+    // Cleanup is mutually exclusive with every provider use for this fixed
+    // identity. Once the transaction commits, later provider calls observe no
+    // active consent and stale workers cannot repopulate the evidence graph.
+    await transaction.execute(sql`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${`tax-consent:${CORE_TAX_PACKET_CANARY_USER_ID}`}, 0)
+      )
+    `);
+    for (const path of objectPaths) {
+      await objectStorage.deleteObjectEntity(path);
+    }
     await transaction.execute(sql`
       DELETE FROM extracted_fields
        WHERE logical_document_id IN (
@@ -292,95 +335,143 @@ export async function cleanupCoreTaxPacketCanary(
   });
 }
 
+export async function cleanupCoreTaxPacketCanary(
+  objectStorage: CoreTaxPacketObjectStore = new ObjectStorageService(),
+): Promise<void> {
+  return withLifecycleLock(() => cleanupCoreTaxPacketCanaryUnlocked(objectStorage));
+}
+
+async function assertRerunAllowed(runtimeCommitSha: string): Promise<void> {
+  const [recent] = await db.select({ id: coreProviderCanaryRuns.id })
+    .from(coreProviderCanaryRuns)
+    .where(and(
+      eq(coreProviderCanaryRuns.operation, CANARY_OPERATION),
+      eq(coreProviderCanaryRuns.commitSha, runtimeCommitSha),
+      sql`${coreProviderCanaryRuns.completedAt} > CURRENT_TIMESTAMP
+        - (${RERUN_COOLDOWN_MS} * interval '1 millisecond')`,
+    ))
+    .limit(1);
+  if (recent) throw new CoreTaxPacketCanaryError("proof_cooldown");
+}
+
+async function existingProofIsActive(now: Date): Promise<boolean> {
+  const [existing] = await db.select({
+    status: documentExtractionJobs.status,
+    leaseActive: sql<boolean>`${documentExtractionJobs.status} = 'processing'
+      AND ${documentExtractionJobs.leaseExpiresAt} > CURRENT_TIMESTAMP`,
+  }).from(documentExtractionJobs)
+    .where(eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID))
+    .limit(1);
+  if (!existing) return false;
+  if (existing.leaseActive) return true;
+  const seed = await getSeedMetadata().catch(() => null);
+  if (!seed) return false;
+  const runtime = runtimeIdentity();
+  const ageMs = now.getTime() - Date.parse(seed.seededAt);
+  return (
+    seed.commitSha.toLowerCase() === runtime.commitSha.toLowerCase() &&
+    seed.deploymentId === runtime.deploymentId &&
+    ageMs >= 0 &&
+    ageMs < RECLAIM_PENDING_AFTER_MS
+  );
+}
+
 /** Create one private, borrower-free 100-page tax upload and its durable job. */
 export async function prepareCoreTaxPacketCanary(
   now = new Date(),
   objectStorage: CoreTaxPacketObjectStore = new ObjectStorageService(),
 ): Promise<SeedMetadata> {
-  const runtime = runtimeIdentity();
-  const [existing] = await db.select({ status: documentExtractionJobs.status })
-    .from(documentExtractionJobs)
-    .where(eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID))
-    .limit(1);
-  if (existing && ["pending", "processing"].includes(existing.status)) {
-    throw new CoreTaxPacketCanaryError("proof_in_progress");
-  }
-  if (existing || (await fixtureObjectPaths()).length > 0) {
-    await cleanupCoreTaxPacketCanary(objectStorage);
-  } else {
-    await assertFixtureOwnership();
-    const [orphan] = await db.select({ id: users.id }).from(users)
-      .where(eq(users.id, CORE_TAX_PACKET_CANARY_USER_ID)).limit(1);
-    if (orphan) await cleanupCoreTaxPacketCanary(objectStorage);
-  }
+  return withLifecycleLock(async () => {
+    const runtime = runtimeIdentity();
+    await assertRerunAllowed(runtime.commitSha);
+    const [existing] = await db.select({ status: documentExtractionJobs.status })
+      .from(documentExtractionJobs)
+      .where(eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID))
+      .limit(1);
+    if (existing && await existingProofIsActive(now)) {
+      throw new CoreTaxPacketCanaryError("proof_in_progress");
+    }
+    if (existing || (await fixtureObjectPaths()).length > 0) {
+      await cleanupCoreTaxPacketCanaryUnlocked(objectStorage);
+    } else {
+      await assertFixtureOwnership();
+      const [orphan] = await db.select({ id: users.id }).from(users)
+        .where(eq(users.id, CORE_TAX_PACKET_CANARY_USER_ID)).limit(1);
+      if (orphan) await cleanupCoreTaxPacketCanaryUnlocked(objectStorage);
+    }
 
-  let objectPath: string | null = null;
-  try {
-    const pdf = await buildSyntheticTaxPacketPdf();
-    await db.insert(users).values({
-      id: CORE_TAX_PACKET_CANARY_USER_ID,
-      email: null,
-      passwordHash: null,
-      authProvider: CANARY_AUTH_PROVIDER,
-      firstName: "Core",
-      lastName: "Tax Packet Canary",
-      role: "aspiring_owner",
-    });
-    objectPath = await objectStorage.savePrivateDerivedObject(
-      pdf,
-      "application/pdf",
-      CORE_TAX_PACKET_CANARY_USER_ID,
-    );
-    const metadata: SeedMetadata = {
-      version: 1,
-      commitSha: runtime.commitSha,
-      deploymentId: runtime.deploymentId,
-      seededAt: now.toISOString(),
-    };
-    await db.transaction(async (transaction) => {
-      await transaction.insert(documents).values({
-        id: CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
-        userId: CORE_TAX_PACKET_CANARY_USER_ID,
-        documentType: "tax_return",
-        fileName: CORE_TAX_PACKET_CANARY_FILE_NAME,
-        fileSize: pdf.length,
-        mimeType: "application/pdf",
-        storagePath: objectPath!,
-        status: "uploaded",
+    let objectPath: string | null = null;
+    let userCreated = false;
+    try {
+      const pdf = await buildSyntheticTaxPacketPdf();
+      await db.insert(users).values({
+        id: CORE_TAX_PACKET_CANARY_USER_ID,
+        email: null,
+        passwordHash: null,
+        authProvider: CANARY_AUTH_PROVIDER,
+        firstName: "Core",
+        lastName: "Tax Packet Canary",
+        role: "aspiring_owner",
       });
-      await transaction.insert(borrowerConsents).values({
-        userId: CORE_TAX_PACKET_CANARY_USER_ID,
-        consentType: "tax_document_use",
-        consentGiven: true,
-        consentMethod: "operational_canary",
-        contentHash: "synthetic-tax-packet-canary-v1",
+      userCreated = true;
+      objectPath = await objectStorage.savePrivateDerivedObject(
+        pdf,
+        "application/pdf",
+        CORE_TAX_PACKET_CANARY_USER_ID,
+      );
+      const metadata: SeedMetadata = {
+        version: 1,
+        commitSha: runtime.commitSha,
+        deploymentId: runtime.deploymentId,
+        seededAt: now.toISOString(),
+      };
+      await db.transaction(async (transaction) => {
+        await transaction.insert(documents).values({
+          id: CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
+          userId: CORE_TAX_PACKET_CANARY_USER_ID,
+          documentType: "tax_return",
+          fileName: CORE_TAX_PACKET_CANARY_FILE_NAME,
+          fileSize: pdf.length,
+          mimeType: "application/pdf",
+          storagePath: objectPath!,
+          status: "uploaded",
+        });
+        await transaction.insert(borrowerConsents).values({
+          userId: CORE_TAX_PACKET_CANARY_USER_ID,
+          consentType: "tax_document_use",
+          consentGiven: true,
+          consentMethod: "operational_canary",
+          contentHash: "synthetic-tax-packet-canary-v1",
+        });
+        await transaction.insert(documentExtractionJobs).values({
+          id: CORE_TAX_PACKET_CANARY_JOB_ID,
+          documentId: CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
+          requestedByUserId: CORE_TAX_PACKET_CANARY_USER_ID,
+          mode: "tax_package",
+          status: "pending",
+          maxAttempts: 1,
+          availableAt: now,
+        });
+        await transaction.insert(auditLogs).values({
+          actorUserId: null,
+          action: SEEDED_ACTION,
+          targetType: "system",
+          targetId: CORE_TAX_PACKET_CANARY_JOB_ID,
+          metadata,
+        });
       });
-      await transaction.insert(documentExtractionJobs).values({
-        id: CORE_TAX_PACKET_CANARY_JOB_ID,
-        documentId: CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
-        requestedByUserId: CORE_TAX_PACKET_CANARY_USER_ID,
-        mode: "tax_package",
-        status: "pending",
-        maxAttempts: 1,
-        availableAt: now,
-      });
-      await transaction.insert(auditLogs).values({
-        actorUserId: null,
-        action: SEEDED_ACTION,
-        targetType: "system",
-        targetId: CORE_TAX_PACKET_CANARY_JOB_ID,
-        metadata,
-      });
-    });
-    return metadata;
-  } catch (error) {
-    if (objectPath) await objectStorage.deleteObjectEntity(objectPath).catch(() => undefined);
-    await db.delete(users).where(and(
-      eq(users.id, CORE_TAX_PACKET_CANARY_USER_ID),
-      eq(users.authProvider, CANARY_AUTH_PROVIDER),
-    )).catch(() => undefined);
-    throw error;
-  }
+      return metadata;
+    } catch (error) {
+      if (objectPath) await objectStorage.deleteObjectEntity(objectPath).catch(() => undefined);
+      if (userCreated) {
+        await db.delete(users).where(and(
+          eq(users.id, CORE_TAX_PACKET_CANARY_USER_ID),
+          eq(users.authProvider, CANARY_AUTH_PROVIDER),
+        )).catch(() => undefined);
+      }
+      throw error;
+    }
+  });
 }
 
 async function getSnapshot(): Promise<CoreTaxPacketCanarySnapshot> {

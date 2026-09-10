@@ -28,6 +28,7 @@ import {
   kickCoreTaxPacketCanaryWorker,
 } from "../services/documentExtractionJobs";
 import {
+  assertCoreTaxPacketCanaryExpectedCommit,
   CoreTaxPacketCanaryError,
   prepareCoreTaxPacketCanary,
 } from "../services/coreTaxPacketCanary";
@@ -267,8 +268,11 @@ export function registerJobRoutes(app: Express) {
 
   const taxPacketCanaryError = (error: unknown) => {
     if (error instanceof CoreTaxPacketCanaryError) {
+      const status = error.code === "proof_cooldown"
+        ? 429
+        : ["proof_in_progress", "release_mismatch"].includes(error.code) ? 409 : 503;
       return {
-        status: error.code === "proof_in_progress" ? 409 : 503,
+        status,
         body: { ok: false, phase: "verify", failureClass: error.code },
       };
     }
@@ -283,6 +287,11 @@ export function registerJobRoutes(app: Express) {
   // evidence lineage, durable completion, then complete fixture deletion.
   app.post("/api/jobs/core-tax-packet-canary", async (req, res) => {
     const run = async (triggeredByUserId: string | null) => {
+      const expectedCommitHeader = req.headers["x-homiquity-expected-commit"];
+      const expectedCommitSha = Array.isArray(expectedCommitHeader)
+        ? expectedCommitHeader[0]
+        : expectedCommitHeader;
+      assertCoreTaxPacketCanaryExpectedCommit(expectedCommitSha ?? "");
       const seed = await prepareCoreTaxPacketCanary();
       kickCoreTaxPacketCanaryWorker();
       const result = await runCoreTaxPacketCanaryVerification(triggeredByUserId);

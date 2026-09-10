@@ -32,10 +32,18 @@ beforeAll(async () => {
   process.env.RAILWAY_DEPLOYMENT_ID = "local-tax-canary-deployment";
   process.env.RAILWAY_GIT_COMMIT_SHA = "c".repeat(40);
   await cleanupCoreTaxPacketCanary(objectStore).catch(() => undefined);
+  await pool.query(
+    "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
+    ["c".repeat(40)],
+  );
 });
 
 afterAll(async () => {
   await cleanupCoreTaxPacketCanary(objectStore).catch(() => undefined);
+  await pool.query(
+    "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
+    ["c".repeat(40)],
+  );
   if (oldDeployment === undefined) delete process.env.RAILWAY_DEPLOYMENT_ID;
   else process.env.RAILWAY_DEPLOYMENT_ID = oldDeployment;
   if (oldCommit === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
@@ -44,6 +52,90 @@ afterAll(async () => {
 });
 
 describe.sequential("core tax packet canary fixture lifecycle", () => {
+  it("serializes concurrent seed requests across database clients", async () => {
+    const seededAt = new Date();
+    let releaseSave!: () => void;
+    let markSaveStarted!: () => void;
+    const saveStarted = new Promise<void>((resolve) => { markSaveStarted = resolve; });
+    const saveReleased = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const blockingStore = {
+      ...objectStore,
+      async savePrivateDerivedObject(): Promise<string> {
+        markSaveStarted();
+        await saveReleased;
+        return sourcePath;
+      },
+    };
+
+    const first = prepareCoreTaxPacketCanary(seededAt, blockingStore);
+    await saveStarted;
+    const duplicate = prepareCoreTaxPacketCanary(
+      new Date(seededAt.getTime() + 1_000),
+      objectStore,
+    );
+    releaseSave();
+
+    await first;
+    await expect(duplicate).rejects.toMatchObject({ code: "proof_in_progress" });
+    await cleanupCoreTaxPacketCanary(objectStore);
+  });
+
+  it("blocks a live duplicate and safely reclaims a stale pending proof", async () => {
+    const seededAt = new Date("2026-09-10T03:00:00.000Z");
+    await prepareCoreTaxPacketCanary(seededAt, objectStore);
+
+    await expect(prepareCoreTaxPacketCanary(
+      new Date(seededAt.getTime() + 60_000),
+      objectStore,
+    )).rejects.toMatchObject({ code: "proof_in_progress" });
+
+    const recovered = await prepareCoreTaxPacketCanary(
+      new Date(seededAt.getTime() + 3 * 60_000),
+      objectStore,
+    );
+    expect(recovered.seededAt).toBe("2026-09-10T03:03:00.000Z");
+    await cleanupCoreTaxPacketCanary(objectStore);
+  });
+
+  it("does not reclaim a processing proof with an active worker lease", async () => {
+    const now = new Date();
+    const seededAt = new Date(now.getTime() - 3 * 60_000);
+    await prepareCoreTaxPacketCanary(seededAt, objectStore);
+    await pool.query(
+      `UPDATE document_extraction_jobs
+          SET status='processing', lease_expires_at=CURRENT_TIMESTAMP + interval '10 minutes',
+              claimed_by='tax-canary-test-worker'
+        WHERE id=$1`,
+      [CORE_TAX_PACKET_CANARY_JOB_ID],
+    );
+
+    await expect(prepareCoreTaxPacketCanary(
+      now,
+      objectStore,
+    )).rejects.toMatchObject({ code: "proof_in_progress" });
+    await cleanupCoreTaxPacketCanary(objectStore);
+  });
+
+  it("applies a per-commit cooldown after a paid proof attempt", async () => {
+    const now = new Date();
+    await pool.query(
+      `INSERT INTO core_provider_canary_runs
+        (capability_id,provider,operation,environment,status,latency_ms,commit_sha,completed_at)
+       VALUES ('document_extraction','Anthropic Claude vision','synthetic_tax_packet_pipeline',
+               'non_production','success',1000,$1,CURRENT_TIMESTAMP)`,
+      ["c".repeat(40)],
+    );
+
+    await expect(prepareCoreTaxPacketCanary(
+      new Date(now.getTime() + 60_000),
+      objectStore,
+    )).rejects.toMatchObject({ code: "proof_cooldown" });
+    await pool.query(
+      "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
+      ["c".repeat(40)],
+    );
+  });
+
   it("creates the fixed private job and deletes its complete evidence graph", async () => {
     const seededAt = new Date("2026-09-10T03:00:00.000Z");
     await prepareCoreTaxPacketCanary(seededAt, objectStore);

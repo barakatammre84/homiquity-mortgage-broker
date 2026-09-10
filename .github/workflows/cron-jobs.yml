@@ -100,6 +100,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           JOB: ${{ steps.resolve.outputs.job }}
           METHOD: ${{ steps.resolve.outputs.method }}
+          EXPECTED_COMMIT: ${{ github.sha }}
           # The RAILWAY service domain, deliberately NOT www.homiquity.com.
           #
           # This call is machine-to-machine — no human ever sees it — so there is
@@ -134,6 +135,7 @@ jobs:
               -X "${METHOD}" \
               -H "Origin: ${SWEEP_HOST}" \
               -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "X-Homiquity-Expected-Commit: ${EXPECTED_COMMIT}" \
               "${SWEEP_HOST}/api/jobs/${JOB}")"
             curl_status=$?
             set -e

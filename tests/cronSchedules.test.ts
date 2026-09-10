@@ -116,7 +116,10 @@ describe("cron-jobs.yml schedules", () => {
       jobs.indexOf("// Borrower-data-free proof that the five core paths"),
     );
     expect(routes).toContain("kickCoreTaxPacketCanaryWorker()");
+    expect(routes).toContain("assertCoreTaxPacketCanaryExpectedCommit");
     expect(routes).not.toContain("kickDocumentExtractionWorker()");
+    expect(workflow).toContain('EXPECTED_COMMIT: ${{ github.sha }}');
+    expect(workflow).toContain('-H "X-Homiquity-Expected-Commit: ${EXPECTED_COMMIT}"');
   });
 
   it("prints only redacted provider diagnostics before failing a canary sweep", () => {

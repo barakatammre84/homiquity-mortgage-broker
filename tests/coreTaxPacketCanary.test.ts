@@ -11,6 +11,7 @@ import {
   CORE_TAX_PACKET_CANARY_JOB_ID,
   CORE_TAX_PACKET_CANARY_USER_ID,
   CoreTaxPacketCanaryError,
+  assertCoreTaxPacketCanaryExpectedCommit,
   isCoreTaxPacketCanaryJob,
   type CoreTaxPacketCanarySnapshot,
   validateCoreTaxPacketCanarySnapshot,
@@ -46,6 +47,25 @@ const validSnapshot = (): CoreTaxPacketCanarySnapshot => ({
 });
 
 describe("core 100-page tax packet canary", () => {
+  it("binds the release proof to the exact deployed commit", () => {
+    const originalCommit = process.env.RAILWAY_GIT_COMMIT_SHA;
+    const originalDeployment = process.env.RAILWAY_DEPLOYMENT_ID;
+    process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+    process.env.RAILWAY_DEPLOYMENT_ID = "tax-canary-test-deployment";
+    try {
+      expect(() => assertCoreTaxPacketCanaryExpectedCommit("A".repeat(40))).not.toThrow();
+      expect(() => assertCoreTaxPacketCanaryExpectedCommit("b".repeat(40)))
+        .toThrowError("release_mismatch");
+      expect(() => assertCoreTaxPacketCanaryExpectedCommit("not-a-commit"))
+        .toThrowError("release_mismatch");
+    } finally {
+      if (originalCommit === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+      else process.env.RAILWAY_GIT_COMMIT_SHA = originalCommit;
+      if (originalDeployment === undefined) delete process.env.RAILWAY_DEPLOYMENT_ID;
+      else process.env.RAILWAY_DEPLOYMENT_ID = originalDeployment;
+    }
+  });
+
   it("builds a bounded 100-page borrower-free PDF", async () => {
     const bytes = await buildSyntheticTaxPacketPdf();
     expect(bytes.length).toBeGreaterThan(10_000);
