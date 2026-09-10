@@ -207,8 +207,8 @@ describe("production extraction restart proof", () => {
       source.indexOf("async function drainCoreExtractionRestartJob"),
       source.indexOf("export function kickCoreExtractionRestartWorker"),
     );
-    expect(ordinary).toContain("await claimNextJob()");
-    expect(proof).toContain('await claimNextJob(new Date(), "only")');
+    expect(ordinary).toContain("await claimNextDocumentExtractionJobForLane(lane)");
+    expect(proof).toContain('await claimNextJob(new Date(), "only", "ordinary")');
     expect(proof).toContain("await processClaimedJob(job)");
   });
 });
