@@ -44,6 +44,9 @@ import {
 } from "./coreExtractionRestartProof";
 import {
   CORE_TAX_PACKET_CANARY_JOB_ID,
+  CoreTaxPacketCanaryError,
+  assertCoreTaxPacketCanaryRuntimeIdentity,
+  isCoreTaxPacketCanaryJob,
 } from "./coreTaxPacketCanary";
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
@@ -749,6 +752,9 @@ export function failureFromUnknown(error: unknown): ExtractionFailure {
   if (error instanceof CoreExtractionRestartProofError) {
     return { code: `core_restart_${error.code}`, retryable: false };
   }
+  if (error instanceof CoreTaxPacketCanaryError) {
+    return { code: `core_tax_packet_${error.code}`, retryable: false };
+  }
   if (
     error &&
     typeof error === "object" &&
@@ -792,6 +798,9 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
   }, documentExtractionHeartbeatMs(job));
   heartbeat.unref();
   try {
+    if (isCoreTaxPacketCanaryJob(job)) {
+      await assertCoreTaxPacketCanaryRuntimeIdentity();
+    }
     const outcome = await executeJob(job, claimFence);
     if (outcome === "cancelled" || outcome === "cancelled_consent") {
       await cancelJob(

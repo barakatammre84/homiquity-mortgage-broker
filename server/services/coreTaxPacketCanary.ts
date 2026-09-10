@@ -2,7 +2,6 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   auditLogs,
   borrowerConsents,
-  coreProviderCanaryRuns,
   documentExtractionJobs,
   documents,
   users,
@@ -23,12 +22,12 @@ export const CORE_TAX_PACKET_CANARY_FILE_NAME = "core-tax-packet-canary.pdf";
 
 const CANARY_AUTH_PROVIDER = "operational_canary";
 const SEEDED_ACTION = "core.tax_packet_canary_seeded";
+export const CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION = "core.tax_packet_canary_triggered";
 const PROOF_TIMEOUT_MS = 105_000;
 const POLL_MS = 1_000;
 const RECLAIM_PENDING_AFTER_MS = 2 * 60 * 1_000;
 const RERUN_COOLDOWN_MS = 15 * 60 * 1_000;
 const LIFECYCLE_LOCK_KEY = "core-tax-packet-canary:lifecycle:v1";
-const CANARY_OPERATION = "synthetic_tax_packet_pipeline";
 
 export type CoreTaxPacketCanaryFailure =
   | "runtime_identity_missing"
@@ -132,16 +131,34 @@ export function assertCoreTaxPacketCanaryExpectedCommit(expectedCommitSha: strin
 async function withLifecycleLock<T>(run: () => Promise<T>): Promise<T> {
   const client = await pool.connect();
   let locked = false;
+  let releaseWithError = false;
   try {
-    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [LIFECYCLE_LOCK_KEY]);
-    locked = true;
+    let lock;
+    try {
+      lock = await client.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+        [LIFECYCLE_LOCK_KEY],
+      );
+    } catch (error) {
+      releaseWithError = true;
+      throw error;
+    }
+    locked = lock.rows[0]?.locked === true;
+    if (!locked) throw new CoreTaxPacketCanaryError("proof_in_progress");
     return await run();
   } finally {
     if (locked) {
-      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [LIFECYCLE_LOCK_KEY])
-        .catch(() => undefined);
+      try {
+        const unlock = await client.query<{ unlocked: boolean }>(
+          "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS unlocked",
+          [LIFECYCLE_LOCK_KEY],
+        );
+        releaseWithError = unlock.rows[0]?.unlocked !== true;
+      } catch {
+        releaseWithError = true;
+      }
     }
-    client.release();
+    client.release(releaseWithError);
   }
 }
 
@@ -167,6 +184,18 @@ export function isCoreTaxPacketCanaryJob(
     job.requestedByUserId === CORE_TAX_PACKET_CANARY_USER_ID &&
     job.mode === "tax_package"
   );
+}
+
+/** Prevent a fixed proof job from crossing a deployment boundary before provider use. */
+export async function assertCoreTaxPacketCanaryRuntimeIdentity(): Promise<void> {
+  const runtime = runtimeIdentity();
+  const seed = await getSeedMetadata();
+  if (
+    seed.commitSha.toLowerCase() !== runtime.commitSha.toLowerCase() ||
+    seed.deploymentId !== runtime.deploymentId
+  ) {
+    throw new CoreTaxPacketCanaryError("release_mismatch");
+  }
 }
 
 async function getSeedMetadata(): Promise<SeedMetadata> {
@@ -230,6 +259,14 @@ async function cleanupCoreTaxPacketCanaryUnlocked(
   await assertFixtureOwnership();
   const objectPaths = await fixtureObjectPaths();
   await db.transaction(async (transaction) => {
+    // Workers lock this row before the tax-consent lock. Cleanup must keep the
+    // same order so a verifier and a finishing worker cannot deadlock.
+    await transaction.execute(sql`
+      SELECT id
+        FROM document_extraction_jobs
+       WHERE id = ${CORE_TAX_PACKET_CANARY_JOB_ID}
+       FOR UPDATE
+    `);
     // Cleanup is mutually exclusive with every provider use for this fixed
     // identity. Once the transaction commits, later provider calls observe no
     // active consent and stale workers cannot repopulate the evidence graph.
@@ -318,8 +355,11 @@ async function cleanupCoreTaxPacketCanaryUnlocked(
     `);
     await transaction.execute(sql`
       DELETE FROM audit_logs
-       WHERE target_id IN (${CORE_TAX_PACKET_CANARY_JOB_ID}, ${CORE_TAX_PACKET_CANARY_DOCUMENT_ID})
-          OR actor_user_id = ${CORE_TAX_PACKET_CANARY_USER_ID}
+       WHERE action <> ${CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION}
+         AND (
+           target_id IN (${CORE_TAX_PACKET_CANARY_JOB_ID}, ${CORE_TAX_PACKET_CANARY_DOCUMENT_ID})
+           OR actor_user_id = ${CORE_TAX_PACKET_CANARY_USER_ID}
+         )
     `);
     await transaction.execute(sql`
       DELETE FROM document_extraction_jobs WHERE id = ${CORE_TAX_PACKET_CANARY_JOB_ID}
@@ -341,14 +381,15 @@ export async function cleanupCoreTaxPacketCanary(
   return withLifecycleLock(() => cleanupCoreTaxPacketCanaryUnlocked(objectStorage));
 }
 
-async function assertRerunAllowed(runtimeCommitSha: string): Promise<void> {
-  const [recent] = await db.select({ id: coreProviderCanaryRuns.id })
-    .from(coreProviderCanaryRuns)
+async function assertRerunAllowed(runtimeCommitSha: string, now: Date): Promise<void> {
+  const [recent] = await db.select({ id: auditLogs.id })
+    .from(auditLogs)
     .where(and(
-      eq(coreProviderCanaryRuns.operation, CANARY_OPERATION),
-      eq(coreProviderCanaryRuns.commitSha, runtimeCommitSha),
-      sql`${coreProviderCanaryRuns.completedAt} > CURRENT_TIMESTAMP
-        - (${RERUN_COOLDOWN_MS} * interval '1 millisecond')`,
+      eq(auditLogs.action, CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION),
+      sql`${auditLogs.metadata}->>'commitSha' = ${runtimeCommitSha}`,
+      // Seed timestamps are normalized ISO strings, so this comparison is
+      // deterministic across databases configured with different time zones.
+      sql`${auditLogs.metadata}->>'seededAt' > ${new Date(now.getTime() - RERUN_COOLDOWN_MS).toISOString()}`,
     ))
     .limit(1);
   if (recent) throw new CoreTaxPacketCanaryError("proof_cooldown");
@@ -383,7 +424,6 @@ export async function prepareCoreTaxPacketCanary(
 ): Promise<SeedMetadata> {
   return withLifecycleLock(async () => {
     const runtime = runtimeIdentity();
-    await assertRerunAllowed(runtime.commitSha);
     const [existing] = await db.select({ status: documentExtractionJobs.status })
       .from(documentExtractionJobs)
       .where(eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID))
@@ -391,6 +431,7 @@ export async function prepareCoreTaxPacketCanary(
     if (existing && await existingProofIsActive(now)) {
       throw new CoreTaxPacketCanaryError("proof_in_progress");
     }
+    await assertRerunAllowed(runtime.commitSha, now);
     if (existing || (await fixtureObjectPaths()).length > 0) {
       await cleanupCoreTaxPacketCanaryUnlocked(objectStorage);
     } else {
@@ -458,6 +499,18 @@ export async function prepareCoreTaxPacketCanary(
           targetType: "system",
           targetId: CORE_TAX_PACKET_CANARY_JOB_ID,
           metadata,
+          createdAt: now,
+        });
+        // This reservation commits before the dedicated worker is kicked, so
+        // cleanup cannot open a duplicate paid-run window before the provider
+        // canary result ledger is written.
+        await transaction.insert(auditLogs).values({
+          actorUserId: null,
+          action: CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION,
+          targetType: "system",
+          targetId: CORE_TAX_PACKET_CANARY_JOB_ID,
+          metadata,
+          createdAt: now,
         });
       });
       return metadata;

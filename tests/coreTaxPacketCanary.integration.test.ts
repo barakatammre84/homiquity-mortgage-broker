@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import {
   CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
   CORE_TAX_PACKET_CANARY_JOB_ID,
+  CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION,
   CORE_TAX_PACKET_CANARY_USER_ID,
+  assertCoreTaxPacketCanaryRuntimeIdentity,
   cleanupCoreTaxPacketCanary,
   prepareCoreTaxPacketCanary,
 } from "../server/services/coreTaxPacketCanary";
@@ -24,6 +26,13 @@ const objectStore = {
   },
 };
 
+async function deleteTriggerReservations(): Promise<void> {
+  await pool.query(
+    "DELETE FROM audit_logs WHERE action=$1",
+    [CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION],
+  );
+}
+
 beforeAll(async () => {
   const url = new URL(process.env.DATABASE_URL!);
   if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
@@ -32,18 +41,18 @@ beforeAll(async () => {
   process.env.RAILWAY_DEPLOYMENT_ID = "local-tax-canary-deployment";
   process.env.RAILWAY_GIT_COMMIT_SHA = "c".repeat(40);
   await cleanupCoreTaxPacketCanary(objectStore).catch(() => undefined);
-  await pool.query(
-    "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
-    ["c".repeat(40)],
-  );
+  await deleteTriggerReservations();
+});
+
+beforeEach(async () => {
+  await cleanupCoreTaxPacketCanary(objectStore).catch(() => undefined);
+  await deleteTriggerReservations();
+  deletedPaths.length = 0;
 });
 
 afterAll(async () => {
   await cleanupCoreTaxPacketCanary(objectStore).catch(() => undefined);
-  await pool.query(
-    "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
-    ["c".repeat(40)],
-  );
+  await deleteTriggerReservations();
   if (oldDeployment === undefined) delete process.env.RAILWAY_DEPLOYMENT_ID;
   else process.env.RAILWAY_DEPLOYMENT_ID = oldDeployment;
   if (oldCommit === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
@@ -69,19 +78,19 @@ describe.sequential("core tax packet canary fixture lifecycle", () => {
 
     const first = prepareCoreTaxPacketCanary(seededAt, blockingStore);
     await saveStarted;
-    const duplicate = prepareCoreTaxPacketCanary(
+    const duplicate = expect(prepareCoreTaxPacketCanary(
       new Date(seededAt.getTime() + 1_000),
       objectStore,
-    );
+    )).rejects.toMatchObject({ code: "proof_in_progress" });
+    await duplicate;
     releaseSave();
 
     await first;
-    await expect(duplicate).rejects.toMatchObject({ code: "proof_in_progress" });
     await cleanupCoreTaxPacketCanary(objectStore);
   });
 
   it("blocks a live duplicate and safely reclaims a stale pending proof", async () => {
-    const seededAt = new Date("2026-09-10T03:00:00.000Z");
+    const seededAt = new Date();
     await prepareCoreTaxPacketCanary(seededAt, objectStore);
 
     await expect(prepareCoreTaxPacketCanary(
@@ -89,11 +98,16 @@ describe.sequential("core tax packet canary fixture lifecycle", () => {
       objectStore,
     )).rejects.toMatchObject({ code: "proof_in_progress" });
 
-    const recovered = await prepareCoreTaxPacketCanary(
+    await expect(prepareCoreTaxPacketCanary(
       new Date(seededAt.getTime() + 3 * 60_000),
       objectStore,
+    )).rejects.toMatchObject({ code: "proof_cooldown" });
+
+    const recovered = await prepareCoreTaxPacketCanary(
+      new Date(seededAt.getTime() + 16 * 60_000),
+      objectStore,
     );
-    expect(recovered.seededAt).toBe("2026-09-10T03:03:00.000Z");
+    expect(recovered.seededAt).toBe(new Date(seededAt.getTime() + 16 * 60_000).toISOString());
     await cleanupCoreTaxPacketCanary(objectStore);
   });
 
@@ -119,21 +133,32 @@ describe.sequential("core tax packet canary fixture lifecycle", () => {
   it("applies a per-commit cooldown after a paid proof attempt", async () => {
     const now = new Date();
     await pool.query(
-      `INSERT INTO core_provider_canary_runs
-        (capability_id,provider,operation,environment,status,latency_ms,commit_sha,completed_at)
-       VALUES ('document_extraction','Anthropic Claude vision','synthetic_tax_packet_pipeline',
-               'non_production','success',1000,$1,CURRENT_TIMESTAMP)`,
-      ["c".repeat(40)],
+      `INSERT INTO audit_logs (action,target_type,target_id,metadata,created_at)
+       VALUES ($1,'system',$2,jsonb_build_object('commitSha',$3::text,'seededAt',$4::text),CURRENT_TIMESTAMP)`,
+      [
+        CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION,
+        CORE_TAX_PACKET_CANARY_JOB_ID,
+        "c".repeat(40),
+        now.toISOString(),
+      ],
     );
 
     await expect(prepareCoreTaxPacketCanary(
       new Date(now.getTime() + 60_000),
       objectStore,
     )).rejects.toMatchObject({ code: "proof_cooldown" });
-    await pool.query(
-      "DELETE FROM core_provider_canary_runs WHERE operation='synthetic_tax_packet_pipeline' AND commit_sha=$1",
-      ["c".repeat(40)],
-    );
+    await deleteTriggerReservations();
+  });
+
+  it("rejects a canary job when the deployment changes before provider use", async () => {
+    await prepareCoreTaxPacketCanary(new Date(), objectStore);
+    try {
+      process.env.RAILWAY_DEPLOYMENT_ID = "different-tax-canary-deployment";
+      await expect(assertCoreTaxPacketCanaryRuntimeIdentity())
+        .rejects.toMatchObject({ code: "release_mismatch" });
+    } finally {
+      process.env.RAILWAY_DEPLOYMENT_ID = "local-tax-canary-deployment";
+    }
   });
 
   it("creates the fixed private job and deletes its complete evidence graph", async () => {
@@ -149,15 +174,25 @@ describe.sequential("core tax packet canary fixture lifecycle", () => {
         (SELECT count(*)::int FROM borrower_consents
           WHERE user_id=$1 AND consent_type='tax_document_use' AND consent_given=true) consents,
         (SELECT count(*)::int FROM audit_logs
-          WHERE target_id=$3 AND action='core.tax_packet_canary_seeded') seeds`,
+          WHERE target_id=$3 AND action='core.tax_packet_canary_seeded') seeds,
+        (SELECT count(*)::int FROM audit_logs
+          WHERE target_id=$3 AND action=$5) reservations`,
       [
         CORE_TAX_PACKET_CANARY_USER_ID,
         CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
         CORE_TAX_PACKET_CANARY_JOB_ID,
         sourcePath,
+        CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION,
       ],
     );
-    expect(created.rows[0]).toEqual({ users: 1, documents: 1, jobs: 1, consents: 1, seeds: 1 });
+    expect(created.rows[0]).toEqual({
+      users: 1,
+      documents: 1,
+      jobs: 1,
+      consents: 1,
+      seeds: 1,
+      reservations: 1,
+    });
 
     const runId = randomUUID();
     const uploadId = randomUUID();
@@ -271,9 +306,33 @@ describe.sequential("core tax packet canary fixture lifecycle", () => {
         (SELECT count(*)::int FROM situation_profiles WHERE user_id=$1) profiles,
         (SELECT count(*)::int FROM borrower_business_entities WHERE user_id=$1) businesses,
         (SELECT count(*)::int FROM readiness_checklist WHERE user_id=$1) readiness,
-        (SELECT count(*)::int FROM audit_logs WHERE target_id IN ($2,$3)) audit`,
-      [CORE_TAX_PACKET_CANARY_USER_ID, CORE_TAX_PACKET_CANARY_DOCUMENT_ID, CORE_TAX_PACKET_CANARY_JOB_ID],
+        (SELECT count(*)::int FROM audit_logs
+          WHERE target_id IN ($2,$3) AND action<>$4) audit,
+        (SELECT count(*)::int FROM audit_logs WHERE target_id=$3 AND action=$4) reservations`,
+      [
+        CORE_TAX_PACKET_CANARY_USER_ID,
+        CORE_TAX_PACKET_CANARY_DOCUMENT_ID,
+        CORE_TAX_PACKET_CANARY_JOB_ID,
+        CORE_TAX_PACKET_CANARY_TRIGGERED_ACTION,
+      ],
     );
-    expect(Object.values(remaining.rows[0])).toEqual(Array(15).fill(0));
+    expect(remaining.rows[0]).toEqual({
+      users: 0,
+      documents: 0,
+      jobs: 0,
+      consents: 0,
+      runs: 0,
+      uploads: 0,
+      logical_documents: 0,
+      facts: 0,
+      confidence: 0,
+      insights: 0,
+      reviews: 0,
+      profiles: 0,
+      businesses: 0,
+      readiness: 0,
+      audit: 0,
+      reservations: 1,
+    });
   });
 });

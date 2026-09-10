@@ -12,6 +12,7 @@ import {
   hasActionableExtractionWarning,
 } from "../server/services/documentExtractionOutcome";
 import { CoreExtractionRestartProofError } from "../server/services/coreExtractionRestartProof";
+import { CoreTaxPacketCanaryError } from "../server/services/coreTaxPacketCanary";
 
 describe("durable document extraction job policy", () => {
   it("queues the borrower document types with a supported extractor", () => {
@@ -97,6 +98,12 @@ describe("durable document extraction job policy", () => {
       new CoreExtractionRestartProofError("invariant_failed"),
     )).toEqual({
       code: "core_restart_invariant_failed",
+      retryable: false,
+    });
+    expect(failureFromUnknown(
+      new CoreTaxPacketCanaryError("release_mismatch"),
+    )).toEqual({
+      code: "core_tax_packet_release_mismatch",
       retryable: false,
     });
   });
