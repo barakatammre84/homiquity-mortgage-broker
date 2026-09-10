@@ -55,6 +55,7 @@ on:
           - core-storage-restart-verify
           - core-extraction-restart-seed
           - core-extraction-restart-verify
+          - core-tax-packet-canary
 
 permissions:
   contents: none
@@ -89,7 +90,7 @@ jobs:
             esac
           fi
           case "$job" in
-            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify) method="POST" ;;
+            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary) method="POST" ;;
             *) method="GET" ;;
           esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
@@ -99,6 +100,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           JOB: ${{ steps.resolve.outputs.job }}
           METHOD: ${{ steps.resolve.outputs.method }}
+          EXPECTED_COMMIT: ${{ github.sha }}
           # The RAILWAY service domain, deliberately NOT www.homiquity.com.
           #
           # This call is machine-to-machine — no human ever sees it — so there is
@@ -125,7 +127,7 @@ jobs:
           # fail after printing the diagnosis. Retrying a timed-out POST could
           # duplicate provider calls and ledger rows.
           case "$JOB" in
-          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify)
+          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary)
             response_file="$(mktemp)"
             set +e
             http_status="$(curl -sS --max-time 120 \
@@ -133,6 +135,7 @@ jobs:
               -X "${METHOD}" \
               -H "Origin: ${SWEEP_HOST}" \
               -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "X-Homiquity-Expected-Commit: ${EXPECTED_COMMIT}" \
               "${SWEEP_HOST}/api/jobs/${JOB}")"
             curl_status=$?
             set -e
@@ -177,6 +180,11 @@ jobs:
             attemptCount: body.attemptCount ?? null,
             factRows: body.factRows ?? null,
             pageRows: body.pageRows ?? null,
+            pageCount: body.pageCount ?? null,
+            formCount: body.formCount ?? null,
+            exactFactRows: body.exactFactRows ?? null,
+            groundedFactRows: body.groundedFactRows ?? null,
+            durationMs: body.durationMs ?? null,
             cleanedUp: body.cleanedUp ?? null,
             reused: body.reused ?? null,
             failureClass: body.failureClass ?? body.canary?.failureClass ?? null,

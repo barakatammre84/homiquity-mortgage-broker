@@ -16,13 +16,22 @@ import {
   runCoreExtractionRestartVerification,
   runCoreProviderCanarySweep,
   runCoreStorageRestartVerification,
+  runCoreTaxPacketCanaryVerification,
 } from "../services/coreProviderCanaries";
 import {
   CoreExtractionRestartProofError,
   prepareCoreExtractionRestartProof,
   waitForCoreExtractionRestartProviderReady,
 } from "../services/coreExtractionRestartProof";
-import { kickCoreExtractionRestartWorker } from "../services/documentExtractionJobs";
+import {
+  kickCoreExtractionRestartWorker,
+  kickCoreTaxPacketCanaryWorker,
+} from "../services/documentExtractionJobs";
+import {
+  assertCoreTaxPacketCanaryExpectedCommit,
+  CoreTaxPacketCanaryError,
+  prepareCoreTaxPacketCanary,
+} from "../services/coreTaxPacketCanary";
 import {
   ObjectStorageService,
   PrivateStorageRestartProofError,
@@ -252,6 +261,84 @@ export function registerJobRoutes(app: Express) {
         return res.status(result.ok ? 200 : 503).json(result);
       } catch (error) {
         const safe = extractionRestartProofError(error, "verify");
+        return res.status(safe.status).json(safe.body);
+      }
+    });
+  });
+
+  const taxPacketCanaryError = (error: unknown) => {
+    if (error instanceof CoreTaxPacketCanaryError) {
+      const status = error.code === "proof_cooldown"
+        ? 429
+        : ["proof_in_progress", "release_mismatch"].includes(error.code) ? 409 : 503;
+      return {
+        status,
+        body: { ok: false, phase: "verify", failureClass: error.code },
+      };
+    }
+    return {
+      status: 500,
+      body: { ok: false, phase: "verify", failureClass: "unknown" },
+    };
+  };
+
+  // Borrower-free, paid production proof for the entire complex-return path:
+  // 100 private pages, provider classification and extraction, exact facts,
+  // evidence lineage, durable completion, then complete fixture deletion.
+  app.post("/api/jobs/core-tax-packet-canary", async (req, res) => {
+    const run = async (triggeredByUserId: string | null) => {
+      const expectedCommitHeader = req.headers["x-homiquity-expected-commit"];
+      const expectedCommitSha = Array.isArray(expectedCommitHeader)
+        ? expectedCommitHeader[0]
+        : expectedCommitHeader;
+      assertCoreTaxPacketCanaryExpectedCommit(expectedCommitSha ?? "");
+      const seed = await prepareCoreTaxPacketCanary();
+      kickCoreTaxPacketCanaryWorker();
+      const result = await runCoreTaxPacketCanaryVerification(triggeredByUserId);
+      return {
+        ok: result.canary.status === "success",
+        phase: "verify" as const,
+        status: result.proof?.status ?? "failed",
+        currentCommitSha: result.proof?.commitSha ?? result.canary.commitSha ?? seed.commitSha,
+        seededAt: result.proof?.seededAt ?? seed.seededAt,
+        completedAt: result.proof?.completedAt ?? null,
+        durationMs: result.proof?.durationMs ?? null,
+        pageCount: result.proof?.pageCount ?? null,
+        formCount: result.proof?.formCount ?? null,
+        factRows: result.proof?.factRows ?? null,
+        exactFactRows: result.proof?.exactFactRows ?? null,
+        groundedFactRows: result.proof?.groundedFactRows ?? null,
+        cleanedUp: result.proof?.cleanedUp ?? false,
+        canary: result.canary,
+      };
+    };
+    if (isCronRequest(req)) {
+      try {
+        const result = await run(null);
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = taxPacketCanaryError(error);
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await run(user.id);
+        await logAudit(req, "jobs.core_tax_packet_canary", "system", "document_extraction", {
+          status: result.status,
+          currentCommitSha: result.currentCommitSha,
+          durationMs: result.durationMs,
+          pageCount: result.pageCount,
+          formCount: result.formCount,
+          factRows: result.factRows,
+          exactFactRows: result.exactFactRows,
+          groundedFactRows: result.groundedFactRows,
+          cleanedUp: result.cleanedUp,
+        });
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = taxPacketCanaryError(error);
         return res.status(safe.status).json(safe.body);
       }
     });

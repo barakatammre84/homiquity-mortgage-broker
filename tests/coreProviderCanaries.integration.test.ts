@@ -122,6 +122,33 @@ describe.sequential("core provider canary ledger", () => {
     });
   });
 
+  it("retains the complete tax-packet proof with its dedicated operation", async () => {
+    const { runCoreTaxPacketCanaryVerification } = await import("../server/services/coreProviderCanaries");
+    const proof = {
+      status: "verified" as const,
+      commitSha: "c".repeat(40),
+      deploymentId: "local-tax-canary-deployment",
+      seededAt: "2026-09-10T03:00:00.000Z",
+      completedAt: "2026-09-10T03:00:40.000Z",
+      durationMs: 40_000,
+      pageCount: 100,
+      formCount: 4,
+      factRows: 24,
+      exactFactRows: 8,
+      groundedFactRows: 24,
+      cleanedUp: true as const,
+    };
+    const result = await runCoreTaxPacketCanaryVerification(userId, async () => proof);
+
+    expect(result.proof).toEqual(proof);
+    expect(result.canary).toMatchObject({
+      capabilityId: "document_extraction",
+      provider: "Anthropic Claude vision",
+      operation: "synthetic_tax_packet_pipeline",
+      status: "success",
+    });
+  });
+
   it("executes the real mixed-income and underwriting engines with repeatable results", async () => {
     const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
     const financial = await runCoreProviderCanary("financial_analysis", userId);

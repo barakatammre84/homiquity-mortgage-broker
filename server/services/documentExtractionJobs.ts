@@ -42,6 +42,12 @@ import {
   isCoreExtractionRestartJob,
   recordCoreExtractionRestartProviderReady,
 } from "./coreExtractionRestartProof";
+import {
+  CORE_TAX_PACKET_CANARY_JOB_ID,
+  CoreTaxPacketCanaryError,
+  assertCoreTaxPacketCanaryRuntimeIdentity,
+  isCoreTaxPacketCanaryJob,
+} from "./coreTaxPacketCanary";
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
   "pay_stub",
@@ -260,7 +266,7 @@ export function nextFailureTransition(input: {
 
 async function claimNextJob(
   now = new Date(),
-  proofJob: "exclude" | "only" = "exclude",
+  proofJob: "exclude" | "only" | "tax_canary" = "exclude",
   lane: DocumentExtractionWorkerLane = "ordinary",
 ): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
@@ -270,7 +276,12 @@ async function claimNextJob(
       .where(and(
         proofJob === "only"
           ? eq(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID)
-          : ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
+          : proofJob === "tax_canary"
+            ? eq(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID)
+            : and(
+                ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
+                ne(documentExtractionJobs.id, CORE_TAX_PACKET_CANARY_JOB_ID),
+              ),
         lane === "tax_package"
           ? eq(documentExtractionJobs.mode, "tax_package")
           : ne(documentExtractionJobs.mode, "tax_package"),
@@ -741,6 +752,9 @@ export function failureFromUnknown(error: unknown): ExtractionFailure {
   if (error instanceof CoreExtractionRestartProofError) {
     return { code: `core_restart_${error.code}`, retryable: false };
   }
+  if (error instanceof CoreTaxPacketCanaryError) {
+    return { code: `core_tax_packet_${error.code}`, retryable: false };
+  }
   if (
     error &&
     typeof error === "object" &&
@@ -784,6 +798,9 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
   }, documentExtractionHeartbeatMs(job));
   heartbeat.unref();
   try {
+    if (isCoreTaxPacketCanaryJob(job)) {
+      await assertCoreTaxPacketCanaryRuntimeIdentity();
+    }
     const outcome = await executeJob(job, claimFence);
     if (outcome === "cancelled" || outcome === "cancelled_consent") {
       await cancelJob(
@@ -811,6 +828,7 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
 let ordinaryWorkerRunning: Promise<void> | null = null;
 let taxPackageWorkerRunning: Promise<void> | null = null;
 let coreRestartWorkerRunning: Promise<void> | null = null;
+let coreTaxPacketCanaryWorkerRunning: Promise<void> | null = null;
 let workerStarted = false;
 let pollTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
@@ -874,6 +892,24 @@ export function kickCoreExtractionRestartWorker(): void {
     .catch((error) => console.error("[DocumentExtraction] Core restart proof worker failed:", error))
     .finally(() => {
       coreRestartWorkerRunning = null;
+    });
+}
+
+async function drainCoreTaxPacketCanaryJob(): Promise<void> {
+  const job = await claimNextJob(new Date(), "tax_canary", "tax_package");
+  if (job) await processClaimedJob(job);
+}
+
+/**
+ * Run the paid 100-page synthetic package outside the borrower tax lane. This
+ * keeps the operational proof from delaying a real borrower's return.
+ */
+export function kickCoreTaxPacketCanaryWorker(): void {
+  if (coreTaxPacketCanaryWorkerRunning) return;
+  coreTaxPacketCanaryWorkerRunning = drainCoreTaxPacketCanaryJob()
+    .catch((error) => console.error("[DocumentExtraction] Core tax packet canary worker failed:", error))
+    .finally(() => {
+      coreTaxPacketCanaryWorkerRunning = null;
     });
 }
 
