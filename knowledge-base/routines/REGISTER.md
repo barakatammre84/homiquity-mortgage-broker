@@ -44,6 +44,8 @@ that `main` cannot show until work lands.
 
 Humans claim too — a routine cannot see your editor.
 
+| codex core financial-analysis audit 2026-09-10 | `server/services/financialReview.ts`, `shared/financialReview.ts`, `client/src/pages/staff/borrowerFile/FinancialReviewTab.tsx`, focused tests and roadmap evidence | `/Users/ammrebarakat/Developer/homiquity-worktrees/raster-document-proof` · `codex/financial-analysis-evidence` · 2026-09-10 22:18 UTC | Trace verified OCR/tax facts into financial workpapers, expose and block conflicting calculation inputs, then re-audit. No overlap with open dependency PRs. |
+
 ## Before you touch someone else's PR — the check `gh` cannot do
 
 Added 2026-08-22, after a drain session update-branched PRs that had **live interactive sessions
