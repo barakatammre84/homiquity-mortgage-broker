@@ -36,6 +36,133 @@ export async function buildSyntheticPayStatementPdf(): Promise<Buffer> {
   });
 }
 
+export const SYNTHETIC_TAX_PACKET_PAGE_COUNT = 100;
+
+type SyntheticTaxFormSection = {
+  startPage: number;
+  title: string;
+  entity: string | null;
+  facts: string[];
+};
+
+const SYNTHETIC_TAX_FORM_SECTIONS: SyntheticTaxFormSection[] = [
+  {
+    startPage: 1,
+    title: "FORM 1040 — U.S. INDIVIDUAL INCOME TAX RETURN — TAX YEAR 2025",
+    entity: null,
+    facts: [
+      "Primary taxpayer name: Morgan Test",
+      "Filing status: Single",
+      "Wages, salaries, tips: $84,000",
+      "Total income: $106,000",
+      "Adjusted gross income: $103,500",
+      "Taxable income: $78,200",
+    ],
+  },
+  {
+    startPage: 26,
+    title: "SCHEDULE C (FORM 1040) — PROFIT OR LOSS FROM BUSINESS — TAX YEAR 2025",
+    entity: "Northstar Test Consulting",
+    facts: [
+      "Business name: Northstar Test Consulting",
+      "Principal business or profession: Technology consulting",
+      "Business activity code: 541611",
+      "Gross receipts or sales: $48,000",
+      "Gross income: $48,000",
+      "Total expenses: $18,000",
+      "Net profit: $30,000",
+      "Depreciation and section 179 expense: $2,000",
+    ],
+  },
+  {
+    startPage: 51,
+    title: "SCHEDULE E (FORM 1040) — SUPPLEMENTAL INCOME AND LOSS — TAX YEAR 2025",
+    entity: null,
+    facts: [
+      "Number of rental properties: 2",
+      "Rents received, total: $36,000",
+      "Total expenses, total: $21,600",
+      "Depreciation, total: $6,000",
+      "Mortgage interest, total: $7,200",
+      "Net rental real estate income: $14,400",
+    ],
+  },
+  {
+    startPage: 76,
+    title: "FORM 1120-S — U.S. INCOME TAX RETURN FOR AN S CORPORATION — TAX YEAR 2025",
+    entity: "Harbor Test Services Inc.",
+    facts: [
+      "S corporation name: Harbor Test Services Inc.",
+      "Principal business activity code: 541990",
+      "Gross receipts or sales: $210,000",
+      "Total income: $210,000",
+      "Total deductions: $168,000",
+      "Ordinary business income: $42,000",
+      "Compensation of officers: $72,000",
+      "Number of shareholders: 1",
+    ],
+  },
+];
+
+/**
+ * A large, fixed tax package with four recognizable form instances and no real
+ * borrower information. Each form occupies two pages; the other pages are
+ * plainly labeled supporting worksheets so classification must count the
+ * complete 100-page source without inventing extra IRS forms.
+ */
+export async function buildSyntheticTaxPacketPdf(): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const pdf = new PDFDocument({
+      autoFirstPage: false,
+      size: "LETTER",
+      margin: 54,
+      info: { Title: "Synthetic 100-page tax packet operational canary" },
+    });
+    pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
+    pdf.on("error", reject);
+    pdf.on("end", () => resolve(Buffer.concat(chunks)));
+
+    for (let pageNumber = 1; pageNumber <= SYNTHETIC_TAX_PACKET_PAGE_COUNT; pageNumber++) {
+      pdf.addPage();
+      const section = [...SYNTHETIC_TAX_FORM_SECTIONS]
+        .reverse()
+        .find((candidate) => pageNumber >= candidate.startPage)!;
+      const formPage = pageNumber - section.startPage + 1;
+      pdf.fontSize(9).fillColor("#425466").text(
+        `SYNTHETIC OPERATIONAL CANARY · SOURCE PAGE ${pageNumber} OF ${SYNTHETIC_TAX_PACKET_PAGE_COUNT}`,
+        { align: "center" },
+      );
+      pdf.moveDown(2);
+      if (formPage <= 2) {
+        pdf.fillColor("#111827").fontSize(17).text(section.title, { align: "center" });
+        pdf.moveDown().fontSize(10).fillColor("#425466").text(
+          `Synthetic test form · page ${formPage} of 2 · no borrower data`,
+          { align: "center" },
+        );
+        pdf.moveDown(2).fontSize(12).fillColor("#111827");
+        if (section.entity) pdf.text(`Entity: ${section.entity}`);
+        for (const fact of section.facts) pdf.text(fact);
+        pdf.moveDown(2).fontSize(10).fillColor("#425466").text(
+          formPage === 1
+            ? "This synthetic page contains the labeled values used by the production extraction proof."
+            : "Continuation page for the same synthetic form instance; no additional values.",
+        );
+      } else {
+        pdf.fillColor("#111827").fontSize(18).text("SUPPORTING TAX WORKSHEET", { align: "center" });
+        pdf.moveDown().fontSize(12).text("This page is not an IRS form and contains no financial values.", {
+          align: "center",
+        });
+        pdf.moveDown().fontSize(10).fillColor("#425466").text(
+          `Supporting worksheet ${formPage - 2} for the preceding synthetic form section.`,
+          { align: "center" },
+        );
+      }
+    }
+    pdf.end();
+  });
+}
+
 /** The minimum exact result that makes the synthetic provider read useful. */
 export function syntheticPayStatementExtractionPasses(
   extracted: ExtractedDocumentData,

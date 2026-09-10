@@ -30,6 +30,11 @@ import {
   verifyCoreExtractionRestartProof,
   type CoreExtractionRestartVerifyResult,
 } from "./coreExtractionRestartProof";
+import {
+  CoreTaxPacketCanaryError,
+  verifyCoreTaxPacketCanary,
+  type CoreTaxPacketCanaryResult,
+} from "./coreTaxPacketCanary";
 
 export const CORE_CANARY_CAPABILITIES = [
   "homi",
@@ -280,6 +285,11 @@ function classifyFailure(error: unknown): {
       ? { status: "configuration_error", failureClass: "configuration" }
       : { status: "failure", failureClass: "extraction_invariant" };
   }
+  if (error instanceof CoreTaxPacketCanaryError) {
+    return error.code === "runtime_identity_missing"
+      ? { status: "configuration_error", failureClass: "configuration" }
+      : { status: "failure", failureClass: "extraction_invariant" };
+  }
   const candidate = error as { status?: number; name?: string; code?: string };
   if (candidate.status === 401 || candidate.status === 403) {
     return { status: "failure", failureClass: "authentication" };
@@ -418,6 +428,30 @@ export async function runCoreExtractionRestartVerification(
     },
     90_000,
     { provider: "Anthropic Claude vision", operation: "synthetic_restart_recovery" },
+  );
+  return { canary, proof };
+}
+
+/**
+ * Exercise the complete 100-page tax-package path and retain a redacted result
+ * beside the smaller twice-daily provider checks.
+ */
+export async function runCoreTaxPacketCanaryVerification(
+  triggeredByUserId: string | null,
+  verifier: () => Promise<CoreTaxPacketCanaryResult> = verifyCoreTaxPacketCanary,
+): Promise<{
+  canary: CoreCanaryResult;
+  proof: CoreTaxPacketCanaryResult | null;
+}> {
+  let proof: CoreTaxPacketCanaryResult | null = null;
+  const canary = await runCoreProviderCanary(
+    "document_extraction",
+    triggeredByUserId,
+    async () => {
+      proof = await verifier();
+    },
+    110_000,
+    { provider: "Anthropic Claude vision", operation: "synthetic_tax_packet_pipeline" },
   );
   return { canary, proof };
 }
