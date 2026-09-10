@@ -181,7 +181,7 @@ TASK_STATUSES	shared/schema/underwritingTasks.ts	array	5	d83f5079ce63	TaskStatus
 TASK_TRIGGER_SOURCES	shared/schema/underwritingTasks.ts	array	6	74d0bb9c1615	TaskTriggerSource	0	internal	
 TASK_TYPE_CODES	shared/schema/underwritingTasks.ts	array	80	25bbc3d42874	TaskTypeCode	2	internal	
 TASK_VERIFICATION_STATUSES	shared/schema/underwritingTasks.ts	array	4	88be9f50eec4	TaskVerificationStatus	1	internal	
-TAX_FORM_TYPES	shared/taxFormExtraction.ts	array	15	a183945f9bf1	TaxFormType	5	internal	
+TAX_FORM_TYPES	shared/taxFormExtraction.ts	array	15	a183945f9bf1	TaxFormType	7	internal	
 TERMINAL_TASK_STATUSES	shared/schema/underwritingTasks.ts	array	2	49c173241bf3		3	internal	
 THRESHOLD_CATEGORIES	shared/schema/underwritingConditions.ts	array	8	a804bfb026be	ThresholdCategory	0	internal	
 TOLERANCE_BUCKETS	shared/compliance/feeTolerance.ts	array	3	b5b6efc5ea7f	ToleranceBucket	1	internal	

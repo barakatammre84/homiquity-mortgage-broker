@@ -56,6 +56,8 @@ on:
           - core-extraction-restart-seed
           - core-extraction-restart-verify
           - core-tax-packet-canary
+          - core-tax-packet-restart-seed
+          - core-tax-packet-restart-verify
 
 permissions:
   contents: none
@@ -90,7 +92,7 @@ jobs:
             esac
           fi
           case "$job" in
-            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary) method="POST" ;;
+            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary|core-tax-packet-restart-seed|core-tax-packet-restart-verify) method="POST" ;;
             *) method="GET" ;;
           esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
@@ -127,10 +129,10 @@ jobs:
           # fail after printing the diagnosis. Retrying a timed-out POST could
           # duplicate provider calls and ledger rows.
           case "$JOB" in
-          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary)
+          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify|core-tax-packet-canary|core-tax-packet-restart-seed|core-tax-packet-restart-verify)
             response_file="$(mktemp)"
             set +e
-            http_status="$(curl -sS --max-time 120 \
+            http_status="$(curl -sS --max-time 300 \
               -o "$response_file" -w '%{http_code}' \
               -X "${METHOD}" \
               -H "Origin: ${SWEEP_HOST}" \
