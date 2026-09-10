@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `e6ae28ae4e221caf8554d58c6e2cc3dce0fb4619` on 2026-09-10.
+**Audited production baseline:** `513ab8c1a7abb67d3bb2163336006f8f8fd29313` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -50,10 +50,10 @@ lender results never satisfy a verified decision or lender-acceptance gate.
 Production served the exact `main` commit above on 2026-09-10. Health and the scheduled core-proof
 route returned successfully, and the service reported SendGrid email configured. The repository
 has a strict required test gate, automatic production migrations and post-deploy commit
-verification. On that exact build, a post-restart borrower-data-free sweep passed Homi's grounded
-status turn, the real synthetic pay-statement extraction path with page evidence, private
-object-storage write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting
-in 6.423 s, 10.136 s, 0.476 s, 0.003 s and 0.781 s. The Homi check uses the production prompt and
+verification. On that exact build, a borrower-data-free sweep passed Homi's grounded status turn,
+the real image-only pay-statement extraction path with page evidence, private object-storage
+write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 5.443 s,
+9.587 s, 0.675 s, 0.006 s and 0.955 s. The Homi check uses the production prompt and
 context builder, requires the real status tool schema, grounds the reply in fixed server truth and
 passes outbound compliance lint without reading a borrower file.
 
@@ -67,13 +67,17 @@ page-backed evidence requires human review. Classification and every form pass h
 through the provider call, so calls already dispatched finish before revocation succeeds and no
 later provider use begins after it succeeds.
 
-The recovery build proves recovery of an interrupted provider-backed ordinary-document job. The
-first deployment completed a real synthetic pay-statement provider read, verified exact values and
-page evidence, then stopped before persisting pages, facts, confidence or readiness. Railway
-replaced it with deployment `cef8b877-29f1-4683-944f-82caec441c2b` on the same exact commit. After
-the lease expired, the replacement reclaimed the fixed job on attempt two, repeated the provider
-read, committed one page graph, one confidence row and ten unique grounded facts, and removed every
-temporary database row and private object. This proves ordinary-document provider recovery without duplicate evidence.
+The ordinary-document recovery proof now starts with pixels rather than an embedded PDF text layer.
+The fixed synthetic pay statement is rendered to one PNG and embedded in a one-page PDF; a runtime
+guard verifies that PDF.js can extract no text before the production provider sees it. The first
+deployment on exact commit `513ab8c1a7abb67d3bb2163336006f8f8fd29313` completed the real provider
+read, verified five exact financial values, page evidence, classification and model/prompt lineage,
+then stopped before persisting pages, facts, confidence or readiness. Railway replaced it with
+deployment `cb7a11d5-126f-4fc4-9972-fe636c93c905` on the same commit. After the lease expired, the
+replacement reclaimed the job on attempt two, repeated the provider read, committed one page graph
+and ten grounded facts, and removed every temporary database row and private object. This proves
+the clean image-only provider path and ordinary-document recovery without duplicate evidence. It
+does not measure accuracy across real scans, image degradation, handwriting or varied layouts.
 
 The same recovery boundary is now proven for the complex path. On exact production commit
 `e6ae28ae4e221caf8554d58c6e2cc3dce0fb4619`, the first deployment classified a fixed synthetic
@@ -104,7 +108,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
 | Guide the borrower with Homi | **Live · production canary proven** | Prove from journey outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
-| Collect and correct evidence | **Built · ordinary and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; calibrate born-digital and scanned-document accuracy with the protected labeled set. |
+| Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; calibrate born-digital and real scanned-document accuracy with the protected labeled set. |
 | Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
@@ -125,13 +129,16 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    form pages. Every tax-provider handoff also holds the borrower's active consent through the call,
    so completed revocation blocks any later external use. A two-deployment production proof now
    recovers the provider-classified 100-page tax path on attempt two with one exact evidence graph
-   and complete cleanup. Keep the proof current and move the internal focus to measured accuracy,
-   especially scanned/raster documents, before changing inference settings.
+   and complete cleanup. The ordinary proof also starts from a verified text-free raster PDF,
+   survives a same-commit process replacement and preserves exact values, evidence and lineage.
+   Keep both proofs current and move the internal focus to measured accuracy across representative
+   real scans before changing inference settings.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
    link logical documents, retain field-level source pages and support field and boundary review.
    A representative 100-page packet completes both the local page pipeline and the live
-   provider/restart path inside the current capacity envelope. Populate the protected independently
-   reviewed labeled set across born-digital and scanned/raster documents, then set review thresholds
+   provider/restart path inside the current capacity envelope, and a clean text-free one-page raster
+   pay statement completes the live provider/restart path. Populate the protected independently
+   reviewed labeled set across born-digital and varied real scanned/raster documents, then set review thresholds
    from measured errors before treating extraction as hands-off.
 3. **Prove decision delivery:** underwriting, AUS and pre-approval letters carry input/policy
    fingerprints; stale output is blocked; out-of-scope files take a manual-underwrite path; and the
