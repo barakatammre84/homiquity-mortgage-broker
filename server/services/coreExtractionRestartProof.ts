@@ -12,7 +12,7 @@ import { ObjectStorageService } from "../integrations/object_storage";
 import {
   assertRasterOnlyPdf,
   buildSyntheticPayStatementPdf,
-  syntheticPayStatementExtractionPasses,
+  syntheticPayStatementExtractionFailures,
 } from "./coreCanaryFixtures";
 
 export const CORE_EXTRACTION_RESTART_USER_ID = "00000000-0000-4000-8000-00000000c101";
@@ -463,7 +463,9 @@ export async function recordCoreExtractionRestartProviderReady(
   now = new Date(),
 ): Promise<void> {
   if (!isCoreExtractionRestartJob(job) || job.attemptCount !== 1) return;
-  if (!syntheticPayStatementExtractionPasses(extracted)) {
+  const invariantFailures = syntheticPayStatementExtractionFailures(extracted);
+  if (invariantFailures.length > 0) {
+    console.warn(`[core-canary] document_extraction restart invariant mismatches (${invariantFailures.join(",")})`);
     throw new CoreExtractionRestartProofError("invariant_failed");
   }
   const runtime = runtimeIdentity();

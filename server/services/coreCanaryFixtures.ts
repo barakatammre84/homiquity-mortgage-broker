@@ -225,26 +225,61 @@ export async function buildSyntheticTaxPacketPdf(): Promise<Buffer> {
 }
 
 /** The minimum exact result that makes the synthetic provider read useful. */
+export const SYNTHETIC_PAY_STATEMENT_INVARIANTS = [
+  "document_shape",
+  "model_lineage",
+  "prompt_lineage",
+  "raw_response_hash",
+  "gross_pay",
+  "net_pay",
+  "ytd_gross",
+  "ytd_net_pay",
+  "ytd_taxes",
+  "gross_pay_evidence",
+  "page_count",
+  "classification_page_count",
+  "classification_page",
+] as const;
+
+export type SyntheticPayStatementInvariant =
+  (typeof SYNTHETIC_PAY_STATEMENT_INVARIANTS)[number];
+
+/**
+ * Return fixed invariant labels only. The production canary may log these
+ * labels to diagnose its borrower-free fixture, without logging model output
+ * or values from a real document.
+ */
+export function syntheticPayStatementExtractionFailures(
+  extracted: ExtractedDocumentData,
+): SyntheticPayStatementInvariant[] {
+  if (!("grossPay" in extracted)) return ["document_shape"];
+  const failures: SyntheticPayStatementInvariant[] = [];
+  const evidence = extracted.fieldEvidence?.grossPay;
+  const classification = extracted.documentClassification;
+  if (extracted.modelId !== EXTRACTION_MODEL_SINGLE_DOC) failures.push("model_lineage");
+  if (extracted.promptVersion === undefined) failures.push("prompt_lineage");
+  if (!/^[0-9a-f]{64}$/.test(extracted.rawResponseHash ?? "")) failures.push("raw_response_hash");
+  if (extracted.grossPay !== 3_000) failures.push("gross_pay");
+  if (extracted.netPay !== 2_100) failures.push("net_pay");
+  if (extracted.ytdGross !== 15_000) failures.push("ytd_gross");
+  if (extracted.ytdNetPay !== 10_500) failures.push("ytd_net_pay");
+  if (extracted.ytdTaxes !== 4_500) failures.push("ytd_taxes");
+  if (evidence?.pageNumber !== 1 || (evidence?.confidence ?? 0) <= 0) {
+    failures.push("gross_pay_evidence");
+  }
+  if (extracted.pageCount !== 1) failures.push("page_count");
+  if (classification?.pageCount !== 1) failures.push("classification_page_count");
+  if (
+    classification?.pages[0]?.pageNumber !== 1 ||
+    classification?.pages[0]?.documentType !== "paystub"
+  ) {
+    failures.push("classification_page");
+  }
+  return failures;
+}
+
 export function syntheticPayStatementExtractionPasses(
   extracted: ExtractedDocumentData,
 ): extracted is ExtractedPayStubData {
-  if (!("grossPay" in extracted)) return false;
-  const evidence = extracted.fieldEvidence?.grossPay;
-  const classification = extracted.documentClassification;
-  return (
-    extracted.modelId === EXTRACTION_MODEL_SINGLE_DOC &&
-    extracted.promptVersion !== undefined &&
-    /^[0-9a-f]{64}$/.test(extracted.rawResponseHash ?? "") &&
-    extracted.grossPay === 3_000 &&
-    extracted.netPay === 2_100 &&
-    extracted.ytdGross === 15_000 &&
-    extracted.ytdNetPay === 10_500 &&
-    extracted.ytdTaxes === 4_500 &&
-    evidence?.pageNumber === 1 &&
-    (evidence?.confidence ?? 0) > 0 &&
-    extracted.pageCount === 1 &&
-    classification?.pageCount === 1 &&
-    classification.pages[0]?.pageNumber === 1 &&
-    classification.pages[0]?.documentType === "paystub"
-  );
+  return syntheticPayStatementExtractionFailures(extracted).length === 0;
 }
