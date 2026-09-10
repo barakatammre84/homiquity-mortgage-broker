@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "dataset": {
+    "datasetId": "complex-borrower-redacted-v1",
+    "version": "1",
+    "path": "labels.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "providerCallBudget": 1,
+  "cases": [
+    {
+      "caseId": "replace-pay-001",
+      "sourcePath": "sources/replace-pay-001.pdf",
+      "sourceSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "mimeType": "application/pdf",
+      "extractor": "pay_stub",
+      "maxProviderCalls": 1
+    }
+  ]
+}

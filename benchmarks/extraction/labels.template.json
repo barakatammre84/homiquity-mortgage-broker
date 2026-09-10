@@ -1,0 +1,65 @@
+{
+  "datasetId": "complex-borrower-redacted-v1",
+  "version": "1",
+  "kind": "production_redacted",
+  "labeling": {
+    "protocolVersion": "mortgage-extraction-v1",
+    "reviewerCount": 2,
+    "reviewerIds": [
+      "reviewer-a",
+      "reviewer-b"
+    ],
+    "independentlyReviewed": true,
+    "adjudicated": true,
+    "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "claimScope": {
+    "documentTypes": [
+      "paystub"
+    ],
+    "situationTags": [
+      "raster_scan"
+    ]
+  },
+  "acceptanceThresholds": {
+    "valuePrecision": 0.98,
+    "valueRecall": 0.98,
+    "pageAttributionAccuracy": 0.98,
+    "documentTypeAccuracy": 0.98,
+    "boundaryPrecision": 0.98,
+    "boundaryRecall": 0.98,
+    "criticalFieldAccuracy": 0.98,
+    "businessWeightedFieldAccuracy": 0.98
+  },
+  "cases": [
+    {
+      "caseId": "replace-pay-001",
+      "documentType": "paystub",
+      "situationTags": [
+        "raster_scan"
+      ],
+      "pageCount": 1,
+      "fields": {
+        "grossPay": {
+          "value": "REPLACE_WITH_REVIEWED_VALUE",
+          "pageNumber": 1,
+          "impact": "critical"
+        }
+      },
+      "logicalDocuments": [
+        {
+          "documentType": "paystub",
+          "pageStart": 1,
+          "pageEnd": 1
+        }
+      ],
+      "labelReview": {
+        "reviewerIds": [
+          "reviewer-a",
+          "reviewer-b"
+        ],
+        "resolution": "agreement"
+      }
+    }
+  ]
+}

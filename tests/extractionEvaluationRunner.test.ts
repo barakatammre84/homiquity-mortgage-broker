@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EXTRACTION_EVALUATION_RUNNER_VERSION,
   assertExtractionEvaluationRuntime,
+  bindExtractionEvaluationLabels,
   computeEvaluationManifestSha256,
   prepareExtractionEvaluation,
   runExtractionEvaluation,
@@ -41,7 +42,10 @@ async function privateWrite(filePath: string, value: string | Buffer): Promise<v
   await chmod(filePath, 0o600);
 }
 
-async function evaluationFixture(caseCount = 1): Promise<{
+async function evaluationFixture(
+  caseCount = 1,
+  kind: ExtractionBenchmarkDataset["kind"] = "synthetic",
+): Promise<{
   root: string;
   manifestPath: string;
   outputDirectory: string;
@@ -69,6 +73,12 @@ async function evaluationFixture(caseCount = 1): Promise<{
       grossPay: { value: 4_200 + index, pageNumber: 1, impact: "critical" as const },
     },
     logicalDocuments: [{ documentType: "paystub", pageStart: 1, pageEnd: 1 }],
+    ...(kind === "production_redacted" ? {
+      labelReview: {
+        reviewerIds: ["reviewer-a", "reviewer-b"],
+        resolution: "agreement" as const,
+      },
+    } : {}),
   }));
   const manifest: ExtractionEvaluationManifest = {
     schemaVersion: "1",
@@ -92,10 +102,11 @@ async function evaluationFixture(caseCount = 1): Promise<{
   const dataset: ExtractionBenchmarkDataset = {
     datasetId: manifest.dataset.datasetId,
     version: manifest.dataset.version,
-    kind: "production_redacted",
+    kind,
     labeling: {
       protocolVersion: "mortgage-labeling-v1",
       reviewerCount: 2,
+      reviewerIds: ["reviewer-a", "reviewer-b"],
       independentlyReviewed: true,
       adjudicated: true,
       manifestSha256,
@@ -111,6 +122,7 @@ async function evaluationFixture(caseCount = 1): Promise<{
       documentTypeAccuracy: 0.95,
       boundaryPrecision: 0.95,
       boundaryRecall: 0.95,
+      criticalFieldAccuracy: 0.95,
       businessWeightedFieldAccuracy: 0.95,
     },
     cases,
@@ -128,10 +140,11 @@ function successfulDependencies(onExecute?: () => void): ExtractionEvaluationDep
     executeCase: async (item, reserveProviderCall) => {
       onExecute?.();
       await reserveProviderCall();
+      const { labelReview: _labelReview, ...prediction } = item.truth;
       return {
         status: "completed",
         errorCodes: [],
-        prediction: structuredClone(item.truth),
+        prediction: structuredClone(prediction),
         lineage: {
           modelIds: [EXTRACTION_MODEL_SINGLE_DOC],
           promptVersions: [EXTRACTION_PROMPT_VERSION],
@@ -151,6 +164,9 @@ describe("protected extraction evaluation runner", () => {
     expect(prepared).toMatchObject({
       datasetSha256: prepared.manifest.dataset.sha256,
       plannedProviderCalls: 1,
+      claimReadiness: {
+        eligibleForProductionClaim: false,
+      },
       cases: [{
         caseId: "pay-1",
         pageCount: 1,
@@ -160,6 +176,72 @@ describe("protected extraction evaluation runner", () => {
 
     await privateWrite(path.join(fixture.root, "source-1.png"), Buffer.concat([ONE_PIXEL_PNG, Buffer.from("changed")]));
     await expect(prepareExtractionEvaluation(fixture.manifestPath)).rejects.toThrow(/SHA-256/i);
+  });
+
+  it("refuses a production-redacted run before credentials or provider calls when labels cannot support a claim", async () => {
+    const fixture = await evaluationFixture(1, "production_redacted");
+    let runtimeChecks = 0;
+    let executions = 0;
+    await expect(runExtractionEvaluation({
+      manifestPath: fixture.manifestPath,
+      outputDirectory: fixture.outputDirectory,
+    }, {
+      assertRuntimeReady: () => { runtimeChecks += 1; },
+      executeCase: async () => {
+        executions += 1;
+        throw new Error("provider must not run");
+      },
+    })).rejects.toThrow(/not claim-ready.*no provider calls/i);
+    expect(runtimeChecks).toBe(0);
+    expect(executions).toBe(0);
+    await expect(stat(fixture.outputDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("binds final labels and the manifest without a circular manual hash edit", async () => {
+    const fixture = await evaluationFixture(1, "production_redacted");
+    const datasetPath = path.join(fixture.root, "labels.json");
+    const manifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+    const dataset = JSON.parse(await readFile(datasetPath, "utf8"));
+    manifest.dataset.sha256 = "0".repeat(64);
+    dataset.labeling.manifestSha256 = "0".repeat(64);
+    await privateWrite(fixture.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await privateWrite(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+
+    const bound = await bindExtractionEvaluationLabels(fixture.manifestPath);
+    const finalManifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+    const finalDatasetBytes = await readFile(datasetPath);
+    const finalDataset = JSON.parse(finalDatasetBytes.toString("utf8"));
+    expect(bound).toEqual({
+      manifestSha256: finalDataset.labeling.manifestSha256,
+      datasetSha256: sha256(finalDatasetBytes),
+      cases: 1,
+    });
+    expect(finalManifest.dataset.sha256).toBe(bound.datasetSha256);
+    await expect(prepareExtractionEvaluation(fixture.manifestPath)).resolves.toMatchObject({
+      manifestSha256: bound.manifestSha256,
+      datasetSha256: bound.datasetSha256,
+    });
+    await expect(bindExtractionEvaluationLabels(fixture.manifestPath))
+      .rejects.toThrow(/64 zeroes.*copy the files/i);
+  });
+
+  it("rejects truth fields the selected production extractor can never emit", async () => {
+    const fixture = await evaluationFixture();
+    const manifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+    const datasetPath = path.join(fixture.root, "labels.json");
+    const dataset = JSON.parse(await readFile(datasetPath, "utf8"));
+    dataset.cases[0].fields.unscorableMortgageValue = {
+      value: 123,
+      pageNumber: 1,
+      impact: "critical",
+    };
+    const datasetBytes = Buffer.from(`${JSON.stringify(dataset, null, 2)}\n`);
+    await privateWrite(datasetPath, datasetBytes);
+    manifest.dataset.sha256 = sha256(datasetBytes);
+    await privateWrite(fixture.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    await expect(prepareExtractionEvaluation(fixture.manifestPath))
+      .rejects.toThrow(/unsupported field key unscorableMortgageValue/i);
   });
 
   it("refuses duplicate source documents that could inflate benchmark coverage", async () => {

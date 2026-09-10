@@ -156,9 +156,12 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    pay statement completes the live provider/restart path. The protected evaluator now runs the exact
    production adapters outside the product database, verifies private source/label hashes, reserves
    a bounded provider-call budget before each call, resumes from private checkpoints and blocks a
-   claim when any case, lineage or threshold is incomplete. Populate its independently reviewed set
-   across born-digital and varied real scanned/raster documents, run it, then set review thresholds
-   from measured errors before treating extraction as hands-off.
+   claim when any case, lineage or threshold is incomplete. It also requires two reviewers per case,
+   non-empty critical truth, a separate critical-field score and a 0.98 minimum production-claim
+   threshold; dry-run exposes blockers and the runner will not spend provider calls on an ineligible
+   production dataset. Populate its independently reviewed set across born-digital and varied real
+   scanned/raster documents, freeze acceptance targets, run it, then set product review-routing
+   thresholds from measured errors before treating extraction as hands-off.
 3. **Prove decision delivery:** underwriting, AUS and pre-approval letters carry input/policy
    fingerprints; stale output is blocked; out-of-scope files take a manual-underwrite path; and the
    multi-borrower MISMO plus final dual-AUS artifact passes the committed XSD. Retain provider-native
