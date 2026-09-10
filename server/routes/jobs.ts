@@ -13,9 +13,16 @@ import { intentEvents } from "@shared/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { routeParam } from "../http/routeParams";
 import {
+  runCoreExtractionRestartVerification,
   runCoreProviderCanarySweep,
   runCoreStorageRestartVerification,
 } from "../services/coreProviderCanaries";
+import {
+  CoreExtractionRestartProofError,
+  prepareCoreExtractionRestartProof,
+  waitForCoreExtractionRestartProviderReady,
+} from "../services/coreExtractionRestartProof";
+import { kickCoreExtractionRestartWorker } from "../services/documentExtractionJobs";
 import {
   ObjectStorageService,
   PrivateStorageRestartProofError,
@@ -142,6 +149,110 @@ export function registerJobRoutes(app: Express) {
           phase: "verify",
           failureClass: "persistence_failure",
         });
+      }
+    });
+  });
+
+  const extractionRestartProofError = (error: unknown, phase: "seed" | "verify") => {
+    if (error instanceof CoreExtractionRestartProofError) {
+      const status = error.code === "proof_in_progress" ? 409 : 503;
+      return {
+        status,
+        body: { ok: false, phase, failureClass: error.code },
+      };
+    }
+    return {
+      status: 500,
+      body: { ok: false, phase, failureClass: "unknown" },
+    };
+  };
+
+  // The first deployment runs a real synthetic pay-statement provider read,
+  // records only that its fixed invariants passed, and holds the result before
+  // persistence. The next deployment must reclaim the expired durable job.
+  app.post("/api/jobs/core-extraction-restart-seed", async (req, res) => {
+    const seed = async () => {
+      const prepared = await prepareCoreExtractionRestartProof();
+      kickCoreExtractionRestartWorker();
+      const ready = await waitForCoreExtractionRestartProviderReady(prepared.reused);
+      return {
+        ok: true,
+        phase: "seed" as const,
+        ...ready,
+      };
+    };
+    if (isCronRequest(req)) {
+      try {
+        return res.json(await seed());
+      } catch (error) {
+        const safe = extractionRestartProofError(error, "seed");
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const result = await seed();
+        await logAudit(req, "jobs.core_extraction_restart_seed", "system", "document_extraction", {
+          sourceCommitSha: result.sourceCommitSha,
+          seededAt: result.seededAt,
+          providerReadyAt: result.providerReadyAt,
+          reused: result.reused,
+        });
+        return res.json(result);
+      } catch (error) {
+        const safe = extractionRestartProofError(error, "seed");
+        return res.status(safe.status).json(safe.body);
+      }
+    });
+  });
+
+  app.post("/api/jobs/core-extraction-restart-verify", async (req, res) => {
+    const verify = async (triggeredByUserId: string | null) => {
+      kickCoreExtractionRestartWorker();
+      const result = await runCoreExtractionRestartVerification(triggeredByUserId);
+      return {
+        ok: result.canary.status === "success",
+        phase: "verify" as const,
+        status: result.proof?.status ?? "failed",
+        sourceCommitSha: result.proof?.sourceCommitSha ?? null,
+        currentCommitSha: result.proof?.currentCommitSha ?? result.canary.commitSha,
+        seededAt: result.proof?.seededAt ?? null,
+        providerReadyAt: result.proof?.providerReadyAt ?? null,
+        completedAt: result.proof?.completedAt ?? null,
+        ageMs: result.proof?.ageMs ?? null,
+        attemptCount: result.proof?.attemptCount ?? null,
+        factRows: result.proof?.factRows ?? null,
+        pageRows: result.proof?.pageRows ?? null,
+        cleanedUp: result.proof?.cleanedUp ?? false,
+        canary: result.canary,
+      };
+    };
+    if (isCronRequest(req)) {
+      try {
+        const result = await verify(null);
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = extractionRestartProofError(error, "verify");
+        return res.status(safe.status).json(safe.body);
+      }
+    }
+    return requireRole("admin")(req, res, async () => {
+      try {
+        const user = req.user as { id: string };
+        const result = await verify(user.id);
+        await logAudit(req, "jobs.core_extraction_restart_verify", "system", "document_extraction", {
+          status: result.status,
+          sourceCommitSha: result.sourceCommitSha,
+          currentCommitSha: result.currentCommitSha,
+          attemptCount: result.attemptCount,
+          factRows: result.factRows,
+          pageRows: result.pageRows,
+          cleanedUp: result.cleanedUp,
+        });
+        return res.status(result.ok ? 200 : 503).json(result);
+      } catch (error) {
+        const safe = extractionRestartProofError(error, "verify");
+        return res.status(safe.status).json(safe.body);
       }
     });
   });

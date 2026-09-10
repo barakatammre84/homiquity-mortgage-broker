@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, lte, max, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
 import {
   auditLogs,
   documentExtractionJobs,
@@ -31,6 +31,17 @@ import {
   hasActionableExtractionWarning,
   type ExtractionFailure,
 } from "./documentExtractionOutcome";
+import {
+  CORE_EXTRACTION_RESTART_JOB_ID,
+  CORE_EXTRACTION_RESTART_LEASE_MS,
+  CoreExtractionRestartProofError,
+  coreExtractionRestartCompletionAudit,
+  documentExtractionHeartbeatMs,
+  documentExtractionLeaseMs,
+  holdCoreExtractionRestartFirstResult,
+  isCoreExtractionRestartJob,
+  recordCoreExtractionRestartProviderReady,
+} from "./coreExtractionRestartProof";
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
   "pay_stub",
@@ -49,7 +60,6 @@ export type DocumentExtractionJobStatus =
 
 const STANDARD_TYPE_SET = new Set<string>(STANDARD_AUTO_EXTRACT_TYPES);
 const LEASE_MS = 5 * 60 * 1000;
-const HEARTBEAT_MS = 60 * 1000;
 const POLL_MS = 5 * 1000;
 const RECONCILE_MS = 5 * 60 * 1000;
 const RECONCILE_LOOKBACK_MS = 60 * 60 * 1000;
@@ -234,12 +244,18 @@ export function nextFailureTransition(input: {
   };
 }
 
-async function claimNextJob(now = new Date()): Promise<DocumentExtractionJob | null> {
+async function claimNextJob(
+  now = new Date(),
+  proofJob: "exclude" | "only" = "exclude",
+): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
     const [candidate] = await transaction
       .select()
       .from(documentExtractionJobs)
       .where(and(
+        proofJob === "only"
+          ? eq(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID)
+          : ne(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID),
         lt(documentExtractionJobs.attemptCount, documentExtractionJobs.maxAttempts),
         or(
           and(
@@ -265,7 +281,7 @@ async function claimNextJob(now = new Date()): Promise<DocumentExtractionJob | n
         status: "processing",
         attemptCount: candidate.attemptCount + 1,
         claimedAt: now,
-        leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+        leaseExpiresAt: new Date(now.getTime() + documentExtractionLeaseMs(candidate)),
         claimedBy: claimToken,
         updatedAt: now,
       })
@@ -298,7 +314,7 @@ async function renewLease(job: DocumentExtractionJob): Promise<boolean> {
   const now = new Date();
   const renewed = await db
     .update(documentExtractionJobs)
-    .set({ leaseExpiresAt: new Date(now.getTime() + LEASE_MS), updatedAt: now })
+    .set({ leaseExpiresAt: new Date(now.getTime() + documentExtractionLeaseMs(job)), updatedAt: now })
     .where(and(
       eq(documentExtractionJobs.id, job.id),
       eq(documentExtractionJobs.status, "processing"),
@@ -329,7 +345,8 @@ async function completeJob(job: DocumentExtractionJob): Promise<void> {
       ))
       .returning({ id: documentExtractionJobs.id });
     if (!completed) return;
-    await transaction.insert(auditLogs).values({
+    const canaryAudit = coreExtractionRestartCompletionAudit(job, now);
+    await transaction.insert(auditLogs).values(canaryAudit ?? {
       actorUserId: job.requestedByUserId,
       action: "document.extraction_completed",
       targetType: "document",
@@ -449,6 +466,13 @@ async function executeStandardJob(
   const extractionFailure = classifyExtractionResult(extracted);
   if (extractionFailure) {
     throw Object.assign(new Error("Standard extraction failed"), { extractionFailure });
+  }
+  if (isCoreExtractionRestartJob(job) && job.attemptCount === 1) {
+    // The production restart proof deliberately stops after the real provider
+    // result passes its fixed invariants but before any borrower-shaped state
+    // is persisted. A different deployment must reclaim and repeat this job.
+    await recordCoreExtractionRestartProviderReady(job, extracted);
+    await holdCoreExtractionRestartFirstResult(job);
   }
   if (extracted.documentClassification) {
     const { materializeDocumentPages } = await import("./documentPageMaterialization");
@@ -688,6 +712,9 @@ async function executeJob(
 }
 
 export function failureFromUnknown(error: unknown): ExtractionFailure {
+  if (error instanceof CoreExtractionRestartProofError) {
+    return { code: `core_restart_${error.code}`, retryable: false };
+  }
   if (
     error &&
     typeof error === "object" &&
@@ -728,7 +755,7 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
         claimLost = true;
         console.error(`[DocumentExtraction] Lease renewal failed for ${job.id}:`, error);
       });
-  }, HEARTBEAT_MS);
+  }, documentExtractionHeartbeatMs(job));
   heartbeat.unref();
   try {
     const outcome = await executeJob(job, claimFence);
@@ -756,6 +783,7 @@ async function processClaimedJob(job: DocumentExtractionJob): Promise<void> {
 }
 
 let workerRunning: Promise<void> | null = null;
+let coreRestartWorkerRunning: Promise<void> | null = null;
 let workerStarted = false;
 let pollTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
@@ -775,6 +803,39 @@ export function kickDocumentExtractionWorker(): void {
     .catch((error) => console.error("[DocumentExtraction] Worker loop failed:", error))
     .finally(() => {
       workerRunning = null;
+    });
+}
+
+async function drainCoreExtractionRestartJob(): Promise<void> {
+  const deadline = Date.now() + CORE_EXTRACTION_RESTART_LEASE_MS + 10_000;
+  for (;;) {
+    const job = await claimNextJob(new Date(), "only");
+    if (job) {
+      await processClaimedJob(job);
+      return;
+    }
+    const [current] = await db
+      .select({ status: documentExtractionJobs.status })
+      .from(documentExtractionJobs)
+      .where(eq(documentExtractionJobs.id, CORE_EXTRACTION_RESTART_JOB_ID))
+      .limit(1);
+    if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+/**
+ * Run the controlled restart proof outside the serial borrower queue. The first
+ * attempt may wait in memory for ten minutes, so sharing workerRunning would
+ * otherwise delay every document queued behind this synthetic job.
+ */
+export function kickCoreExtractionRestartWorker(): void {
+  if (coreRestartWorkerRunning) return;
+  coreRestartWorkerRunning = drainCoreExtractionRestartJob()
+    .catch((error) => console.error("[DocumentExtraction] Core restart proof worker failed:", error))
+    .finally(() => {
+      coreRestartWorkerRunning = null;
     });
 }
 

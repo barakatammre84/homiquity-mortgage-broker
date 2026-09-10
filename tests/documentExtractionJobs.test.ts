@@ -10,6 +10,7 @@ import {
   classifyExtractionResult,
   hasActionableExtractionWarning,
 } from "../server/services/documentExtractionOutcome";
+import { CoreExtractionRestartProofError } from "../server/services/coreExtractionRestartProof";
 
 describe("durable document extraction job policy", () => {
   it("queues the borrower document types with a supported extractor", () => {
@@ -81,6 +82,12 @@ describe("durable document extraction job policy", () => {
       new Error("EXTRACTION_SIMULATE cannot be enabled in production"),
     )).toEqual({
       code: "invalid_production_extraction_configuration",
+      retryable: false,
+    });
+    expect(failureFromUnknown(
+      new CoreExtractionRestartProofError("invariant_failed"),
+    )).toEqual({
+      code: "core_restart_invariant_failed",
       retryable: false,
     });
   });

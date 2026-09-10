@@ -1,4 +1,3 @@
-import PDFDocument from "pdfkit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { and, desc, eq } from "drizzle-orm";
 import { coreProviderCanaryRuns } from "@shared/schema";
@@ -22,6 +21,15 @@ import {
   financialAnalysisCanaryPasses,
   underwritingCanaryPasses,
 } from "./coreEngineCanaries";
+import {
+  buildSyntheticPayStatementPdf,
+  syntheticPayStatementExtractionPasses,
+} from "./coreCanaryFixtures";
+import {
+  CoreExtractionRestartProofError,
+  verifyCoreExtractionRestartProof,
+  type CoreExtractionRestartVerifyResult,
+} from "./coreExtractionRestartProof";
 
 export const CORE_CANARY_CAPABILITIES = [
   "homi",
@@ -107,31 +115,6 @@ function responseText(response: { content: Array<{ type: string; text?: string }
     .map((block) => block.text ?? "")
     .join("")
     .trim();
-}
-
-async function syntheticCanaryPdf(): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const pdf = new PDFDocument({ size: "LETTER", margin: 72, info: { Title: "Synthetic extraction canary" } });
-    pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
-    pdf.on("error", reject);
-    pdf.on("end", () => resolve(Buffer.concat(chunks)));
-    pdf.fontSize(20).text("SYNTHETIC PAY STATEMENT", { align: "center" });
-    pdf.moveDown().fontSize(11).text("Operational canary only — no borrower data", { align: "center" });
-    pdf.moveDown(2).fontSize(12);
-    pdf.text("Employee: Morgan Test");
-    pdf.text("Employer: Homiquity Canary Corporation");
-    pdf.text("Pay period: 2026-08-01 to 2026-08-15");
-    pdf.moveDown();
-    pdf.text("Gross pay: $3,000.00");
-    pdf.text("Net pay: $2,100.00");
-    pdf.text("Year-to-date gross: $15,000.00");
-    pdf.text("Year-to-date net: $10,500.00");
-    pdf.text("Year-to-date taxes: $4,500.00");
-    pdf.moveDown();
-    pdf.text("Verification code: 7319");
-    pdf.end();
-  });
 }
 
 async function runHomiCanary(): Promise<void> {
@@ -224,7 +207,7 @@ async function runExtractionCanary(): Promise<void> {
   if (process.env.NODE_ENV === "production" && process.env.EXTRACTION_SIMULATE === "true") {
     throw new CanaryExecutionError("configuration", "configuration_error");
   }
-  const pdf = await syntheticCanaryPdf();
+  const pdf = await buildSyntheticPayStatementPdf();
   const response = await extractionAnthropic.messages.create({
     model: EXTRACTION_MODEL_SINGLE_DOC,
     max_tokens: 20,
@@ -251,24 +234,9 @@ async function runExtractionCanary(): Promise<void> {
   }
 
   const extracted = await extractPayStubData(pdf, "application/pdf");
-  const evidence = extracted.fieldEvidence?.grossPay;
-  const classification = extracted.documentClassification;
-  const valid =
-    extracted.modelId === EXTRACTION_MODEL_SINGLE_DOC &&
-    extracted.promptVersion !== undefined &&
-    /^[0-9a-f]{64}$/.test(extracted.rawResponseHash ?? "") &&
-    extracted.grossPay === 3_000 &&
-    extracted.netPay === 2_100 &&
-    extracted.ytdGross === 15_000 &&
-    extracted.ytdNetPay === 10_500 &&
-    extracted.ytdTaxes === 4_500 &&
-    evidence?.pageNumber === 1 &&
-    (evidence?.confidence ?? 0) > 0 &&
-    extracted.pageCount === 1 &&
-    classification?.pageCount === 1 &&
-    classification.pages[0]?.pageNumber === 1 &&
-    classification.pages[0]?.documentType === "paystub";
-  if (!valid) throw new CanaryExecutionError("extraction_invariant");
+  if (!syntheticPayStatementExtractionPasses(extracted)) {
+    throw new CanaryExecutionError("extraction_invariant");
+  }
 }
 
 async function runObjectStorageCanary(): Promise<void> {
@@ -306,6 +274,11 @@ function classifyFailure(error: unknown): {
     return error.code === "runtime_identity_missing"
       ? { status: "configuration_error", failureClass: "configuration" }
       : { status: "failure", failureClass: "storage_round_trip" };
+  }
+  if (error instanceof CoreExtractionRestartProofError) {
+    return error.code === "runtime_identity_missing"
+      ? { status: "configuration_error", failureClass: "configuration" }
+      : { status: "failure", failureClass: "extraction_invariant" };
   }
   const candidate = error as { status?: number; name?: string; code?: string };
   if (candidate.status === 401 || candidate.status === 403) {
@@ -421,6 +394,30 @@ export async function runCoreStorageRestartVerification(
     },
     CANARY_TIMEOUT_MS,
     { provider: "Google Cloud Storage", operation: "private_restart_read_delete" },
+  );
+  return { canary, proof };
+}
+
+/**
+ * Validate and clean up the synthetic durable-job restart proof, then retain a
+ * redacted result in the existing provider canary ledger.
+ */
+export async function runCoreExtractionRestartVerification(
+  triggeredByUserId: string | null,
+  verifier: () => Promise<CoreExtractionRestartVerifyResult> = verifyCoreExtractionRestartProof,
+): Promise<{
+  canary: CoreCanaryResult;
+  proof: CoreExtractionRestartVerifyResult | null;
+}> {
+  let proof: CoreExtractionRestartVerifyResult | null = null;
+  const canary = await runCoreProviderCanary(
+    "document_extraction",
+    triggeredByUserId,
+    async () => {
+      proof = await verifier();
+    },
+    90_000,
+    { provider: "Anthropic Claude vision", operation: "synthetic_restart_recovery" },
   );
   return { canary, proof };
 }
