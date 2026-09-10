@@ -117,7 +117,7 @@ describe.sequential("core provider canary ledger", () => {
     expect(result.canary).toMatchObject({
       capabilityId: "document_extraction",
       provider: "Anthropic Claude vision",
-      operation: "synthetic_restart_recovery",
+      operation: "synthetic_raster_restart_recovery",
       status: "success",
     });
   });

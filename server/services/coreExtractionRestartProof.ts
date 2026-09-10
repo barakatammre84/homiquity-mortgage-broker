@@ -10,6 +10,7 @@ import type { ExtractedDocumentData } from "../extractionCore";
 import { db } from "../db";
 import { ObjectStorageService } from "../integrations/object_storage";
 import {
+  assertRasterOnlyPdf,
   buildSyntheticPayStatementPdf,
   syntheticPayStatementExtractionPasses,
 } from "./coreCanaryFixtures";
@@ -397,6 +398,11 @@ export async function prepareCoreExtractionRestartProof(
     });
 
     const pdf = await buildSyntheticPayStatementPdf();
+    try {
+      await assertRasterOnlyPdf(pdf);
+    } catch {
+      throw new CoreExtractionRestartProofError("invariant_failed");
+    }
     objectPath = await objectStorage.savePrivateDerivedObject(
       pdf,
       "application/pdf",

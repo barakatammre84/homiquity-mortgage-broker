@@ -22,6 +22,7 @@ import {
   underwritingCanaryPasses,
 } from "./coreEngineCanaries";
 import {
+  assertRasterOnlyPdf,
   buildSyntheticPayStatementPdf,
   syntheticPayStatementExtractionPasses,
 } from "./coreCanaryFixtures";
@@ -107,7 +108,7 @@ const CANARY_DEFINITIONS: Record<
   { provider: string; operation: string }
 > = {
   homi: { provider: "Anthropic Claude", operation: "grounded_status_turn" },
-  document_extraction: { provider: "Anthropic Claude vision", operation: "synthetic_paystub_pipeline" },
+  document_extraction: { provider: "Anthropic Claude vision", operation: "synthetic_raster_paystub_pipeline" },
   object_storage: { provider: "Google Cloud Storage", operation: "private_write_read_delete" },
   financial_analysis: {
     provider: "Homiquity financial analysis",
@@ -218,6 +219,11 @@ async function runExtractionCanary(): Promise<void> {
     throw new CanaryExecutionError("configuration", "configuration_error");
   }
   const pdf = await buildSyntheticPayStatementPdf();
+  try {
+    await assertRasterOnlyPdf(pdf);
+  } catch {
+    throw new CanaryExecutionError("extraction_invariant");
+  }
   const response = await extractionAnthropic.messages.create({
     model: EXTRACTION_MODEL_SINGLE_DOC,
     max_tokens: 20,
@@ -437,7 +443,7 @@ export async function runCoreExtractionRestartVerification(
       proof = await verifier();
     },
     90_000,
-    { provider: "Anthropic Claude vision", operation: "synthetic_restart_recovery" },
+    { provider: "Anthropic Claude vision", operation: "synthetic_raster_restart_recovery" },
   );
   return { canary, proof };
 }

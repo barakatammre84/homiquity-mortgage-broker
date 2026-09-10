@@ -1,39 +1,100 @@
 import PDFDocument from "pdfkit";
+import { createCanvas } from "@napi-rs/canvas";
 import type { ExtractedDocumentData, ExtractedPayStubData } from "../extractionCore";
 import { EXTRACTION_MODEL_SINGLE_DOC } from "../extractionCore";
 
 /**
- * One fixed, borrower-free pay statement shared by the ordinary extraction
- * canary and the restart-recovery proof. Keeping one fixture prevents the two
- * proofs from drifting onto different prompts or expected values.
+ * One fixed, borrower-free, image-only pay statement shared by the ordinary
+ * extraction canary and the restart-recovery proof. The page has no PDF text
+ * layer, so a successful read proves the deployed vision path can read pixels
+ * rather than accidentally relying on born-digital text extraction. Keeping
+ * one fixture prevents the two proofs from drifting onto different prompts or
+ * expected values.
  */
 export async function buildSyntheticPayStatementPdf(): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const pdf = new PDFDocument({
-      size: "LETTER",
-      margin: 72,
-      info: { Title: "Synthetic extraction canary" },
+  // 150 DPI letter page. Keep this clean and high contrast: it proves the
+  // raster path is wired and usable. Representative scan quality and model
+  // accuracy belong to the protected human-labeled benchmark.
+  const page = createCanvas(1_275, 1_650);
+  try {
+    const context = page.getContext("2d");
+    context.fillStyle = "#fdfcf9";
+    context.fillRect(0, 0, page.width, page.height);
+    context.strokeStyle = "#cbd5e1";
+    context.lineWidth = 2;
+    context.strokeRect(72, 72, page.width - 144, page.height - 144);
+
+    context.textAlign = "center";
+    context.fillStyle = "#111827";
+    context.font = "700 42px sans-serif";
+    context.fillText("SYNTHETIC PAY STATEMENT", page.width / 2, 160);
+    context.fillStyle = "#475569";
+    context.font = "22px sans-serif";
+    context.fillText("Operational canary only — no borrower data", page.width / 2, 210);
+
+    context.textAlign = "left";
+    context.fillStyle = "#111827";
+    context.font = "26px sans-serif";
+    const lines = [
+      "Employee: Morgan Test",
+      "Employer: Homiquity Canary Corporation",
+      "Pay period: 2026-08-01 to 2026-08-15",
+      "",
+      "Gross pay: $3,000.00",
+      "Net pay: $2,100.00",
+      "Year-to-date gross: $15,000.00",
+      "Year-to-date net: $10,500.00",
+      "Year-to-date taxes: $4,500.00",
+      "",
+      "Verification code: 7319",
+    ];
+    lines.forEach((line, index) => context.fillText(line, 130, 360 + index * 72));
+
+    const raster = page.toBuffer("image/png");
+    return await new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const pdf = new PDFDocument({
+        size: "LETTER",
+        margin: 0,
+        info: { Title: "Synthetic raster extraction canary" },
+      });
+      pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
+      pdf.on("error", reject);
+      pdf.on("end", () => resolve(Buffer.concat(chunks)));
+      pdf.image(raster, 0, 0, { width: 612, height: 792 });
+      pdf.end();
     });
-    pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
-    pdf.on("error", reject);
-    pdf.on("end", () => resolve(Buffer.concat(chunks)));
-    pdf.fontSize(20).text("SYNTHETIC PAY STATEMENT", { align: "center" });
-    pdf.moveDown().fontSize(11).text("Operational canary only — no borrower data", { align: "center" });
-    pdf.moveDown(2).fontSize(12);
-    pdf.text("Employee: Morgan Test");
-    pdf.text("Employer: Homiquity Canary Corporation");
-    pdf.text("Pay period: 2026-08-01 to 2026-08-15");
-    pdf.moveDown();
-    pdf.text("Gross pay: $3,000.00");
-    pdf.text("Net pay: $2,100.00");
-    pdf.text("Year-to-date gross: $15,000.00");
-    pdf.text("Year-to-date net: $10,500.00");
-    pdf.text("Year-to-date taxes: $4,500.00");
-    pdf.moveDown();
-    pdf.text("Verification code: 7319");
-    pdf.end();
-  });
+  } finally {
+    page.width = 0;
+    page.height = 0;
+  }
+}
+
+/**
+ * Runtime assertion used by production canaries. A test alone could prove that
+ * yesterday's fixture was raster-only while a later refactor quietly restored
+ * a text layer. The deployed proof checks the actual bytes before provider use.
+ */
+export async function assertRasterOnlyPdf(pdfBytes: Buffer): Promise<void> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfBytes) });
+  const pdf = await loadingTask.promise;
+  try {
+    if (pdf.numPages !== 1) {
+      throw new Error(`Raster extraction fixture must have exactly one page; received ${pdf.numPages}`);
+    }
+    const sourcePage = await pdf.getPage(1);
+    try {
+      const text = await sourcePage.getTextContent();
+      if (text.items.length > 0) {
+        throw new Error("Raster extraction fixture unexpectedly contains an extractable PDF text layer");
+      }
+    } finally {
+      sourcePage.cleanup();
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
 }
 
 export const SYNTHETIC_TAX_PACKET_PAGE_COUNT = 100;
