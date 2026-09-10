@@ -96,6 +96,32 @@ describe.sequential("core provider canary ledger", () => {
     });
   });
 
+  it("retains the provider-backed extraction restart proof with its dedicated operation", async () => {
+    const { runCoreExtractionRestartVerification } = await import("../server/services/coreProviderCanaries");
+    const proof = {
+      status: "verified" as const,
+      sourceCommitSha: "a".repeat(40),
+      currentCommitSha: "a".repeat(40),
+      seededAt: "2026-09-10T00:00:00.000Z",
+      providerReadyAt: "2026-09-10T00:00:10.000Z",
+      completedAt: "2026-09-10T00:02:00.000Z",
+      ageMs: 120_000,
+      attemptCount: 2,
+      factRows: 9,
+      pageRows: 1,
+      cleanedUp: true as const,
+    };
+    const result = await runCoreExtractionRestartVerification(userId, async () => proof);
+
+    expect(result.proof).toEqual(proof);
+    expect(result.canary).toMatchObject({
+      capabilityId: "document_extraction",
+      provider: "Anthropic Claude vision",
+      operation: "synthetic_restart_recovery",
+      status: "success",
+    });
+  });
+
   it("executes the real mixed-income and underwriting engines with repeatable results", async () => {
     const { runCoreProviderCanary } = await import("../server/services/coreProviderCanaries");
     const financial = await runCoreProviderCanary("financial_analysis", userId);

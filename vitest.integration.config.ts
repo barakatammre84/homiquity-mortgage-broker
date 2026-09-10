@@ -46,6 +46,7 @@ export default defineConfig({
       "tests/documentExtractionQueue.integration.test.ts",
       "tests/documentFieldReview.integration.test.ts",
       "tests/coreProviderCanaries.integration.test.ts",
+      "tests/coreExtractionRestartProof.integration.test.ts",
       "tests/documentPageMaterialization.integration.test.ts",
     ],
   },

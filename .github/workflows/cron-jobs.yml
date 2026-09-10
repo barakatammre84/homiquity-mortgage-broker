@@ -53,6 +53,8 @@ on:
           - core-provider-canaries
           - core-storage-restart-seed
           - core-storage-restart-verify
+          - core-extraction-restart-seed
+          - core-extraction-restart-verify
 
 permissions:
   contents: none
@@ -87,7 +89,7 @@ jobs:
             esac
           fi
           case "$job" in
-            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify) method="POST" ;;
+            core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify) method="POST" ;;
             *) method="GET" ;;
           esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
@@ -123,7 +125,7 @@ jobs:
           # fail after printing the diagnosis. Retrying a timed-out POST could
           # duplicate provider calls and ledger rows.
           case "$JOB" in
-          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify)
+          core-provider-canaries|core-storage-restart-seed|core-storage-restart-verify|core-extraction-restart-seed|core-extraction-restart-verify)
             response_file="$(mktemp)"
             set +e
             http_status="$(curl -sS --max-time 120 \
@@ -168,8 +170,14 @@ jobs:
             sourceCommitSha: body.sourceCommitSha ?? null,
             currentCommitSha: body.currentCommitSha ?? null,
             seededAt: body.seededAt ?? null,
+            providerReadyAt: body.providerReadyAt ?? null,
+            completedAt: body.completedAt ?? null,
             verifiedAt: body.verifiedAt ?? null,
             ageMs: body.ageMs ?? null,
+            attemptCount: body.attemptCount ?? null,
+            factRows: body.factRows ?? null,
+            pageRows: body.pageRows ?? null,
+            cleanedUp: body.cleanedUp ?? null,
             reused: body.reused ?? null,
             failureClass: body.failureClass ?? body.canary?.failureClass ?? null,
             canary: body.canary ? {
