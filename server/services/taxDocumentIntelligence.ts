@@ -24,6 +24,7 @@ import {
 import {
   classifyTaxDocument,
   extractTaxFormInstanceFields,
+  assessTaxFormExtractions,
   EXTRACTION_PROMPT_VERSION,
   type TaxFormInstanceExtraction,
 } from "../extractionService";
@@ -35,7 +36,14 @@ import {
   type DatabaseTransaction,
 } from "./documentLineage";
 import { currentDocumentEvidencePredicate } from "./currentDocumentEvidence";
-import { withActiveTaxDocumentConsent } from "./taxConsentWorkflow";
+import {
+  withActiveTaxDocumentConsent,
+  withActiveTaxDocumentConsentUse,
+} from "./taxConsentWorkflow";
+import {
+  TaxPacketExcerptSession,
+  assertNonOverlappingTaxFormRanges,
+} from "./taxPacketExcerpt";
 
 /**
  * Tax Document Intelligence orchestrator (UAL P2a — Situation Identification
@@ -77,10 +85,16 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
+  let failed = false;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++;
-      results[index] = await fn(items[index], index);
+      try {
+        results[index] = await fn(items[index], index);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   });
   await Promise.all(workers);
@@ -272,9 +286,24 @@ export async function runTaxDocumentIntelligence(
     return failRun(error, extra, transaction);
   });
 
+  let packet: TaxPacketExcerptSession | undefined;
   try {
+    // Load the private source once. Classification needs the complete packet;
+    // every field pass below receives only its classified page range.
+    packet = await TaxPacketExcerptSession.open(
+      document.storagePath,
+      document.mimeType ?? undefined,
+    );
+
     // Pass 1 — classification.
-    const cls = await classifyTaxDocument(document.storagePath, document.mimeType ?? undefined);
+    const classificationUse = await withActiveTaxDocumentConsentUse(
+      borrowerUserId,
+      () => classifyTaxDocument(packet!.sourceBytes, packet!.sourceMimeType),
+    );
+    if (!classificationUse.authorized) {
+      return failRunWithClaim("Tax document authorization was revoked before provider processing");
+    }
+    const cls = classificationUse.value;
     if (!cls.classification) {
       return failRunWithClaim(cls.failureReason ?? "Classification produced no usable result", {
         modelId: cls.lineage.modelId,
@@ -289,6 +318,11 @@ export async function runTaxDocumentIntelligence(
     if (!classification.pageCount) {
       return failRunWithClaim("Tax document classification did not return a page count");
     }
+    if (!cls.simulated && classification.pageCount !== packet.pageCount) {
+      return failRunWithClaim(
+        `Tax document classification returned ${classification.pageCount} pages for a ${packet.pageCount}-page source`,
+      );
+    }
     const instances = classification.forms
       .filter((instance) =>
         instance.pageStart !== null &&
@@ -302,11 +336,56 @@ export async function runTaxDocumentIntelligence(
     if (instances.length === 0) {
       return failRunWithClaim("Tax document classification found no form with a valid source-page range");
     }
+    // A model-controlled manifest must not make the web process rasterize the
+    // same source pages repeatedly or create an unbounded single form input.
+    assertNonOverlappingTaxFormRanges(
+      instances.map((instance) => ({
+        pageStart: instance.pageStart!,
+        pageEnd: instance.pageEnd!,
+      })),
+      packet.pageCount,
+    );
 
     // Pass 2 — per-instance field extraction (bounded concurrency).
-    const extractions = await mapWithConcurrency(instances, EXTRACTION_CONCURRENCY, (instance) =>
-      extractTaxFormInstanceFields(document.storagePath, instance, document.mimeType ?? undefined),
-    );
+    const extractions = await mapWithConcurrency(instances, EXTRACTION_CONCURRENCY, async (instance) => {
+      const excerpt = cls.simulated
+        ? { bytes: packet!.sourceBytes, mimeType: packet!.sourceMimeType }
+        : await packet!.excerpt(instance.pageStart!, instance.pageEnd!);
+      const extractionUse = await withActiveTaxDocumentConsentUse(
+        borrowerUserId,
+        () => extractTaxFormInstanceFields(
+          excerpt.bytes,
+          instance,
+          excerpt.mimeType,
+          "sourcePageOffset" in excerpt
+            ? {
+                sourcePageOffset: excerpt.sourcePageOffset,
+                attachedPageCount: excerpt.pageCount,
+              }
+            : undefined,
+        ),
+      );
+      if (!extractionUse.authorized) {
+        throw new TaxDocumentIntelligenceError(
+          "Tax document authorization was revoked before provider processing",
+          409,
+          "TAX_CONSENT_REVOKED",
+          run.id,
+        );
+      }
+      return extractionUse.value;
+    });
+    const extractionQuality = assessTaxFormExtractions(extractions);
+    if (extractionQuality.failureReason) {
+      return failRunWithClaim(extractionQuality.failureReason, {
+        modelId: cls.lineage.modelId,
+        classificationResponseHash: cls.lineage.rawResponseHash,
+        classificationRawEncrypted: cls.lineage.rawResponseEncrypted,
+        classificationRawIv: cls.lineage.rawResponseIv,
+        classificationRawKeyId: cls.lineage.rawResponseKeyId,
+        simulated: cls.simulated,
+      });
+    }
 
     return withDocumentWorkflowLock(document.id, async (currentDocument, isCurrentVersion, transaction) => {
       await beforePersist?.(transaction);
@@ -404,7 +483,12 @@ export async function runTaxDocumentIntelligence(
         }
 
         const taxFormInstances = toTaxFormInstances(persisted);
-        const overall = aggregateFieldConfidence(taxFormInstances);
+        // A classifier score cannot hide a form with no safely fileable fields
+        // or evidence that had to be discarded. Treat completeness as part of
+        // confidence so both the persisted gate and later reads require review.
+        const overall = extractionQuality.evidenceIncomplete
+          ? 0
+          : aggregateFieldConfidence(taxFormInstances);
         const simulated = cls.simulated || extractions.some((e) => e.simulated);
 
         // Quality gate: real per-field confidences feed the existing
@@ -508,6 +592,8 @@ export async function runTaxDocumentIntelligence(
     return failRunWithClaim(
       error instanceof Error ? error.message : "Tax document intelligence run failed",
     );
+  } finally {
+    await packet?.close();
   }
 }
 

@@ -9,6 +9,7 @@ const documentId = randomUUID();
 const persistedDocumentId = randomUUID();
 const rollbackDocumentId = randomUUID();
 const jobId = randomUUID();
+const taxLaneJobId = randomUUID();
 let fixturesCreated = false;
 
 beforeAll(async () => {
@@ -221,6 +222,39 @@ describe.sequential("document extraction restart recovery", () => {
     });
   });
 
+  it("claims tax and ordinary jobs through independent database lanes", async () => {
+    await pool.query(
+      `UPDATE document_extraction_jobs
+          SET status='pending',attempt_count=0,available_at='2000-01-01T00:00:00Z',
+              claimed_at=null,lease_expires_at=null,claimed_by=null,completed_at=null,
+              last_error_code=null,last_error_at=null
+        WHERE id=$1`,
+      [jobId],
+    );
+    await pool.query(
+      `INSERT INTO document_extraction_jobs
+         (id,document_id,requested_by_user_id,mode,status,attempt_count,max_attempts,available_at)
+       VALUES ($1,$2,$3,'tax_package','pending',0,3,'2000-01-01T00:00:00Z')`,
+      [taxLaneJobId, documentId, userId],
+    );
+
+    const { claimNextDocumentExtractionJobForLane } = await import(
+      "../server/services/documentExtractionJobs"
+    );
+    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package");
+    expect(taxClaim).toMatchObject({ id: taxLaneJobId, mode: "tax_package", status: "processing" });
+
+    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary");
+    expect(ordinaryClaim).toMatchObject({ id: jobId, mode: "standard", status: "processing" });
+
+    await pool.query(
+      `UPDATE document_extraction_jobs
+          SET status='cancelled',claimed_by=null,lease_expires_at=null,completed_at=now()
+        WHERE id = ANY($1::varchar[])`,
+      [[jobId, taxLaneJobId]],
+    );
+  });
+
   it("orders final tax persistence and consent revocation so revoked data stays purged", async () => {
     await pool.query(
       `INSERT INTO borrower_consents
@@ -354,6 +388,57 @@ describe.sequential("document extraction restart recovery", () => {
 
     const afterRevocation = await withActiveTaxDocumentConsent(userId, async () => "written");
     expect(afterRevocation).toEqual({ authorized: false, value: null });
+  });
+
+  it("lets concurrent provider uses finish before revocation and blocks every later use", async () => {
+    await pool.query(
+      `INSERT INTO borrower_consents
+         (user_id,consent_type,consent_given,consent_method,is_revoked)
+       VALUES ($1,'tax_document_use',true,'click',false)`,
+      [userId],
+    );
+    const {
+      revokeTaxDocumentConsentAndPurge,
+      withActiveTaxDocumentConsentUse,
+    } = await import("../server/services/taxConsentWorkflow");
+
+    let enteredCount = 0;
+    let allEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+    let releaseUses!: () => void;
+    const release = new Promise<void>((resolve) => { releaseUses = resolve; });
+    const providerUse = (value: string) => withActiveTaxDocumentConsentUse(userId, async () => {
+      enteredCount += 1;
+      if (enteredCount === 2) allEntered();
+      await release;
+      return value;
+    });
+
+    const uses = [providerUse("classification"), providerUse("form")];
+    await entered;
+    let revocationSettled = false;
+    const revocation = revokeTaxDocumentConsentAndPurge(userId).then((result) => {
+      revocationSettled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(revocationSettled).toBe(false);
+
+    releaseUses();
+    const [useResults, revoked] = await Promise.all([Promise.all(uses), revocation]);
+    expect(useResults).toEqual([
+      { authorized: true, value: "classification" },
+      { authorized: true, value: "form" },
+    ]);
+    expect(revoked.revoked).toHaveLength(1);
+
+    let calledAfterRevocation = false;
+    const afterRevocation = await withActiveTaxDocumentConsentUse(userId, async () => {
+      calledAfterRevocation = true;
+      return "provider-called";
+    });
+    expect(afterRevocation).toEqual({ authorized: false, value: null });
+    expect(calledAfterRevocation).toBe(false);
   });
 
   it("locks a live claim through persistence and rejects the old token after takeover", async () => {

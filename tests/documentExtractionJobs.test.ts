@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyTaxPackageFailure,
   failureFromUnknown,
+  jobBelongsToWorkerLane,
   nextFailureTransition,
   retryDelayMs,
   standardDocumentNeedsExtraction,
@@ -19,6 +20,14 @@ describe("durable document extraction job policy", () => {
     expect(standardDocumentNeedsExtraction("bank_statement")).toBe(true);
     expect(standardDocumentNeedsExtraction("lease_agreement")).toBe(true);
     expect(standardDocumentNeedsExtraction("government_id")).toBe(false);
+  });
+
+  it("keeps long tax packages off the ordinary borrower-document lane", () => {
+    expect(jobBelongsToWorkerLane("standard", "ordinary")).toBe(true);
+    expect(jobBelongsToWorkerLane("autopilot", "ordinary")).toBe(true);
+    expect(jobBelongsToWorkerLane("tax_package", "ordinary")).toBe(false);
+    expect(jobBelongsToWorkerLane("tax_package", "tax_package")).toBe(true);
+    expect(jobBelongsToWorkerLane("standard", "tax_package")).toBe(false);
   });
 
   it("retries provider or storage failures but not missing configuration", () => {
@@ -113,6 +122,30 @@ describe("durable document extraction job policy", () => {
     });
     expect(classifyTaxPackageFailure(
       "Model output failed schema validation - values discarded, manual review required",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
+    expect(classifyTaxPackageFailure(
+      "Tax document classification returned 100 pages for a 98-page source",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
+    expect(classifyTaxPackageFailure(
+      "Tax form excerpt is 24.0 MB; split the source packet before provider extraction",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
+    expect(classifyTaxPackageFailure(
+      "Tax form page range 1-26 exceeds the 25-page provider excerpt limit",
+    )).toEqual({
+      code: "tax_package_validation_failed",
+      retryable: false,
+    });
+    expect(classifyTaxPackageFailure(
+      "Tax form page ranges overlap at source page 10",
     )).toEqual({
       code: "tax_package_validation_failed",
       retryable: false,

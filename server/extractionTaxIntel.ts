@@ -86,6 +86,28 @@ export interface TaxFormInstanceExtraction {
   warnings: string[];
   lineage: ExtractionLineage;
   simulated: boolean;
+  /** Set when the provider pass itself failed and the run must not complete. */
+  failureReason?: string;
+  /** Evidence that was visible but could not be filed safely. */
+  evidenceIncomplete?: boolean;
+}
+
+export interface RetainedTaxFields {
+  fields: Record<string, ExtractedFieldValue>;
+  unreadable: number;
+  missingEvidence: number;
+}
+
+export function assessTaxFormExtractions(
+  extractions: TaxFormInstanceExtraction[],
+): { failureReason?: string; evidenceIncomplete: boolean } {
+  const failed = extractions.find((extraction) => extraction.failureReason);
+  return {
+    failureReason: failed?.failureReason,
+    evidenceIncomplete: extractions.some(
+      (extraction) => extraction.evidenceIncomplete || Object.keys(extraction.fields).length === 0,
+    ),
+  };
 }
 
 const FORM_TYPE_PROMPT_LABELS: Record<TaxFormType, string> = {
@@ -139,7 +161,44 @@ Return ONLY valid JSON:
 {"pageCount": <total pages>, "forms": [{"formType": "...", "taxYear": 2025, "entityName": "... or null", "k1Variant": "1065 or 1120s or null", "pageStart": 1, "pageEnd": 2, "confidence": 0.95}], "warnings": []}`;
 }
 
-function buildFormExtractionPrompt(instance: ClassifiedFormInstance): string {
+export interface TaxFormExtractionWindow {
+  /** Original source page number minus provider-visible excerpt page number. */
+  sourcePageOffset: number;
+  attachedPageCount: number;
+}
+
+export function retainTaxFieldsWithEvidence(
+  candidateFields: Record<string, ExtractedFieldValue | undefined>,
+  instance: ClassifiedFormInstance,
+  window?: TaxFormExtractionWindow,
+): RetainedTaxFields {
+  const fields: Record<string, ExtractedFieldValue> = {};
+  let unreadable = 0;
+  let missingEvidence = 0;
+  const pageStart = window ? 1 : instance.pageStart ?? 1;
+  const pageEnd = window ? window.attachedPageCount : instance.pageEnd ?? pageStart;
+  for (const [name, field] of Object.entries(candidateFields)) {
+    if (!field) continue;
+    if (field.value === null) {
+      unreadable += 1;
+      continue;
+    }
+    if (!field.pageNumber || field.pageNumber < pageStart || field.pageNumber > pageEnd) {
+      missingEvidence += 1;
+      continue;
+    }
+    fields[name] = {
+      ...field,
+      pageNumber: field.pageNumber + (window?.sourcePageOffset ?? 0),
+    };
+  }
+  return { fields, unreadable, missingEvidence };
+}
+
+function buildFormExtractionPrompt(
+  instance: ClassifiedFormInstance,
+  window?: TaxFormExtractionWindow,
+): string {
   const catalog = TAX_FORM_FIELD_CATALOG[instance.formType];
   const fieldLines = Object.entries(catalog)
     .map(([name, spec]) => `- "${name}" (${FIELD_KIND_PROMPT_HINTS[spec.kind]}): ${spec.description}`)
@@ -153,7 +212,10 @@ function buildFormExtractionPrompt(instance: ClassifiedFormInstance): string {
   ]
     .filter(Boolean)
     .join(", ");
-  return `You are a tax document analysis specialist. The attached file is a complete tax package. Extract fields from EXACTLY ONE form instance in it:
+  const attachmentDescription = window
+    ? `The attached file is a bounded excerpt containing original source pages ${window.sourcePageOffset + 1}-${window.sourcePageOffset + window.attachedPageCount}. Its attached-page numbers run from 1-${window.attachedPageCount}.`
+    : "The attached file is the complete tax package.";
+  return `You are a tax document analysis specialist. ${attachmentDescription} Extract fields from EXACTLY ONE form instance in it:
 
 Target: ${FORM_TYPE_PROMPT_LABELS[instance.formType]}${where ? ` — ${where}` : ""}.
 
@@ -163,13 +225,13 @@ Fields to extract:
 ${fieldLines}
 
 Rules:
-- Every field you return must be {"value": <value>, "confidence": <0.0-1.0>, "pageNumber": <1-indexed page in the complete uploaded file>, "boundingBox": {"x": <0-1>, "y": <0-1>, "width": <0-1>, "height": <0-1>}}. Omit boundingBox only when the value is readable but its exact box cannot be located.
-- pageNumber must be inside the target form's page range. A value without a source page is not evidence and will be discarded.
+- Every field you return must be {"value": <value>, "confidence": <0.0-1.0>, "pageNumber": <1-indexed page in the attached file>, "boundingBox": {"x": <0-1>, "y": <0-1>, "width": <0-1>, "height": <0-1>}}. Omit boundingBox only when the value is readable but its exact box cannot be located.
+- pageNumber must be inside the attached file${window ? ` (1-${window.attachedPageCount})` : " and the target form's page range"}. A value without a source page is not evidence and will be discarded.
 - If a field is not present on the form or is unreadable, OMIT it or return {"value": null, "confidence": <low>}. NEVER estimate, compute, or carry a value from a different form or year.
 - Numbers must be plain (no currency symbols, no thousands separators). Parentheses on the form mean a negative number.
 
 Return ONLY valid JSON:
-{"taxYear": ${instance.taxYear ?? "<year or null>"}, "entityName": ${instance.entityName ? `"${instance.entityName}"` : "<name or null>"}, "fields": {"<fieldName>": {"value": 12345, "confidence": 0.97, "pageNumber": ${instance.pageStart ?? 1}, "boundingBox": {"x": 0.1, "y": 0.2, "width": 0.2, "height": 0.03}}}, "warnings": []}`;
+{"taxYear": ${instance.taxYear ?? "<year or null>"}, "entityName": ${instance.entityName ? `"${instance.entityName}"` : "<name or null>"}, "fields": {"<fieldName>": {"value": 12345, "confidence": 0.97, "pageNumber": ${window ? 1 : instance.pageStart ?? 1}, "boundingBox": {"x": 0.1, "y": 0.2, "width": 0.2, "height": 0.03}}}, "warnings": []}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,19 +519,25 @@ export function buildSimulatedTaxScenario(filePath: string): {
   };
 }
 
+function simulationSourceKey(source: string | Buffer): string {
+  return Buffer.isBuffer(source)
+    ? `buffer:${computeHash(source.toString("base64"))}`
+    : source;
+}
+
 function simulatedLineage(): ExtractionLineage {
   return { modelId: SIMULATED_MODEL_ID, promptVersion: EXTRACTION_PROMPT_VERSION };
 }
 
 /** Pass 1: find every IRS form instance in the uploaded tax package. */
 export async function classifyTaxDocument(
-  filePath: string,
+  filePath: string | Buffer,
   storedMimeType?: string,
 ): Promise<TaxFormClassificationResult> {
   const model = EXTRACTION_MODEL_TAX_PACKAGE;
   if (!anthropic) {
     if (extractionSimulationEnabled()) {
-      const sim = buildSimulatedTaxScenario(filePath);
+      const sim = buildSimulatedTaxScenario(simulationSourceKey(filePath));
       return { classification: sim.classification, lineage: simulatedLineage(), simulated: true };
     }
     return {
@@ -522,14 +590,15 @@ function matchesSimInstance(
 
 /** Pass 2: extract one classified form instance's fields as {value, confidence}. */
 export async function extractTaxFormInstanceFields(
-  filePath: string,
+  filePath: string | Buffer,
   instance: ClassifiedFormInstance,
   storedMimeType?: string,
+  window?: TaxFormExtractionWindow,
 ): Promise<TaxFormInstanceExtraction> {
   const model = EXTRACTION_MODEL_TAX_PACKAGE;
   if (!anthropic) {
     if (extractionSimulationEnabled()) {
-      const sim = buildSimulatedTaxScenario(filePath);
+      const sim = buildSimulatedTaxScenario(simulationSourceKey(filePath));
       const match = sim.instances.find((i) => matchesSimInstance(i, instance));
       if (match) {
         return { ...match.extraction, lineage: simulatedLineage(), simulated: true };
@@ -541,6 +610,7 @@ export async function extractTaxFormInstanceFields(
         warnings: ["Simulated extraction: no simulated data for this form instance"],
         lineage: simulatedLineage(),
         simulated: true,
+        evidenceIncomplete: true,
       };
     }
     return {
@@ -550,6 +620,8 @@ export async function extractTaxFormInstanceFields(
       warnings: ["Anthropic API not configured - form extraction unavailable"],
       lineage: lineageFor(model),
       simulated: false,
+      failureReason: "Anthropic API not configured - form extraction unavailable",
+      evidenceIncomplete: true,
     };
   }
 
@@ -557,7 +629,13 @@ export async function extractTaxFormInstanceFields(
     const base64 = await fileToBase64(filePath);
     const mimeType = getMimeType(filePath, storedMimeType);
     const text = await withCallTimeout(
-      generateExtractionText(anthropic, mimeType, base64, buildFormExtractionPrompt(instance), model),
+      generateExtractionText(
+        anthropic,
+        mimeType,
+        base64,
+        buildFormExtractionPrompt(instance, window),
+        model,
+      ),
       `Form extraction (${instance.formType})`,
     );
     const schema = buildFormExtractionResponseSchema(instance.formType);
@@ -570,28 +648,18 @@ export async function extractTaxFormInstanceFields(
         warnings: [VALIDATION_FAILED_WARNING],
         lineage: rawLineage(text, model),
         simulated: false,
+        failureReason: VALIDATION_FAILED_WARNING,
+        evidenceIncomplete: true,
       };
     }
 
     // Keep only readable values: a {value: null} entry means "label seen,
     // value unreadable" — that surfaces as a count, never as a number.
-    const fields: Record<string, ExtractedFieldValue> = {};
-    let unreadable = 0;
-    let missingEvidence = 0;
-    for (const [name, fv] of Object.entries(validated.fields as Record<string, ExtractedFieldValue | undefined>)) {
-      if (!fv) continue;
-      if (fv.value === null) {
-        unreadable += 1;
-        continue;
-      }
-      const pageStart = instance.pageStart ?? 1;
-      const pageEnd = instance.pageEnd ?? pageStart;
-      if (!fv.pageNumber || fv.pageNumber < pageStart || fv.pageNumber > pageEnd) {
-        missingEvidence += 1;
-        continue;
-      }
-      fields[name] = fv;
-    }
+    const { fields, unreadable, missingEvidence } = retainTaxFieldsWithEvidence(
+      validated.fields as Record<string, ExtractedFieldValue | undefined>,
+      instance,
+      window,
+    );
     const warnings = [...(validated.warnings ?? [])];
     if (unreadable > 0) {
       warnings.push(`${unreadable} field(s) visible but unreadable - omitted, manual review may be needed`);
@@ -607,6 +675,7 @@ export async function extractTaxFormInstanceFields(
       warnings,
       lineage: rawLineage(text, model),
       simulated: false,
+      evidenceIncomplete: unreadable > 0 || missingEvidence > 0 || Object.keys(fields).length === 0,
     };
   } catch (error) {
     console.error(`Form extraction error (${instance.formType}):`, error);
@@ -617,6 +686,8 @@ export async function extractTaxFormInstanceFields(
       warnings: [`Failed to extract ${instance.formType} fields`],
       lineage: lineageFor(model),
       simulated: false,
+      failureReason: `Form extraction (${instance.formType}) call failed`,
+      evidenceIncomplete: true,
     };
   }
 }
