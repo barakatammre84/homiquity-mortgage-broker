@@ -54,18 +54,45 @@ interface OutcomeSegment {
 
 interface HomiOutcomeMetrics {
   daysBack: number;
+  turnAttempts: number;
   turns: number;
-  groundedTurns: number;
-  repeatedQuestions: number;
-  repeatedQuestionRate: number;
+  failedTurns: number;
+  turnSuccessRate: number;
+  uniqueBorrowers: number;
+  serverTruthTurns: number;
+  serverActionTurns: number;
+  exactRepeatedQuestions: number;
+  exactRepeatedQuestionRate: number;
+  completionMeasuredTurns: number;
+  completionMeasurementCoverageRate: number;
+  captureAttemptTurns: number;
+  captureSucceededTurns: number;
+  capturedFields: number;
+  completionMeasuredCaptureTurns: number;
   completionImprovedTurns: number;
   completionImprovementRate: number;
+  completionRegressedTurns: number;
   humanHelpRequests: number;
   openHumanHelpRequests: number;
+  recordedStaffResponses: number;
+  recordedStaffResponseRate: number;
+  averageRecordedStaffResponseMinutes: number | null;
+  medianRecordedStaffResponseMinutes: number | null;
+  completedWithoutRecordedStaffResponse: number;
+  pastDueWithoutRecordedStaffResponse: number;
   averageTurnResponseMs: number | null;
-  averageHumanHelpResolutionMinutes: number | null;
+  p95TurnResponseMs: number | null;
+  invalidTurnLatencyRows: number;
   degradedTurns: number;
   lintReplacedTurns: number;
+  legacyTurns: number;
+  measurement: {
+    status: "collecting" | "observational_only";
+    canClaimReducedFriction: false;
+    minimumMeasuredTurns: number;
+    minimumUniqueBorrowers: number;
+    blockers: string[];
+  };
 }
 
 type CoreCapabilityState = "live" | "simulated" | "disabled" | "configuration_error";
@@ -458,57 +485,98 @@ export default function IntelligenceTab() {
         <TabsContent value="homi" className="space-y-4 mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Homi borrower outcomes</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-base">Homi borrower outcomes</CardTitle>
+                {homiOutcomes && (
+                  <Badge variant="secondary" data-testid="homi-measurement-status">
+                    {homiOutcomes.measurement.status === "collecting" ? "Collecting evidence" : "Observational evidence"}
+                  </Badge>
+                )}
+              </div>
               <p className="text-sm text-muted-foreground">
-                Measured work completion, repeated questions, response speed and accountable human follow-up over the last {homiOutcomes?.daysBack ?? 30} days.
+                Server-measured file progress, exact repeated wording, response speed and recorded staff replies over the last {homiOutcomes?.daysBack ?? 30} days.
               </p>
             </CardHeader>
             <CardContent>
-              {!homiOutcomes || homiOutcomes.turns === 0 ? (
+              {!homiOutcomes || (homiOutcomes.turnAttempts === 0 && homiOutcomes.humanHelpRequests === 0) ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   No measured Homi turns yet. Results appear after borrowers use Homi on this build.
                 </p>
               ) : (
                 <div className="space-y-4">
+                  <div className="rounded-lg border bg-muted p-3 text-sm text-foreground" data-testid="homi-claim-boundary">
+                    These measures describe observed work. They do not yet prove that Homi reduced friction; that claim needs the minimum sample and a pre-registered comparison cohort.
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Completion improved</p>
-                      <p className="text-xl font-semibold">{homiOutcomes.completionImprovementRate.toFixed(1)}%</p>
-                      <p className="text-xs text-muted-foreground">{homiOutcomes.completionImprovedTurns} of {homiOutcomes.turns} turns</p>
+                      <p className="text-xs text-muted-foreground">Saved work advanced file</p>
+                      <p className="text-xl font-semibold">
+                        {homiOutcomes.completionMeasuredCaptureTurns === 0 ? "—" : `${homiOutcomes.completionImprovementRate.toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {homiOutcomes.completionImprovedTurns} of {homiOutcomes.completionMeasuredCaptureTurns} measured capture turns
+                      </p>
                     </div>
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Repeated questions</p>
-                      <p className="text-xl font-semibold">{homiOutcomes.repeatedQuestionRate.toFixed(1)}%</p>
-                      <p className="text-xs text-muted-foreground">Lower is better</p>
+                      <p className="text-xs text-muted-foreground">Exact repeated wording</p>
+                      <p className="text-xl font-semibold">{homiOutcomes.exactRepeatedQuestionRate.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">{homiOutcomes.exactRepeatedQuestions} of {homiOutcomes.turns} turns</p>
                     </div>
                     <div className="rounded-lg border p-3">
                       <p className="text-xs text-muted-foreground">Average response</p>
                       <p className="text-xl font-semibold">
                         {homiOutcomes.averageTurnResponseMs === null ? "—" : `${(homiOutcomes.averageTurnResponseMs / 1000).toFixed(1)}s`}
                       </p>
-                      <p className="text-xs text-muted-foreground">End-to-end turn time</p>
+                      <p className="text-xs text-muted-foreground">
+                        {homiOutcomes.p95TurnResponseMs === null ? "No p95 yet" : `p95 ${(homiOutcomes.p95TurnResponseMs / 1000).toFixed(1)}s`}
+                      </p>
                     </div>
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Human follow-ups</p>
-                      <p className="text-xl font-semibold">{homiOutcomes.humanHelpRequests}</p>
-                      <p className="text-xs text-muted-foreground">{homiOutcomes.openHumanHelpRequests} currently open</p>
+                      <p className="text-xs text-muted-foreground">Recorded staff replies</p>
+                      <p className="text-xl font-semibold">
+                        {homiOutcomes.humanHelpRequests === 0 ? "—" : `${homiOutcomes.recordedStaffResponseRate.toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {homiOutcomes.recordedStaffResponses} of {homiOutcomes.humanHelpRequests} Homi requests
+                      </p>
                     </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-lg border p-3 text-sm">
-                      <p className="font-medium">Grounded file use</p>
+                      <p className="font-medium">Grounded and saved work</p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.groundedTurns} turns used a server-truth or action tool. {homiOutcomes.degradedTurns} used labeled offline guidance.
+                        {homiOutcomes.serverTruthTurns} turns read a server-truth tool; {homiOutcomes.serverActionTurns} used a server action. Homi saved {homiOutcomes.capturedFields} fields across {homiOutcomes.captureSucceededTurns} turns.
                       </p>
                     </div>
                     <div className="rounded-lg border p-3 text-sm">
-                      <p className="font-medium">Human response accountability</p>
+                      <p className="font-medium">Recorded human response</p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.averageHumanHelpResolutionMinutes === null
-                          ? "No Homi follow-up has been completed yet."
-                          : `Average follow-up resolution: ${homiOutcomes.averageHumanHelpResolutionMinutes} minutes.`}
+                        {homiOutcomes.medianRecordedStaffResponseMinutes === null
+                          ? "No staff reply in secure Messages is recorded after a Homi request."
+                          : `Median first staff reply: ${homiOutcomes.medianRecordedStaffResponseMinutes} minutes; average ${homiOutcomes.averageRecordedStaffResponseMinutes} minutes.`}
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        {homiOutcomes.openHumanHelpRequests} open · {homiOutcomes.pastDueWithoutRecordedStaffResponse} past due without a secure-message reply · {homiOutcomes.completedWithoutRecordedStaffResponse} completed without a secure-message reply
                       </p>
                     </div>
+                    <div className="rounded-lg border p-3 text-sm">
+                      <p className="font-medium">Measurement coverage</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {homiOutcomes.completionMeasuredTurns} of {homiOutcomes.turns} turns ({homiOutcomes.completionMeasurementCoverageRate.toFixed(1)}%) have two server file snapshots across {homiOutcomes.uniqueBorrowers} borrowers. {homiOutcomes.legacyTurns} turns use the earlier metric format.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border p-3 text-sm">
+                      <p className="font-medium">Quality exceptions</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {homiOutcomes.turns} of {homiOutcomes.turnAttempts} attempts completed ({homiOutcomes.turnSuccessRate.toFixed(1)}%) · {homiOutcomes.failedTurns} failed · {homiOutcomes.degradedTurns} offline-guidance turns · {homiOutcomes.lintReplacedTurns} compliance replacements · {homiOutcomes.completionRegressedTurns} measured regressions · {homiOutcomes.invalidTurnLatencyRows} invalid latency rows
+                      </p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border p-3 text-sm">
+                    <p className="font-medium">Evidence blockers</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                      {homiOutcomes.measurement.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+                    </ul>
                   </div>
                 </div>
               )}

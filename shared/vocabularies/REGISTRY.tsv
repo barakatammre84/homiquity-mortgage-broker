@@ -172,7 +172,7 @@ SfcExecution	shared/fannieMae/specialFeatureCodes.ts	union	3	f87e60e4d05b		0	int
 SITEMAP_STATIC_PATHS	shared/seo/routeMeta.ts	array	19	3959a41378db		2	internal	
 SITUATION_FLAG_IDS	shared/situationProfile.ts	array	10	4dfa7c4330a7	SituationFlagId	0	internal	
 SLA_CLASSES	shared/schema/underwritingTasks.ts	array	6	0188a35a5853	SlaClass	2	internal	
-STAFF_ROLES	shared/roles.ts	array	8	f0b806aacc9e		8	internal	
+STAFF_ROLES	shared/roles.ts	array	8	f0b806aacc9e		9	internal	
 STREAMLINE_ELIGIBLE_FAMILIES	shared/loanProducts.ts	array	3	f942aa76e8b2		0	internal	
 STUDENT_LOAN_TREATMENTS	shared/schema/underwritingCore.ts	array	5	1d4ae8375161		0	internal	
 TASK_OWNER_ROLES	shared/schema/underwritingTasks.ts	array	8	81080fa4875f	TaskOwnerRole	1	internal	

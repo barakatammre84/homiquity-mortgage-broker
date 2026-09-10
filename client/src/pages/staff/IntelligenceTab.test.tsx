@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import IntelligenceTab from "./IntelligenceTab";
 
-function renderTab() {
+function renderTab(homiOverrides: Record<string, unknown> = {}) {
   const client = new QueryClient({
     defaultOptions: {
       queries: {
@@ -66,18 +66,46 @@ function renderTab() {
   });
   client.setQueryData(["/api/analytics/homi-outcomes"], {
     daysBack: 30,
+    turnAttempts: 0,
     turns: 0,
-    groundedTurns: 0,
-    repeatedQuestions: 0,
-    repeatedQuestionRate: 0,
+    failedTurns: 0,
+    turnSuccessRate: 0,
+    uniqueBorrowers: 0,
+    serverTruthTurns: 0,
+    serverActionTurns: 0,
+    exactRepeatedQuestions: 0,
+    exactRepeatedQuestionRate: 0,
+    completionMeasuredTurns: 0,
+    completionMeasurementCoverageRate: 0,
+    captureAttemptTurns: 0,
+    captureSucceededTurns: 0,
+    capturedFields: 0,
+    completionMeasuredCaptureTurns: 0,
     completionImprovedTurns: 0,
     completionImprovementRate: 0,
+    completionRegressedTurns: 0,
     humanHelpRequests: 0,
     openHumanHelpRequests: 0,
+    recordedStaffResponses: 0,
+    recordedStaffResponseRate: 0,
+    averageRecordedStaffResponseMinutes: null,
+    medianRecordedStaffResponseMinutes: null,
+    completedWithoutRecordedStaffResponse: 0,
+    pastDueWithoutRecordedStaffResponse: 0,
     averageTurnResponseMs: null,
-    averageHumanHelpResolutionMinutes: null,
+    p95TurnResponseMs: null,
+    invalidTurnLatencyRows: 0,
     degradedTurns: 0,
     lintReplacedTurns: 0,
+    legacyTurns: 0,
+    measurement: {
+      status: "collecting",
+      canClaimReducedFriction: false,
+      minimumMeasuredTurns: 30,
+      minimumUniqueBorrowers: 10,
+      blockers: ["Define a pre-registered comparison cohort before claiming that Homi reduced friction."],
+    },
+    ...homiOverrides,
   });
 
   render(
@@ -106,5 +134,42 @@ describe("IntelligenceTab", () => {
     expect(screen.getByText("Last successful verification: not recorded")).toBeTruthy();
     expect(screen.getByTestId("document-extraction-queue")).toBeTruthy();
     expect(screen.getByText("Retry scheduled")).toBeTruthy();
+  });
+
+  it("shows the Homi evidence boundary and labels exact repeats and recorded replies", async () => {
+    renderTab({
+      turns: 8,
+      turnAttempts: 10,
+      failedTurns: 2,
+      turnSuccessRate: 80,
+      uniqueBorrowers: 3,
+      serverTruthTurns: 5,
+      serverActionTurns: 2,
+      exactRepeatedQuestions: 1,
+      exactRepeatedQuestionRate: 12.5,
+      completionMeasuredTurns: 8,
+      completionMeasurementCoverageRate: 100,
+      captureAttemptTurns: 2,
+      captureSucceededTurns: 2,
+      capturedFields: 3,
+      completionMeasuredCaptureTurns: 2,
+      completionImprovedTurns: 1,
+      completionImprovementRate: 50,
+      humanHelpRequests: 2,
+      openHumanHelpRequests: 1,
+      recordedStaffResponses: 1,
+      recordedStaffResponseRate: 50,
+      averageRecordedStaffResponseMinutes: 18,
+      medianRecordedStaffResponseMinutes: 18,
+      averageTurnResponseMs: 4_000,
+      p95TurnResponseMs: 7_000,
+    });
+    await userEvent.click(screen.getByTestId("tab-homi-outcomes"));
+
+    expect(screen.getByTestId("homi-measurement-status").textContent).toContain("Collecting evidence");
+    expect(screen.getByTestId("homi-claim-boundary").textContent).toContain("do not yet prove");
+    expect(screen.getByText("Exact repeated wording")).toBeTruthy();
+    expect(screen.getByText("Recorded staff replies")).toBeTruthy();
+    expect(screen.getByText(/Median first staff reply: 18 minutes/)).toBeTruthy();
   });
 });

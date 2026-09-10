@@ -67,7 +67,7 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
+| Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, current server-snapshot outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | The 30-turn/10-borrower floor, pre-registered comparison cohort and explicit accounting for phone/off-platform work remain uncollected | Strong assistant foundation; grounded production operability and a truthful measurement rail are built while production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
@@ -395,13 +395,19 @@ status, document requests, qualifying income, timelines or score improvements, a
 decision. The 2026-09-09 live-model run passed all 12 scenarios: tool triggering 5/5, restraint
 2/2, grounding 3/3, honest-gap handling 1/1 and prompt-injection resistance 1/1.
 
-**Built in the current production build:** Homi records grounded turns, repeated questions, completion
-movement, model latency, degraded/lint-replaced turns and human-help requests. `request_human_help`
-creates or reuses a real loan-officer task and will not claim success until that write succeeds.
+**Built in this release:** Homi refreshes the borrower-visible readiness panel after a successful
+chat capture from a second server file snapshot, then records that exact before/after state. It
+separates server-truth reads from assistant-only tools, records actual saved-field counts, failed
+turns, exact repeated wording, bounded response latency and degraded/lint-replaced turns.
+`request_human_help` creates or reuses a real loan-officer task and will not claim success until
+that write succeeds. The staff report measures the first later secure staff message to the same
+borrower and file; task completion is no longer mislabeled as a human response.
 
-**Production proof still required:** run redacted canaries and compare completion, repeat-question,
-handoff and response-time measures. A regression pass proves safety behavior; it does not prove that
-borrowers finish faster.
+**Production proof still required:** collect at least 30 current-format turns across 10 distinct
+borrowers, define a comparison cohort before reading its result and compare completion,
+exact-repeat, handoff and response-time measures. Phone calls and work outside secure Messages need
+an explicit disposition because the current report cannot see them. A regression pass and an
+observational dashboard prove operability; neither proves that borrowers finish faster.
 
 ## Build order and exit gates
 
@@ -450,7 +456,10 @@ file with no off-platform rekeying left undocumented.
 ### 5. Prove Homi from measured friction
 
 - Keep the grounded production canary ledger current.
-- Measure question repetition, completion, handoff and response latency.
+- Collect at least 30 server-measured turns across 10 borrowers and define the comparison cohort in
+  advance. Treat exact repeated wording as a narrow signal, not semantic question resolution.
+- Measure persisted completion movement, failed turns, handoff work and the first recorded staff
+  message after a request; disposition phone and off-platform work explicitly.
 - Add guidance only where a journey metric shows a problem.
 
 **Exit:** Homi materially reduces borrower or staff effort without increasing incorrect claims,
@@ -598,6 +607,13 @@ missed escalation or time to a useful human response.
     atomic pre-call reservations, resumable strict checkpoints, explicit production lineage and an
     aggregate-only report. Building this execution rail does not supply the independently reviewed
     document population or establish an accuracy result.
+51. Replaced Homi's optimistic outcome counters with evidence-bounded measures. Successful chat
+    capture now refreshes the visible readiness panel from the saved server file; completion deltas
+    use the same before/after snapshots, failed turns are counted, assistant-only tools no longer
+    count as grounded file use, and a human response means a later staff message to the same
+    borrower and file rather than task completion. The staff view shows coverage, sample floors and
+    the comparison-cohort blocker, so it cannot present observed activity as proof that Homi caused
+    less friction.
 
 ## Sources
 

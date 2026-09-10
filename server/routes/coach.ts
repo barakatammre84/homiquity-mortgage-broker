@@ -19,6 +19,10 @@ import { pickActiveLoanApplication, pickWorkableLoanApplication } from "@shared/
 import type { CoachConversation, User } from "@shared/schema";
 import { z } from "zod";
 import { emitEvent } from "../services/analyticsEventPipeline";
+import {
+  buildHomiTurnFailurePayload,
+  buildHomiTurnOutcomePayload,
+} from "../services/homiOutcomeEvaluation";
 
 /**
  * The only values `documents.notes.confidence` may take. Anything a legacy row
@@ -61,10 +65,40 @@ async function recordHomiOutcome(input: {
   startedAt: number;
   result: CoachTurnResult;
 }) {
-  const completionDelta = input.completionBefore !== null && input.completionAfter !== null
-    ? input.completionAfter - input.completionBefore
-    : null;
+  const responseMs = Date.now() - input.startedAt;
   await emitEvent("borrower", "homi_turn_completed", {
+    applicationId: input.result.state.syncedApplicationId ?? input.applicationId ?? undefined,
+    userId: input.userId,
+    actorId: input.userId,
+    actorRole: input.userRole,
+    entityType: "coach_conversation",
+    entityId: input.conversationId,
+    numericValue: responseMs,
+    source: "homi",
+    payload: buildHomiTurnOutcomePayload({
+      repeatedQuestion: input.repeatedQuestion,
+      completionBefore: input.completionBefore,
+      completionAfter: input.completionAfter,
+      degraded: input.result.degraded,
+      lintReplaced: input.result.lintReplaced,
+      modelCalls: input.result.usage.modelCalls,
+      toolCalls: input.result.toolCalls,
+      captureOutcome: input.result.state.captureOutcome,
+      humanHelpRequest: input.result.state.humanHelpRequest,
+    }),
+  });
+}
+
+async function recordHomiFailure(input: {
+  userId: string;
+  userRole: string;
+  applicationId: string | null;
+  conversationId: string;
+  startedAt: number;
+  code: string;
+  streamOpened: boolean;
+}) {
+  await emitEvent("borrower", "homi_turn_failed", {
     applicationId: input.applicationId ?? undefined,
     userId: input.userId,
     actorId: input.userId,
@@ -73,16 +107,46 @@ async function recordHomiOutcome(input: {
     entityId: input.conversationId,
     numericValue: Date.now() - input.startedAt,
     source: "homi",
-    payload: {
-      repeatedQuestion: input.repeatedQuestion,
-      completionDelta,
-      degraded: input.result.degraded,
-      lintReplaced: input.result.lintReplaced,
-      modelCalls: input.result.usage.modelCalls,
-      toolCalls: input.result.toolCalls,
-      humanHandoff: input.result.toolCalls.includes("request_human_help"),
-    },
+    payload: buildHomiTurnFailurePayload({
+      code: input.code,
+      streamOpened: input.streamOpened,
+    }),
   });
+}
+
+async function refreshReadinessAfterCapture(input: {
+  userId: string;
+  verifiedContext: VerifiedUserContext;
+  result: CoachTurnResult;
+  emit: CoachEmit;
+}): Promise<number | null> {
+  const before = input.verifiedContext.completionPercentage ?? null;
+  if ((input.result.state.captureOutcome?.appliedFields.length ?? 0) === 0) return before;
+
+  try {
+    const graph = await buildBorrowerGraph(
+      input.userId,
+      input.result.state.syncedApplicationId ?? undefined,
+    );
+    if (!graph) return null;
+    const refreshedContext: VerifiedUserContext = {
+      ...input.verifiedContext,
+      completionPercentage: graph.readiness.completionPercentage,
+      readinessTier: graph.readiness.tier,
+      completedInputs: graph.readiness.completedInputs,
+      outstandingInputs: graph.readiness.outstandingInputs,
+      documentsMissing: graph.documentsMissing,
+      documentsUploaded: graph.documentsUploaded,
+      documentsVerified: graph.documentsVerified,
+    };
+    const profile = deriveReadinessProfile(refreshedContext);
+    input.result.state.profile = profile;
+    input.emit({ type: "panel", profile, source: "file" });
+    return graph.readiness.completionPercentage;
+  } catch (error) {
+    console.error("[HomiOutcome] Failed to refresh the post-turn server snapshot:", error);
+    return null;
+  }
 }
 
 async function buildVerifiedContext(userId: string, user: User, propertyContext?: { price: number; address: string } | null): Promise<VerifiedUserContext> {
@@ -601,6 +665,12 @@ export function registerCoachRoutes(app: Express) {
   //   error {code, message, retryable}
   app.post("/api/coach/message/stream", isAuthenticated, async (req, res) => {
     let streaming = false;
+    let outcomeIdentity: {
+      userId: string;
+      userRole: string;
+      applicationId: string | null;
+      conversationId: string;
+    } | null = null;
     const turnStartedAt = Date.now();
     try {
       // Input-side sensitive-data guard: runs BEFORE prepareCoachTurn so a
@@ -616,6 +686,12 @@ export function registerCoachRoutes(app: Express) {
 
       const prep = await prepareCoachTurn(req, res, rawMessage);
       if (!prep) return;
+      outcomeIdentity = {
+        userId: prep.user.id,
+        userRole: prep.user.role,
+        applicationId: prep.verifiedContext.workableApplicationId ?? null,
+        conversationId: prep.conversation.id,
+      };
 
       if (guardHit) {
         const guardMessage = SENSITIVE_INPUT_MESSAGES[guardHit.kind];
@@ -675,6 +751,12 @@ export function registerCoachRoutes(app: Express) {
         signal: abortController.signal,
       });
 
+      const completionAfter = await refreshReadinessAfterCapture({
+        userId: prep.user.id,
+        verifiedContext: prep.verifiedContext,
+        result,
+        emit,
+      });
       const assistantMsg = await persistAssistantTurn(prep.conversation, prep.verifiedContext, result);
 
       await recordHomiOutcome({
@@ -683,8 +765,8 @@ export function registerCoachRoutes(app: Express) {
         applicationId: prep.verifiedContext.workableApplicationId ?? null,
         conversationId: prep.conversation.id,
         repeatedQuestion: prep.repeatedQuestion,
-        completionBefore: prep.verifiedContext.previousCompletionPercentage ?? null,
-        completionAfter: result.state.profile?.completionPercentage ?? prep.verifiedContext.completionPercentage ?? null,
+        completionBefore: prep.verifiedContext.completionPercentage ?? null,
+        completionAfter,
         startedAt: turnStartedAt,
         result,
       });
@@ -700,6 +782,14 @@ export function registerCoachRoutes(app: Express) {
       const payload = error instanceof CoachTurnError
         ? { code: error.code, message: error.message, retryable: error.retryable }
         : { code: "internal", message: "Failed to process message", retryable: true };
+      if (outcomeIdentity) {
+        await recordHomiFailure({
+          ...outcomeIdentity,
+          startedAt: turnStartedAt,
+          code: payload.code,
+          streamOpened: streaming,
+        });
+      }
       // Once the stream is open the global error handler can't fire
       // (headersSent) — errors must be emitted in-stream. No assistant
       // message is persisted on error: the client shows a retry affordance.
@@ -718,6 +808,12 @@ export function registerCoachRoutes(app: Express) {
   // an intermediary buffers SSE.
   app.post("/api/coach/message", isAuthenticated, async (req, res) => {
     const turnStartedAt = Date.now();
+    let outcomeIdentity: {
+      userId: string;
+      userRole: string;
+      applicationId: string | null;
+      conversationId: string;
+    } | null = null;
     try {
       // Same input-side sensitive-data guard as the streaming variant.
       const rawMessage = typeof req.body?.message === "string" ? req.body.message : "";
@@ -728,6 +824,12 @@ export function registerCoachRoutes(app: Express) {
 
       const prep = await prepareCoachTurn(req, res, rawMessage);
       if (!prep) return;
+      outcomeIdentity = {
+        userId: prep.user.id,
+        userRole: prep.user.role,
+        applicationId: prep.verifiedContext.workableApplicationId ?? null,
+        conversationId: prep.conversation.id,
+      };
 
       if (guardHit) {
         const guardMessage = SENSITIVE_INPUT_MESSAGES[guardHit.kind];
@@ -777,6 +879,12 @@ export function registerCoachRoutes(app: Express) {
         signal: abortController.signal,
       });
 
+      const completionAfter = await refreshReadinessAfterCapture({
+        userId: prep.user.id,
+        verifiedContext: prep.verifiedContext,
+        result,
+        emit,
+      });
       const assistantMsg = await persistAssistantTurn(prep.conversation, prep.verifiedContext, result);
       await recordHomiOutcome({
         userId: prep.user.id,
@@ -784,8 +892,8 @@ export function registerCoachRoutes(app: Express) {
         applicationId: prep.verifiedContext.workableApplicationId ?? null,
         conversationId: prep.conversation.id,
         repeatedQuestion: prep.repeatedQuestion,
-        completionBefore: prep.verifiedContext.previousCompletionPercentage ?? null,
-        completionAfter: result.state.profile?.completionPercentage ?? prep.verifiedContext.completionPercentage ?? null,
+        completionBefore: prep.verifiedContext.completionPercentage ?? null,
+        completionAfter,
         startedAt: turnStartedAt,
         result,
       });
@@ -807,6 +915,14 @@ export function registerCoachRoutes(app: Express) {
     } catch (error) {
       console.error("Coach message error:", error);
       if (res.headersSent) return;
+      if (outcomeIdentity) {
+        await recordHomiFailure({
+          ...outcomeIdentity,
+          startedAt: turnStartedAt,
+          code: error instanceof CoachTurnError ? error.code : "internal",
+          streamOpened: false,
+        });
+      }
       if (error instanceof CoachTurnError) {
         res.status(502).json({ error: error.message, code: error.code, retryable: error.retryable });
       } else {

@@ -106,7 +106,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Live · production canary proven** | Prove from journey outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
+| Guide the borrower with Homi | **Live · production canary proven · outcome collection built** | Collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
 | Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
@@ -152,8 +152,13 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.
 5. **Prove Homi's value:** production response canaries pass and the mortgage scenario and
-   prompt-attack regression suite is built. Change guidance only when journey measures show less
-   borrower or loan-officer effort.
+   prompt-attack regression suite is built. Homi now refreshes the readiness panel from the saved
+   server file after a successful chat capture and records completed and failed turns, exact-repeat
+   detection, server-truth reads, actual saved fields and staff secure-message response after a
+   handoff. The staff report separates legacy turns, measurement coverage and operational
+   exceptions and refuses a reduced-friction claim without at least 30 measured turns across 10
+   borrowers and a comparison cohort defined in advance. Collect that cohort; change guidance only
+   when the measured journey shows less borrower or loan-officer effort.
 
 The dated [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md)
 contains the evidence and acceptance tests. This order is part of Phase 0 and Phase 1; it does not
