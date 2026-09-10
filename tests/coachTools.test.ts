@@ -171,6 +171,12 @@ describe("executeCoachTool: record_intake", () => {
     );
     expect(ctx.state.intake).toEqual({ annualIncome: "85000", creditScore: "720" });
     expect(ctx.state.syncedApplicationId).toBe("app-1");
+    expect(ctx.state.captureOutcome).toEqual({
+      attempts: 1,
+      createdApplication: false,
+      appliedFields: ["annualIncome"],
+      skippedFields: 1,
+    });
     expect(events).toEqual([
       expect.objectContaining({ type: "captured", applicationId: "app-1", applied: [{ field: "annualIncome", value: "85000" }] }),
     ]);
@@ -198,6 +204,12 @@ describe("executeCoachTool: record_intake", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toMatch(/Do NOT tell the user/i);
     expect(ctx.state.intake).toEqual({ annualIncome: "85000" }); // structuredData still persists it
+    expect(ctx.state.captureOutcome).toEqual({
+      attempts: 1,
+      createdApplication: false,
+      appliedFields: [],
+      skippedFields: 0,
+    });
     expect(events).toEqual([]); // no captured event for a failed save
   });
 });

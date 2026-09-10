@@ -328,6 +328,13 @@ export interface CoachToolTurnState {
   borrowerPackage?: BorrowerPackage;
   suggestions?: string[];
   humanHelpRequest?: { taskId: string; alreadyOpen: boolean };
+  /** Redacted persistence result used by Homi's operational outcome metrics. */
+  captureOutcome?: {
+    attempts: number;
+    createdApplication: boolean;
+    appliedFields: string[];
+    skippedFields: number;
+  };
   /** Writeback target resolved by record_intake (for ai_interactions linkage). */
   syncedApplicationId?: string | null;
 }
@@ -709,10 +716,27 @@ export async function executeCoachTool(
       // /api/coach/intake/latest, and the Pre-Approval prefill read it) …
       ctx.state.intake = { ...ctx.state.intake, ...parsed.data };
 
+      const previousCapture = ctx.state.captureOutcome;
+      ctx.state.captureOutcome = {
+        attempts: (previousCapture?.attempts ?? 0) + 1,
+        createdApplication: previousCapture?.createdApplication ?? false,
+        appliedFields: previousCapture?.appliedFields ?? [],
+        skippedFields: previousCapture?.skippedFields ?? 0,
+      };
+
       // … and write through to the borrower's real records.
       try {
         const sync = await syncCoachIntakeToApplication(ctx.req, ctx.userId, parsed.data, ctx.conversationId);
         ctx.state.syncedApplicationId = sync.applicationId;
+        ctx.state.captureOutcome = {
+          attempts: ctx.state.captureOutcome.attempts,
+          createdApplication: ctx.state.captureOutcome.createdApplication || sync.created,
+          appliedFields: [...new Set([
+            ...ctx.state.captureOutcome.appliedFields,
+            ...sync.applied.map((field) => field.field),
+          ])],
+          skippedFields: ctx.state.captureOutcome.skippedFields + sync.skipped.length,
+        };
         ctx.emit({
           type: "captured",
           applicationId: sync.applicationId,
