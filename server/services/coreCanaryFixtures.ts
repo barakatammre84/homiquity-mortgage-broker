@@ -1,7 +1,57 @@
 import PDFDocument from "pdfkit";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, type SKRSContext2D } from "@napi-rs/canvas";
+import { resolve } from "node:path";
 import type { ExtractedDocumentData, ExtractedPayStubData } from "../extractionCore";
 import { EXTRACTION_MODEL_SINGLE_DOC } from "../extractionCore";
+
+const CANARY_FONT_REGULAR = "HomiquityCanaryRegular";
+const CANARY_FONT_SEMIBOLD = "HomiquityCanarySemibold";
+
+function registerCanaryFonts(): void {
+  const fontDirectory = resolve(process.cwd(), "attached_assets/brand/fonts");
+  if (
+    !GlobalFonts.has(CANARY_FONT_REGULAR) &&
+    !GlobalFonts.registerFromPath(resolve(fontDirectory, "geist-400.woff2"), CANARY_FONT_REGULAR)
+  ) {
+    throw new Error("Raster extraction fixture could not register its regular font");
+  }
+  if (
+    !GlobalFonts.has(CANARY_FONT_SEMIBOLD) &&
+    !GlobalFonts.registerFromPath(resolve(fontDirectory, "geist-600.woff2"), CANARY_FONT_SEMIBOLD)
+  ) {
+    throw new Error("Raster extraction fixture could not register its semibold font");
+  }
+}
+
+function darkPixelCount(
+  context: SKRSContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): number {
+  const pixels = context.getImageData(x, y, width, height).data;
+  let count = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (
+      pixels[index]! < 80 &&
+      pixels[index + 1]! < 100 &&
+      pixels[index + 2]! < 120 &&
+      pixels[index + 3]! > 200
+    ) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function assertCanaryTextRendered(context: SKRSContext2D): void {
+  const titleInk = darkPixelCount(context, 250, 110, 775, 80);
+  const financialInk = darkPixelCount(context, 100, 320, 1_075, 850);
+  if (titleInk < 500 || financialInk < 2_000) {
+    throw new Error("Raster extraction fixture font did not render enough visible text");
+  }
+}
 
 /**
  * One fixed, borrower-free, image-only pay statement shared by the ordinary
@@ -15,6 +65,7 @@ export async function buildSyntheticPayStatementPdf(): Promise<Buffer> {
   // 150 DPI letter page. Keep this clean and high contrast: it proves the
   // raster path is wired and usable. Representative scan quality and model
   // accuracy belong to the protected human-labeled benchmark.
+  registerCanaryFonts();
   const page = createCanvas(1_275, 1_650);
   try {
     const context = page.getContext("2d");
@@ -26,15 +77,15 @@ export async function buildSyntheticPayStatementPdf(): Promise<Buffer> {
 
     context.textAlign = "center";
     context.fillStyle = "#111827";
-    context.font = "700 42px sans-serif";
+    context.font = `42px ${CANARY_FONT_SEMIBOLD}`;
     context.fillText("SYNTHETIC PAY STATEMENT", page.width / 2, 160);
     context.fillStyle = "#475569";
-    context.font = "22px sans-serif";
+    context.font = `22px ${CANARY_FONT_REGULAR}`;
     context.fillText("Operational canary only — no borrower data", page.width / 2, 210);
 
     context.textAlign = "left";
     context.fillStyle = "#111827";
-    context.font = "26px sans-serif";
+    context.font = `26px ${CANARY_FONT_REGULAR}`;
     const lines = [
       "Employee: Morgan Test",
       "Employer: Homiquity Canary Corporation",
@@ -49,6 +100,7 @@ export async function buildSyntheticPayStatementPdf(): Promise<Buffer> {
       "Verification code: 7319",
     ];
     lines.forEach((line, index) => context.fillText(line, 130, 360 + index * 72));
+    assertCanaryTextRendered(context);
 
     const raster = page.toBuffer("image/png");
     return await new Promise((resolve, reject) => {
