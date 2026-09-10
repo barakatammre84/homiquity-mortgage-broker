@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `f84adce7ab153ca0c1a7426c9744bae0ceaa4aa9` on 2026-09-10.
+**Audited production baseline:** `9267ad963e48853fce8a4259b13faef8960bb29a` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -50,18 +50,22 @@ lender results never satisfy a verified decision or lender-acceptance gate.
 Production served the exact `main` commit above on 2026-09-10. Health and the scheduled core-proof
 route returned successfully, and the service reported SendGrid email configured. The repository
 has a strict required test gate, automatic production migrations and post-deploy commit
-verification. On that exact build, the strengthened borrower-data-free sweep passed before and
-after a controlled same-build process replacement. Homi's grounded status turn, the real synthetic
-pay-statement extraction path with page evidence, private object-storage write/read/delete, mixed
-W-2/business/rental analysis and deterministic underwriting took 4.104 s, 10.112 s, 0.591 s,
-0.006 s and 0.787 s before the restart, then 4.079 s, 9.645 s, 0.483 s, 0.004 s and 0.552 s after it.
-The Homi check uses the production prompt and context builder, requires the real status tool schema,
-grounds the reply in fixed server truth and passes outbound compliance lint without reading a
-borrower file. A private marker seeded by the old deployment was CRC-validated, read and deleted by
-a different deployment on the same commit 109.370 seconds later. This proves the private object
-store survives a controlled process replacement and that all five capabilities remained operable.
-It does not prove model accuracy, recovery of an interrupted provider-backed extraction or lender
-acceptance.
+verification. On that exact build, a post-restart borrower-data-free sweep passed Homi's grounded
+status turn, the real synthetic pay-statement extraction path with page evidence, private
+object-storage write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting
+in 5.069 s, 11.393 s, 0.451 s, 0.005 s and 0.743 s. The Homi check uses the production prompt and
+context builder, requires the real status tool schema, grounds the reply in fixed server truth and
+passes outbound compliance lint without reading a borrower file.
+
+The same build now proves recovery of an interrupted provider-backed ordinary-document job. The
+first deployment completed a real synthetic pay-statement provider read, verified exact values and
+page evidence, then stopped before persisting pages, facts, confidence or readiness. Railway
+replaced it with deployment `cef8b877-29f1-4683-944f-82caec441c2b` on the same exact commit. After
+the lease expired, the replacement reclaimed the fixed job on attempt two, repeated the provider
+read, committed one page graph, one confidence row and ten unique grounded facts, and removed every
+temporary database row and private object. This proves ordinary-document provider recovery without
+duplicate evidence. It does not prove model accuracy on a protected labeled set, production
+capacity for a provider-classified 100-page tax packet or lender acceptance.
 
 The internal complex-borrower journey is proven. Fictional multi-business, rental and mixed W-2
 plus side-business borrowers moved through the public application, full URLA, database
@@ -72,7 +76,7 @@ qualifying income, an approval or a lender-ready submission.
 
 No approved wholesale lender, current lender receiver, production credit/AUS/verification suite,
 real lender acceptance or funded Homiquity loan has been proven. Recovery of an in-flight
-provider-backed extraction and the complete operating handoff between licensed loan officer,
+multi-form tax-package extraction and the complete operating handoff between licensed loan officer,
 processor, underwriter and closer also remain unproven.
 
 ## Core capability map
@@ -82,7 +86,7 @@ processor, underwriter and closer also remain unproven.
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
 | Guide the borrower with Homi | **Live · production canary proven** | Prove from journey outcome measures that guidance reduces incomplete work, repeated questions or time to a useful human response. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
-| Collect and correct evidence | **Built · provider, storage and restart proof live** | Run pilot upload → page/box review → correction → authorized download; interrupt one provider-backed extraction during deployment and verify job recovery; calibrate accuracy with the protected labeled set. |
+| Collect and correct evidence | **Built · ordinary-document provider recovery live** | Run pilot upload → page/box review → correction → authorized download; repeat the recovery proof on a representative provider-classified tax packet; calibrate accuracy with the protected labeled set. |
 | Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
 | Explain options and decisions | **Built** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
@@ -92,14 +96,14 @@ processor, underwriter and closer also remain unproven.
 ## Core intelligence build order
 
 1. **Prove durable evidence ingestion in production:** database-backed extraction jobs, leased
-   restart recovery and staff-visible failures are built and proven locally for ordinary documents
-   and consented multi-form tax packages. Document status, confidence, extracted facts and
-   readiness commit atomically, demonstration extraction fails closed in production, and
-   tax-consent cleanup preserves unrelated work. The canary ledger is live and Homi, the real
-   pay-statement pipeline, private storage, mixed-income analysis and underwriting repeatability
-   pass before and after a controlled same-build process replacement in production. Generic private
-   storage survival is proven; complete one controlled interruption and recovery of an in-flight
-   provider-backed extraction and inspect its single resulting fact set.
+   restart recovery and staff-visible failures are built for ordinary documents and consented
+   multi-form tax packages. Document status, confidence, extracted facts and readiness commit
+   atomically, demonstration extraction fails closed in production, and tax-consent cleanup
+   preserves unrelated work. The canary ledger is live; Homi, the real pay-statement pipeline,
+   private storage, mixed-income analysis and underwriting remain operable across a controlled
+   process replacement. A provider-backed ordinary-document job now survives interruption before
+   persistence and produces one evidence set after reclaim. Keep that proof current and repeat it
+   on a representative provider-classified tax packet while measuring the deployed capacity limit.
 2. **Calibrate page-level evidence:** ordinary and consented tax uploads normalize pages, split or
    link logical documents, retain field-level source pages and support field and boundary review.
    A representative 100-page packet completes the local page pipeline inside the current capacity
