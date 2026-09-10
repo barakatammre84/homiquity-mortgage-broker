@@ -6,9 +6,11 @@ import {
   realpath,
   rename,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { MAX_UPLOAD_BYTES } from "@shared/uploads";
 import { MAX_FORM_INSTANCES, type ClassifiedFormInstance } from "@shared/taxFormExtraction";
@@ -50,6 +52,11 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const PRIVATE_PERMISSION_MASK = 0o077;
 const MAX_EVALUATION_CASES = 500;
 const MAX_PROVIDER_CALL_BUDGET = 2_000;
+const DEFAULT_REPOSITORY_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const EVALUATION_LOCK_FILE = ".extraction-evaluation.lock";
 
 export const EXTRACTION_EVALUATOR_TYPES = [
   "pay_stub",
@@ -438,6 +445,63 @@ async function atomicWriteJson(filePath: string, value: unknown): Promise<void> 
   await chmod(filePath, 0o600);
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) return false;
+    throw error;
+  }
+}
+
+async function acquireEvaluationLock(outputDirectory: string): Promise<() => Promise<void>> {
+  const lockPath = path.join(outputDirectory, EVALUATION_LOCK_FILE);
+  const token = randomUUID();
+  try {
+    await writeFile(lockPath, `${JSON.stringify({
+      pid: process.pid,
+      token,
+      startedAt: new Date().toISOString(),
+    })}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    await chmod(lockPath, 0o600);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "EEXIST"
+    ) {
+      throw new Error(
+        "Evaluation output is already locked; if the prior process terminated, remove the private lock file before resuming",
+      );
+    }
+    throw error;
+  }
+  return async () => {
+    try {
+      const current = JSON.parse(await readFile(lockPath, "utf8")) as { token?: unknown };
+      if (current.token === token) await unlink(lockPath);
+    } catch (error) {
+      if (
+        !error ||
+        typeof error !== "object" ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) throw error;
+    }
+  };
+}
+
 function parseJson<T>(bytes: Buffer, schema: z.ZodType<T>, label: string): T {
   let value: unknown;
   try {
@@ -467,7 +531,7 @@ function parseDataset(bytes: Buffer): ExtractionBenchmarkDataset {
 
 export async function loadExtractionEvaluationManifest(
   manifestPath: string,
-  repositoryRoot = process.cwd(),
+  repositoryRoot = DEFAULT_REPOSITORY_ROOT,
 ): Promise<{
   manifest: ExtractionEvaluationManifest;
   manifestSha256: string;
@@ -492,7 +556,7 @@ export async function loadExtractionEvaluationManifest(
 
 export async function prepareExtractionEvaluation(
   manifestPath: string,
-  repositoryRoot = process.cwd(),
+  repositoryRoot = DEFAULT_REPOSITORY_ROOT,
 ): Promise<PreparedExtractionEvaluation> {
   const loaded = await loadExtractionEvaluationManifest(manifestPath, repositoryRoot);
   const datasetAbsolutePath = await assertPrivateFile(
@@ -1132,40 +1196,21 @@ function reportFromCheckpoint(
   };
 }
 
-export async function runExtractionEvaluation(
+async function runLockedExtractionEvaluation(
+  prepared: PreparedExtractionEvaluation,
+  outputDirectory: string,
   options: RunExtractionEvaluationOptions,
-  dependencies: ExtractionEvaluationDependencies = defaultDependencies,
+  dependencies: ExtractionEvaluationDependencies,
+  now: () => Date,
 ): Promise<ExtractionEvaluationReport> {
-  const now = options.now ?? (() => new Date());
-  const prepared = await prepareExtractionEvaluation(
-    options.manifestPath,
-    options.repositoryRoot ?? process.cwd(),
-  );
-  dependencies.assertRuntimeReady();
-  const outputDirectory = await ensurePrivateOutputDirectory(
-    options.outputDirectory,
-    options.repositoryRoot ?? process.cwd(),
-  );
   const checkpointPath = path.join(outputDirectory, "checkpoint.json");
   const reportPath = path.join(outputDirectory, "report.json");
   let checkpoint: ExtractionEvaluationCheckpoint;
   if (options.resume) {
     checkpoint = await loadCheckpoint(checkpointPath, prepared);
   } else {
-    let checkpointExists = false;
-    try {
-      await stat(checkpointPath);
-      checkpointExists = true;
-    } catch (error) {
-      if (
-        !error ||
-        typeof error !== "object" ||
-        !("code" in error) ||
-        error.code !== "ENOENT"
-      ) throw error;
-    }
-    if (checkpointExists) {
-      throw new Error("Evaluation checkpoint already exists; use --resume or a new output directory");
+    if (await fileExists(checkpointPath) || await fileExists(reportPath)) {
+      throw new Error("Evaluation output already exists; use --resume or a new output directory");
     }
     checkpoint = newCheckpoint(prepared, now());
     await atomicWriteJson(checkpointPath, checkpoint);
@@ -1267,4 +1312,42 @@ export async function runExtractionEvaluation(
   const report = reportFromCheckpoint(prepared, checkpoint, now());
   await atomicWriteJson(reportPath, report);
   return report;
+}
+
+export async function runExtractionEvaluation(
+  options: RunExtractionEvaluationOptions,
+  dependencies: ExtractionEvaluationDependencies = defaultDependencies,
+): Promise<ExtractionEvaluationReport> {
+  const now = options.now ?? (() => new Date());
+  const repositoryRoot = options.repositoryRoot ?? DEFAULT_REPOSITORY_ROOT;
+  const prepared = await prepareExtractionEvaluation(options.manifestPath, repositoryRoot);
+  dependencies.assertRuntimeReady();
+  const outputDirectory = await ensurePrivateOutputDirectory(
+    options.outputDirectory,
+    repositoryRoot,
+  );
+  const outputFiles = [
+    path.join(outputDirectory, "checkpoint.json"),
+    path.join(outputDirectory, "report.json"),
+  ];
+  const inputFiles = new Set([
+    prepared.manifestAbsolutePath,
+    prepared.datasetAbsolutePath,
+    ...prepared.cases.map((item) => item.sourceAbsolutePath),
+  ]);
+  if (outputFiles.some((filePath) => inputFiles.has(filePath))) {
+    throw new Error("Evaluation output files must not overlap the manifest, labels, or sources");
+  }
+  const releaseLock = await acquireEvaluationLock(outputDirectory);
+  try {
+    return await runLockedExtractionEvaluation(
+      prepared,
+      outputDirectory,
+      options,
+      dependencies,
+      now,
+    );
+  } finally {
+    await releaseLock();
+  }
 }

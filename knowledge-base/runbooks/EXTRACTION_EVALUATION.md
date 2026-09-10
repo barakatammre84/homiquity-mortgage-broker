@@ -157,7 +157,10 @@ Completed cases are not called again. A failed or interrupted case can continue 
 per-case limit and the original manifest budget have room. Earlier failures and provider calls with
 missing response lineage remain in the checkpoint and keep that run ineligible for an accuracy
 claim. Use a new output directory for a clean rerun, a new manifest, a model/prompt revision or an
-adjudicated label set.
+adjudicated label set. One process holds the output-directory lock at a time. If the process is
+forcibly terminated, verify that no evaluation still uses that directory, then remove the private
+**.extraction-evaluation.lock** file before resuming. A fresh run refuses to overwrite either an
+existing checkpoint or report.
 
 The generated private **output/report.json** file contains aggregate metrics, run completeness,
 failure counts, provider-call use, model/prompt lineage and the benchmark's claim blockers. It

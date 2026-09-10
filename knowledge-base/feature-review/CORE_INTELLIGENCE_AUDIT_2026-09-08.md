@@ -259,7 +259,7 @@ unique source and adjudicated-label hashes, source page counts and exact case id
 It sends in-memory bytes through the production pay-stub, W-2, bank, lease and bounded multi-form
 tax adapters without importing the product database. Provider calls and their case IDs are reserved
 atomically before use, each case checkpoints privately, completed cases resume without another call,
-restart cannot reset a per-case limit, and the report
+restart cannot reset a per-case limit, concurrent runs cannot share one output directory, and the report
 is claim-ineligible when the run, provider result or model/prompt/response-hash lineage is incomplete.
 Raw provider responses, encrypted response payloads, document bytes, warnings and source paths are
 never serialized by the runner.

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -226,6 +226,60 @@ describe("protected extraction evaluation runner", () => {
     expect(executions).toBe(1);
     expect(resumed.providerCallsConsumed).toBe(1);
     expect(resumed.runComplete).toBe(true);
+  });
+
+  it("locks one output directory so concurrent runs cannot overwrite call accounting", async () => {
+    const fixture = await evaluationFixture();
+    let markReserved!: () => void;
+    let releaseProvider!: () => void;
+    const reserved = new Promise<void>((resolve) => { markReserved = resolve; });
+    const providerBlocked = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    const firstRun = runExtractionEvaluation({
+      manifestPath: fixture.manifestPath,
+      outputDirectory: fixture.outputDirectory,
+    }, {
+      assertRuntimeReady: () => undefined,
+      executeCase: async (item, reserveProviderCall) => {
+        await reserveProviderCall();
+        markReserved();
+        await providerBlocked;
+        return {
+          status: "completed",
+          errorCodes: [],
+          prediction: structuredClone(item.truth),
+          lineage: {
+            modelIds: [EXTRACTION_MODEL_SINGLE_DOC],
+            promptVersions: [EXTRACTION_PROMPT_VERSION],
+            responseHashes: ["b".repeat(64)],
+          },
+        };
+      },
+    });
+    await reserved;
+
+    await expect(runExtractionEvaluation({
+      manifestPath: fixture.manifestPath,
+      outputDirectory: fixture.outputDirectory,
+      resume: true,
+    }, successfulDependencies())).rejects.toThrow(/already locked/i);
+
+    releaseProvider();
+    await expect(firstRun).resolves.toMatchObject({ providerCallsConsumed: 1 });
+    await expect(stat(path.join(fixture.outputDirectory, ".extraction-evaluation.lock")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses to overwrite an existing report when starting a fresh run", async () => {
+    const fixture = await evaluationFixture();
+    await mkdir(fixture.outputDirectory, { mode: 0o700 });
+    await privateWrite(path.join(fixture.outputDirectory, "report.json"), "protected-existing-report\n");
+
+    await expect(runExtractionEvaluation({
+      manifestPath: fixture.manifestPath,
+      outputDirectory: fixture.outputDirectory,
+    }, successfulDependencies())).rejects.toThrow(/output already exists/i);
+    expect(await readFile(path.join(fixture.outputDirectory, "report.json"), "utf8"))
+      .toBe("protected-existing-report\n");
   });
 
   it("keeps an intentionally bounded tranche ineligible until every case is recorded", async () => {
