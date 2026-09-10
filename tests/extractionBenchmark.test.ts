@@ -37,13 +37,14 @@ function predictions(): ExtractionBenchmarkPredictions {
 }
 
 const passingThresholds = {
-  valuePrecision: 0.95,
-  valueRecall: 0.95,
-  pageAttributionAccuracy: 0.95,
-  documentTypeAccuracy: 0.95,
-  boundaryPrecision: 0.95,
-  boundaryRecall: 0.95,
-  businessWeightedFieldAccuracy: 0.95,
+  valuePrecision: 0.98,
+  valueRecall: 0.98,
+  pageAttributionAccuracy: 0.98,
+  documentTypeAccuracy: 0.98,
+  boundaryPrecision: 0.98,
+  boundaryRecall: 0.98,
+  criticalFieldAccuracy: 0.98,
+  businessWeightedFieldAccuracy: 0.98,
 };
 
 function productionDataset(): ExtractionBenchmarkDataset {
@@ -54,6 +55,7 @@ function productionDataset(): ExtractionBenchmarkDataset {
     labeling: {
       protocolVersion: "mortgage-labeling-v1",
       reviewerCount: 2,
+      reviewerIds: ["reviewer-a", "reviewer-b"],
       independentlyReviewed: true,
       adjudicated: true,
       manifestSha256: "a".repeat(64),
@@ -66,6 +68,10 @@ function productionDataset(): ExtractionBenchmarkDataset {
     cases: Array.from({ length: 30 }, (_, index) => ({
       ...structuredClone(dataset.cases[0]),
       caseId: `mixed-${index + 1}`,
+      labelReview: {
+        reviewerIds: ["reviewer-a", "reviewer-b"],
+        resolution: index % 5 === 0 ? "adjudicated" as const : "agreement" as const,
+      },
     })),
   };
 }
@@ -106,6 +112,9 @@ describe("extraction benchmark", () => {
       boundaryPrecision: 0.5,
       boundaryRecall: 0.5,
       boundaryAccuracy: 0.5,
+      expectedCriticalFields: 2,
+      correctCriticalValues: 1,
+      criticalFieldAccuracy: 0.5,
     });
     expect(report.overall.businessWeightedFieldAccuracy).toBe(0.5);
   });
@@ -146,6 +155,36 @@ describe("extraction benchmark", () => {
     expect(report.claimBlockers.join(" ")).toMatch(/independent reviewers/i);
     expect(report.claimBlockers.join(" ")).toMatch(/situation tag/i);
     expect(report.claimBlockers.join(" ")).toMatch(/acceptance thresholds/i);
+  });
+
+  it("requires case-level evidence that both reviewers handled every production label", () => {
+    const source = productionDataset();
+    delete source.cases[0].labelReview;
+    const report = scoreExtractionBenchmark(source, productionPredictions(source));
+    expect(report.evidenceEligibleForProductionClaim).toBe(false);
+    expect(report.claimBlockers.join(" ")).toMatch(/every production case.*two named opaque reviewers/i);
+    expect(report.claimBlockers.join(" ")).toMatch(/mixed-1/i);
+  });
+
+  it("rejects permissive pre-approved thresholds below the production operating floor", () => {
+    const source = productionDataset();
+    source.acceptanceThresholds = {
+      ...source.acceptanceThresholds!,
+      criticalFieldAccuracy: 0.5,
+    };
+    const report = scoreExtractionBenchmark(source, productionPredictions(source));
+    expect(report.evidenceEligibleForProductionClaim).toBe(true);
+    expect(report.meetsAcceptanceThresholds).toBe(false);
+    expect(report.claimBlockers.join(" ")).toMatch(/criticalFieldAccuracy.*production-claim floor/i);
+  });
+
+  it("blocks empty or non-critical truth that could otherwise score as perfect", () => {
+    const source = productionDataset();
+    source.cases[0].fields = {};
+    source.cases[0].logicalDocuments = [];
+    const report = scoreExtractionBenchmark(source, productionPredictions(source));
+    expect(report.eligibleForProductionClaim).toBe(false);
+    expect(report.claimBlockers.join(" ")).toMatch(/at least one critical field.*one logical document/i);
   });
 
   it("permits only a manifest-bound, sufficiently represented run that passes its thresholds", () => {

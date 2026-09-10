@@ -22,6 +22,13 @@ export interface BenchmarkLogicalDocument {
   pageEnd: number;
 }
 
+export interface BenchmarkLabelReview {
+  /** Opaque reviewer identifiers from the private labeling workspace. */
+  reviewerIds: string[];
+  /** Whether both reviewers agreed or a disagreement needed adjudication. */
+  resolution: "agreement" | "adjudicated";
+}
+
 export interface ExtractionBenchmarkCase {
   caseId: string;
   documentType: string;
@@ -29,6 +36,8 @@ export interface ExtractionBenchmarkCase {
   pageCount: number;
   fields: Record<string, BenchmarkField>;
   logicalDocuments: BenchmarkLogicalDocument[];
+  /** Required on every production-redacted truth case; never copied to predictions. */
+  labelReview?: BenchmarkLabelReview;
 }
 
 export interface ExtractionBenchmarkDataset {
@@ -42,6 +51,8 @@ export interface ExtractionBenchmarkDataset {
   labeling?: {
     protocolVersion: string;
     reviewerCount: number;
+    /** Opaque, unique identifiers; names and email addresses do not belong here. */
+    reviewerIds?: string[];
     independentlyReviewed: boolean;
     adjudicated: boolean;
     manifestSha256: string;
@@ -72,6 +83,7 @@ export interface ExtractionBenchmarkAcceptanceThresholds {
   documentTypeAccuracy: number;
   boundaryPrecision: number;
   boundaryRecall: number;
+  criticalFieldAccuracy: number;
   businessWeightedFieldAccuracy: number;
 }
 
@@ -88,6 +100,8 @@ export interface ExtractionBenchmarkMetrics {
   predictedLogicalDocuments: number;
   exactLogicalDocuments: number;
   falseLogicalDocuments: number;
+  expectedCriticalFields: number;
+  correctCriticalValues: number;
   valuePrecision: number;
   valueRecall: number;
   pageAttributionAccuracy: number;
@@ -95,6 +109,7 @@ export interface ExtractionBenchmarkMetrics {
   boundaryPrecision: number;
   boundaryRecall: number;
   boundaryAccuracy: number;
+  criticalFieldAccuracy: number;
   businessWeightedFieldAccuracy: number;
 }
 
@@ -127,8 +142,25 @@ const THRESHOLD_METRICS = [
   "documentTypeAccuracy",
   "boundaryPrecision",
   "boundaryRecall",
+  "criticalFieldAccuracy",
   "businessWeightedFieldAccuracy",
 ] as const satisfies ReadonlyArray<keyof ExtractionBenchmarkAcceptanceThresholds>;
+
+/**
+ * Internal operating floor for any production accuracy claim. A dataset may
+ * pre-register stricter targets, but a permissive target cannot turn weak OCR
+ * into a passing mortgage-evidence claim.
+ */
+export const MINIMUM_PRODUCTION_EXTRACTION_THRESHOLDS: ExtractionBenchmarkAcceptanceThresholds = {
+  valuePrecision: 0.98,
+  valueRecall: 0.98,
+  pageAttributionAccuracy: 0.98,
+  documentTypeAccuracy: 0.98,
+  boundaryPrecision: 0.98,
+  boundaryRecall: 0.98,
+  criticalFieldAccuracy: 0.98,
+  businessWeightedFieldAccuracy: 0.98,
+};
 
 interface ScoreAccumulator {
   cases: number;
@@ -143,6 +175,8 @@ interface ScoreAccumulator {
   predictedLogicalDocuments: number;
   exactLogicalDocuments: number;
   falseLogicalDocuments: number;
+  expectedCriticalFields: number;
+  correctCriticalValues: number;
   weightedCorrect: number;
   weightedTotal: number;
 }
@@ -160,6 +194,8 @@ const emptyScore = (): ScoreAccumulator => ({
   predictedLogicalDocuments: 0,
   exactLogicalDocuments: 0,
   falseLogicalDocuments: 0,
+  expectedCriticalFields: 0,
+  correctCriticalValues: 0,
   weightedCorrect: 0,
   weightedTotal: 0,
 });
@@ -213,6 +249,7 @@ function addCase(
 
   for (const [name, expected] of Object.entries(truth.fields)) {
     const weight = expected.impact === "critical" ? 3 : 1;
+    if (expected.impact === "critical") score.expectedCriticalFields += 1;
     score.weightedTotal += weight;
     const actual = predictedFields[name];
     if (!actual) {
@@ -222,6 +259,7 @@ function addCase(
     if (normalizedValue(actual.value) === normalizedValue(expected.value)) {
       score.correctValues += 1;
       score.weightedCorrect += weight;
+      if (expected.impact === "critical") score.correctCriticalValues += 1;
       if (actual.pageNumber === expected.pageNumber) score.correctSourcePages += 1;
     }
   }
@@ -260,6 +298,8 @@ function metrics(score: ScoreAccumulator): ExtractionBenchmarkMetrics {
     predictedLogicalDocuments: score.predictedLogicalDocuments,
     exactLogicalDocuments: score.exactLogicalDocuments,
     falseLogicalDocuments: score.falseLogicalDocuments,
+    expectedCriticalFields: score.expectedCriticalFields,
+    correctCriticalValues: score.correctCriticalValues,
     valuePrecision: ratio(score.correctValues, score.predictedFields),
     valueRecall: ratio(score.correctValues, score.expectedFields),
     pageAttributionAccuracy: ratio(score.correctSourcePages, score.correctValues),
@@ -267,6 +307,7 @@ function metrics(score: ScoreAccumulator): ExtractionBenchmarkMetrics {
     boundaryPrecision: ratio(score.exactLogicalDocuments, score.predictedLogicalDocuments),
     boundaryRecall: ratio(score.exactLogicalDocuments, score.expectedLogicalDocuments),
     boundaryAccuracy: ratio(score.exactLogicalDocuments, score.expectedLogicalDocuments),
+    criticalFieldAccuracy: ratio(score.correctCriticalValues, score.expectedCriticalFields),
     businessWeightedFieldAccuracy: ratio(score.weightedCorrect, score.weightedTotal),
   };
 }
@@ -296,6 +337,19 @@ function thresholdFailuresFor(
   return THRESHOLD_METRICS.flatMap((metric) =>
     actual[metric] < thresholds[metric]
       ? [`${label} ${metric} ${actual[metric].toFixed(4)} is below ${thresholds[metric].toFixed(4)}.`]
+      : [],
+  );
+}
+
+function thresholdPolicyFailures(
+  thresholds: ExtractionBenchmarkAcceptanceThresholds,
+): string[] {
+  return THRESHOLD_METRICS.flatMap((metric) =>
+    thresholds[metric] < MINIMUM_PRODUCTION_EXTRACTION_THRESHOLDS[metric]
+      ? [
+          `Pre-approved ${metric} threshold ${thresholds[metric].toFixed(4)} is below ` +
+          `Homiquity's production-claim floor ${MINIMUM_PRODUCTION_EXTRACTION_THRESHOLDS[metric].toFixed(4)}.`,
+        ]
       : [],
   );
 }
@@ -360,11 +414,13 @@ export function scoreExtractionBenchmark(
     evidenceBlockers.push("The dataset is synthetic; it cannot support a production accuracy claim.");
   }
   const labeling = dataset.labeling;
+  const reviewerIds = normalizedScope(labeling?.reviewerIds);
   if (
     typeof labeling?.protocolVersion !== "string" ||
     !labeling.protocolVersion.trim() ||
     !Number.isInteger(labeling.reviewerCount) ||
     labeling.reviewerCount < 2 ||
+    reviewerIds.length !== labeling.reviewerCount ||
     !labeling.independentlyReviewed ||
     !labeling.adjudicated ||
     typeof labeling.manifestSha256 !== "string" ||
@@ -373,6 +429,28 @@ export function scoreExtractionBenchmark(
     evidenceBlockers.push(
       "Labels need a versioned protocol, two independent reviewers, adjudication, and a valid private-manifest SHA-256.",
     );
+  }
+  if (dataset.kind === "production_redacted") {
+    const reviewerIdSet = new Set(reviewerIds);
+    const incompleteCases = dataset.cases.flatMap((item) => {
+      const caseReviewers = normalizedScope(item.labelReview?.reviewerIds);
+      const reviewIsComplete = caseReviewers.length >= 2 &&
+        caseReviewers.every((reviewerId) => reviewerIdSet.has(reviewerId)) &&
+        (item.labelReview?.resolution === "agreement" || item.labelReview?.resolution === "adjudicated");
+      const hasScorableTruth = Object.keys(item.fields ?? {}).length > 0 &&
+        Object.values(item.fields ?? {}).some((field) => field.impact === "critical") &&
+        (item.logicalDocuments ?? []).length > 0 &&
+        item.situationTags.length > 0;
+      return reviewIsComplete && hasScorableTruth ? [] : [item.caseId];
+    });
+    if (incompleteCases.length > 0) {
+      const preview = incompleteCases.slice(0, 5).join(", ");
+      const suffix = incompleteCases.length > 5 ? ` and ${incompleteCases.length - 5} more` : "";
+      evidenceBlockers.push(
+        `Every production case needs two named opaque reviewers from the dataset roster, a review resolution, ` +
+        `at least one critical field, one logical document and one situation tag. Incomplete: ${preview}${suffix}.`,
+      );
+    }
   }
   if (labeling?.manifestSha256 && predictions.datasetManifestSha256 !== labeling.manifestSha256) {
     evidenceBlockers.push("Predictions are not bound to the labeled dataset manifest SHA-256.");
@@ -406,6 +484,9 @@ export function scoreExtractionBenchmark(
   if (!dataset.acceptanceThresholds) {
     thresholdFailures.push("Pre-approved acceptance thresholds are required before scoring a production claim.");
   } else {
+    if (dataset.kind === "production_redacted") {
+      thresholdFailures.push(...thresholdPolicyFailures(dataset.acceptanceThresholds));
+    }
     thresholdFailures.push(...thresholdFailuresFor("Overall", scoredOverall, dataset.acceptanceThresholds));
     for (const type of claimScope.documentTypes) {
       const segment = scoredByDocumentType[type];

@@ -1,4 +1,5 @@
 import {
+  bindExtractionEvaluationLabels,
   loadExtractionEvaluationManifest,
   prepareExtractionEvaluation,
   runExtractionEvaluation,
@@ -9,6 +10,7 @@ interface CliOptions {
   outputDirectory?: string;
   resume: boolean;
   dryRun: boolean;
+  bindLabels: boolean;
   printManifestSha: boolean;
   maxCases?: number;
 }
@@ -16,6 +18,7 @@ interface CliOptions {
 function usage(): never {
   console.error(`Usage:
   pnpm benchmark:extraction:run --manifest <private-manifest.json> --print-manifest-sha
+  pnpm benchmark:extraction:run --manifest <private-manifest.json> --bind-labels
   pnpm benchmark:extraction:run --manifest <private-manifest.json> --dry-run
   pnpm benchmark:extraction:run --manifest <private-manifest.json> --output <private-directory> [--resume] [--max-cases N]`);
   process.exit(2);
@@ -25,6 +28,7 @@ function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
     resume: false,
     dryRun: false,
+    bindLabels: false,
     printManifestSha: false,
   };
   for (let index = 0; index < args.length; index += 1) {
@@ -33,6 +37,7 @@ function parseArgs(args: string[]): CliOptions {
     else if (arg === "--output") options.outputDirectory = args[++index];
     else if (arg === "--resume") options.resume = true;
     else if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--bind-labels") options.bindLabels = true;
     else if (arg === "--print-manifest-sha") options.printManifestSha = true;
     else if (arg === "--max-cases") {
       const raw = args[++index];
@@ -40,14 +45,17 @@ function parseArgs(args: string[]): CliOptions {
     } else usage();
   }
   if (!options.manifestPath) usage();
+  const preparationModes = [options.printManifestSha, options.bindLabels, options.dryRun]
+    .filter(Boolean).length;
+  if (preparationModes > 1) usage();
   if (
-    options.printManifestSha &&
-    (options.dryRun || options.outputDirectory || options.resume || options.maxCases !== undefined)
+    (options.printManifestSha || options.bindLabels) &&
+    (options.outputDirectory || options.resume || options.maxCases !== undefined)
   ) usage();
   if (options.dryRun && (options.outputDirectory || options.resume || options.maxCases !== undefined)) {
     usage();
   }
-  if (!options.printManifestSha && !options.dryRun && !options.outputDirectory) usage();
+  if (!options.printManifestSha && !options.bindLabels && !options.dryRun && !options.outputDirectory) usage();
   return options;
 }
 
@@ -56,6 +64,11 @@ async function main(): Promise<void> {
   if (options.printManifestSha) {
     const loaded = await loadExtractionEvaluationManifest(options.manifestPath!);
     console.log(JSON.stringify({ manifestSha256: loaded.manifestSha256 }, null, 2));
+    return;
+  }
+  if (options.bindLabels) {
+    const bound = await bindExtractionEvaluationLabels(options.manifestPath!);
+    console.log(JSON.stringify(bound, null, 2));
     return;
   }
   if (options.dryRun) {
@@ -78,6 +91,13 @@ async function main(): Promise<void> {
       byExtractor,
       plannedProviderCalls: prepared.plannedProviderCalls,
       providerCallBudget: prepared.manifest.providerCallBudget,
+      evidenceEligibleForProductionClaim:
+        prepared.claimReadiness.evidenceEligibleForProductionClaim,
+      thresholdsMeetProductionFloor:
+        prepared.claimReadiness.meetsAcceptanceThresholds,
+      eligibleIfExtractionPasses:
+        prepared.claimReadiness.eligibleForProductionClaim,
+      preflightClaimBlockers: prepared.claimReadiness.claimBlockers,
     }, null, 2));
     return;
   }

@@ -9,13 +9,21 @@ This is the execution half of the benchmark in
 [the core intelligence audit](../feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md). A successful
 run proves only the measured population, model and prompt recorded in its report. Synthetic cases,
 an incomplete run, a provider/lineage failure, fewer than 30 independently reviewed cases in a
-claimed segment, or a missed pre-approved threshold cannot support an accuracy claim.
+claimed segment, an unreviewed case, a critical field missing from truth, or a missed pre-approved
+threshold cannot support an accuracy claim. Production thresholds cannot be below Homiquity's
+code-enforced 0.98 operating floor.
 
 ## Private workspace
 
 Create a directory outside this public repository on an encrypted, access-controlled volume. The
 manifest, labels and every source must be a regular file accessible only to the current user; the
 output directory must also be private.
+
+Copy the repository's blank
+[`manifest.template.json`](../../benchmarks/extraction/manifest.template.json) and
+[`labels.template.json`](../../benchmarks/extraction/labels.template.json) into that directory.
+Use [`mortgage-extraction-v1`](../../benchmarks/extraction/LABELING_PROTOCOL.md) for the independent
+review and adjudication. The templates contain placeholders, not a usable dataset.
 
 ```text
 /private/homiquity-extraction-eval/
@@ -78,14 +86,19 @@ budget.
 
 Allowed extractors are `pay_stub`, `w2`, `bank_statement`, `lease_agreement` and `tax_package`.
 Allowed MIME types are PDF, JPEG and PNG. Compute every source digest from the final redacted bytes;
-any later edit deliberately breaks the run.
+any later edit deliberately breaks the run. On macOS or Linux, `shasum -a 256 <source>` prints the
+digest. The preflight rejects a field key that the selected production extractor can never emit.
 
 ## Labels and the two-way hash binding
 
 The private **labels.json** file uses `ExtractionBenchmarkDataset` from
 [`extractionBenchmark.ts`](../../server/services/extractionBenchmark.ts). Each case needs an exact
 document type, situation tags, source page count, evidence-backed field values and logical-document
-boundaries. Set `impact` to `critical` only under the approved labeling protocol.
+boundaries. Every production case also records the two opaque reviewer IDs and whether they agreed
+or required adjudication. It must contain at least one critical field, one logical document and one
+situation tag. Set `impact` to `critical` under the approved labeling protocol; critical-field
+accuracy is scored separately so a large number of easy fields cannot conceal a mortgage-impacting
+error.
 
 Simple-document field keys are the production field paths. Examples include `grossPay`,
 `wagesTipsOtherCompensation`, `closingBalance`, `statementPeriod.end` and `monthlyRent`. The expected
@@ -102,17 +115,22 @@ Create the binding in this order:
 
 1. Finish the manifest's case list, source hashes and call budget. Leave `dataset.sha256` as 64
    zeroes.
-2. Print the canonical manifest identity:
+2. Complete the resolved **labels.json**, including its dataset identity, reviewer roster,
+   case-level review records, claim scope, thresholds and cases. Leave `labeling.manifestSha256` as
+   64 zeroes. Do not show model output to either reviewer before this file is frozen.
+3. Bind both files with private atomic file replacements:
 
    ```bash
-   pnpm benchmark:extraction:run --manifest /private/homiquity-extraction-eval/manifest.json --print-manifest-sha
+   pnpm benchmark:extraction:run --manifest /private/homiquity-extraction-eval/manifest.json --bind-labels
    ```
 
-3. Put that value in the private **labels.json** file at `labeling.manifestSha256`. Complete the
-   dataset ID, version, labeling protocol, two-reviewer/adjudication fields, claim scope and thresholds.
-4. Hash the final private **labels.json** bytes and replace the manifest's `dataset.sha256` with that digest.
-   The canonical manifest identity deliberately excludes only this one label-file digest, which
-   avoids a circular hash while the final pair still binds in both directions.
+The command requires the manifest's label digest placeholder to still be 64 zeroes, verifies the
+dataset and manifest identities and case lists, writes the canonical manifest identity into the
+labels, then writes the final label-file digest into the manifest. It refuses to overwrite an
+already-bound pair; make a private copy and restore the two zero placeholders before deliberately
+rebinding changed labels. `--print-manifest-sha` remains available for an independent digest check.
+The canonical manifest identity excludes only the label-file digest, avoiding a circular hash while
+the final pair still binds in both directions.
 
 Changing the case list, sources, paths, MIME types, extractor choice or call limits changes the
 manifest identity. Changing any label changes the dataset digest. A resume works only when both
@@ -126,6 +144,12 @@ credential or making a paid call:
 ```bash
 pnpm benchmark:extraction:run --manifest /private/homiquity-extraction-eval/manifest.json --dry-run
 ```
+
+The output includes document/extractor counts, planned calls, production-claim readiness and every
+preflight blocker. A production-redacted live run refuses to load a provider credential, create an
+output directory or make a provider call until this preflight could support a claim assuming the
+candidate extraction meets the frozen thresholds. Synthetic runs remain available for engineering
+checks and are always claim-ineligible.
 
 For a live run, supply the managed Anthropic credential to the local process and keep
 `EXTRACTION_SIMULATE` unset. The runner refuses production-service execution and simulation. Start

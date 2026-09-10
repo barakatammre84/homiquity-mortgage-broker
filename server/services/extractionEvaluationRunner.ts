@@ -154,6 +154,7 @@ export interface PreparedExtractionEvaluation {
   datasetSha256: string;
   datasetAbsolutePath: string;
   plannedProviderCalls: number;
+  claimReadiness: ExtractionBenchmarkReport;
   cases: PreparedEvaluationCase[];
 }
 
@@ -186,7 +187,7 @@ const benchmarkFieldSchema = z.object({
   impact: z.enum(["critical", "standard"]).optional(),
 }).strict();
 
-const benchmarkCaseSchema: z.ZodType<ExtractionBenchmarkCase> = z.object({
+const benchmarkCaseShape = {
   caseId: z.string().trim().min(1).max(100),
   documentType: z.string().trim().min(1).max(100),
   situationTags: z.array(z.string().trim().min(1).max(100)).max(100),
@@ -197,6 +198,49 @@ const benchmarkCaseSchema: z.ZodType<ExtractionBenchmarkCase> = z.object({
     pageStart: z.number().int().min(1).max(1_000),
     pageEnd: z.number().int().min(1).max(1_000),
   }).strict()).max(1_000),
+};
+
+const benchmarkCaseSchema: z.ZodType<ExtractionBenchmarkCase> = z.object(
+  benchmarkCaseShape,
+).strict();
+
+const benchmarkTruthCaseSchema = z.object({
+  ...benchmarkCaseShape,
+  labelReview: z.object({
+    reviewerIds: z.array(z.string().trim().min(1).max(100)).min(2).max(20),
+    resolution: z.enum(["agreement", "adjudicated"]),
+  }).strict().optional(),
+}).strict();
+
+const acceptanceThresholdsSchema = z.object({
+  valuePrecision: z.number().finite().min(0).max(1),
+  valueRecall: z.number().finite().min(0).max(1),
+  pageAttributionAccuracy: z.number().finite().min(0).max(1),
+  documentTypeAccuracy: z.number().finite().min(0).max(1),
+  boundaryPrecision: z.number().finite().min(0).max(1),
+  boundaryRecall: z.number().finite().min(0).max(1),
+  criticalFieldAccuracy: z.number().finite().min(0).max(1),
+  businessWeightedFieldAccuracy: z.number().finite().min(0).max(1),
+}).strict();
+
+const benchmarkDatasetSchema = z.object({
+  datasetId: z.string().trim().min(1).max(100),
+  version: z.string().trim().min(1).max(100),
+  kind: z.enum(["synthetic", "production_redacted"]),
+  labeling: z.object({
+    protocolVersion: z.string().trim().min(1).max(100),
+    reviewerCount: z.number().int().min(2).max(20),
+    reviewerIds: z.array(z.string().trim().min(1).max(100)).min(2).max(20),
+    independentlyReviewed: z.boolean(),
+    adjudicated: z.boolean(),
+    manifestSha256: sha256Schema,
+  }).strict().optional(),
+  claimScope: z.object({
+    documentTypes: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+    situationTags: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+  }).strict().optional(),
+  acceptanceThresholds: acceptanceThresholdsSchema.optional(),
+  cases: z.array(benchmarkTruthCaseSchema).min(1).max(MAX_EVALUATION_CASES),
 }).strict();
 
 export interface EvaluationCaseLineage {
@@ -517,16 +561,34 @@ function parseJson<T>(bytes: Buffer, schema: z.ZodType<T>, label: string): T {
 }
 
 function parseDataset(bytes: Buffer): ExtractionBenchmarkDataset {
-  let value: unknown;
-  try {
-    value = JSON.parse(bytes.toString("utf8"));
-  } catch {
-    throw new Error("Evaluation dataset is not valid JSON");
+  return parseJson(
+    bytes,
+    benchmarkDatasetSchema,
+    "Evaluation dataset",
+  ) as ExtractionBenchmarkDataset;
+}
+
+function assertTruthFitsExtractor(
+  item: ExtractionEvaluationManifestCase,
+  truth: ExtractionBenchmarkCase,
+): void {
+  if (item.extractor === "tax_package") {
+    if (truth.documentType !== "tax_package") {
+      throw new Error(`Tax-package case ${item.caseId} must label documentType tax_package`);
+    }
+    const unsupported = Object.keys(truth.fields).find((field) =>
+      !/^[a-z0-9_]+\[[1-9]\d*\]\.[A-Za-z][A-Za-z0-9]*$/.test(field),
+    );
+    if (unsupported) {
+      throw new Error(`Tax-package case ${item.caseId} has an unsupported field key ${unsupported}`);
+    }
+    return;
   }
-  if (!value || typeof value !== "object" || !Array.isArray((value as { cases?: unknown }).cases)) {
-    throw new Error("Evaluation dataset does not contain benchmark cases");
+  const allowedFields = new Set(SIMPLE_FIELD_PATHS[item.extractor]);
+  const unsupported = Object.keys(truth.fields).find((field) => !allowedFields.has(field));
+  if (unsupported) {
+    throw new Error(`${item.extractor} case ${item.caseId} has an unsupported field key ${unsupported}`);
   }
-  return value as ExtractionBenchmarkDataset;
 }
 
 export async function loadExtractionEvaluationManifest(
@@ -551,6 +613,65 @@ export async function loadExtractionEvaluationManifest(
     manifest,
     manifestSha256: computeEvaluationManifestSha256(manifest),
     manifestAbsolutePath,
+  };
+}
+
+export async function bindExtractionEvaluationLabels(
+  manifestPath: string,
+  repositoryRoot = DEFAULT_REPOSITORY_ROOT,
+): Promise<{
+  manifestSha256: string;
+  datasetSha256: string;
+  cases: number;
+}> {
+  const loaded = await loadExtractionEvaluationManifest(manifestPath, repositoryRoot);
+  if (loaded.manifest.dataset.sha256 !== "0".repeat(64)) {
+    throw new Error(
+      "Label binding requires dataset.sha256 to contain 64 zeroes; copy the files before rebinding",
+    );
+  }
+  const datasetAbsolutePath = await assertPrivateFile(
+    resolvePrivateReference(loaded.manifest.dataset.path, loaded.manifestAbsolutePath),
+    repositoryRoot,
+    "Evaluation dataset",
+  );
+  const dataset = parseDataset(await readFile(datasetAbsolutePath));
+  if (dataset.kind !== "production_redacted" || !dataset.labeling) {
+    throw new Error("Label binding requires a production_redacted dataset with labeling metadata");
+  }
+  if (
+    dataset.datasetId !== loaded.manifest.dataset.datasetId ||
+    dataset.version !== loaded.manifest.dataset.version
+  ) {
+    throw new Error("Evaluation dataset identity does not match the manifest");
+  }
+  const datasetIds = new Set(dataset.cases.map((item) => item.caseId));
+  const manifestIds = new Set(loaded.manifest.cases.map((item) => item.caseId));
+  if (
+    datasetIds.size !== dataset.cases.length ||
+    manifestIds.size !== loaded.manifest.cases.length ||
+    datasetIds.size !== manifestIds.size ||
+    [...datasetIds].some((caseId) => !manifestIds.has(caseId))
+  ) {
+    throw new Error("Manifest and dataset must contain exactly the same unique case ids");
+  }
+
+  dataset.labeling.manifestSha256 = loaded.manifestSha256;
+  const datasetBytes = Buffer.from(`${JSON.stringify(dataset, null, 2)}\n`);
+  const datasetSha256 = digest(datasetBytes);
+  const finalManifest: ExtractionEvaluationManifest = {
+    ...loaded.manifest,
+    dataset: {
+      ...loaded.manifest.dataset,
+      sha256: datasetSha256,
+    },
+  };
+  await atomicWriteJson(datasetAbsolutePath, dataset);
+  await atomicWriteJson(loaded.manifestAbsolutePath, finalManifest);
+  return {
+    manifestSha256: loaded.manifestSha256,
+    datasetSha256,
+    cases: dataset.cases.length,
   };
 }
 
@@ -582,12 +703,12 @@ export async function prepareExtractionEvaluation(
   ) {
     throw new Error("Human-reviewed labels are not bound to this evaluation manifest");
   }
-  scoreExtractionBenchmark(dataset, {
+  const claimReadiness = scoreExtractionBenchmark(dataset, {
     datasetId: dataset.datasetId,
     datasetVersion: dataset.version,
     datasetManifestSha256: loaded.manifestSha256,
-    modelId: "dataset-validation",
-    promptVersion: "dataset-validation",
+    modelId: "preflight-perfect-candidate",
+    promptVersion: "preflight-perfect-candidate",
     cases: dataset.cases,
   });
 
@@ -600,6 +721,9 @@ export async function prepareExtractionEvaluation(
   const missingDatasetCase = loaded.manifest.cases.find((item) => !truthById.has(item.caseId));
   if (missingManifestCase || missingDatasetCase) {
     throw new Error("Manifest and dataset must contain exactly the same case ids");
+  }
+  for (const item of loaded.manifest.cases) {
+    assertTruthFitsExtractor(item, truthById.get(item.caseId)!);
   }
 
   const preparedCases: PreparedEvaluationCase[] = [];
@@ -640,6 +764,7 @@ export async function prepareExtractionEvaluation(
       (total, item) => total + item.maxProviderCalls,
       0,
     ),
+    claimReadiness,
     cases: preparedCases,
   };
 }
@@ -1321,6 +1446,15 @@ export async function runExtractionEvaluation(
   const now = options.now ?? (() => new Date());
   const repositoryRoot = options.repositoryRoot ?? DEFAULT_REPOSITORY_ROOT;
   const prepared = await prepareExtractionEvaluation(options.manifestPath, repositoryRoot);
+  if (
+    prepared.dataset.kind === "production_redacted" &&
+    !prepared.claimReadiness.eligibleForProductionClaim
+  ) {
+    throw new Error(
+      `Production-redacted evaluation is not claim-ready; no provider calls were made. ` +
+      prepared.claimReadiness.claimBlockers.join(" "),
+    );
+  }
   dependencies.assertRuntimeReady();
   const outputDirectory = await ensurePrivateOutputDirectory(
     options.outputDirectory,

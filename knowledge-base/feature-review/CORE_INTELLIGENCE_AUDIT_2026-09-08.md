@@ -262,8 +262,11 @@ fields, false fields, document boundaries, original-page attribution and higher-
 fields. Results are segmented by document type and complex-borrower situation. It refuses to mark a
 synthetic dataset or a claimed segment with fewer than 30 human-labeled cases as eligible for a
 production accuracy claim. Claim eligibility now also requires a private-manifest SHA-256 shared
-by the labels and predictions, a versioned protocol, two independent reviewers, adjudication,
-explicit document and complex-situation scope, and pre-approved quality thresholds. A run must
+by the labels and predictions, a versioned protocol, a unique opaque reviewer roster, two
+independent reviewers recorded on every case, adjudication, non-empty critical truth, explicit
+document and complex-situation scope, and pre-approved quality thresholds. Critical-field accuracy
+is measured directly instead of being diluted inside an average, and production claim thresholds
+cannot be set below Homiquity's 0.98 operating floor. A run must
 meet every threshold overall and inside each claimed segment; sound evidence alone cannot turn
 poor measured performance into an accuracy claim.
 
@@ -276,10 +279,14 @@ atomically before use, each case checkpoints privately, completed cases resume w
 restart cannot reset a per-case limit, concurrent runs cannot share one output directory, and the report
 is claim-ineligible when the run, provider result or model/prompt/response-hash lineage is incomplete.
 Raw provider responses, encrypted response payloads, document bytes, warnings and source paths are
-never serialized by the runner.
+never serialized by the runner. A strict preflight now rejects unknown label structure and fields the
+selected extractor cannot emit, exposes all claim blockers, binds label and manifest hashes without
+manual circular edits, and refuses provider use for a production-redacted dataset that could not
+support a claim even with perfect predictions.
 
-**Build next:** assemble the protected redacted dataset, run the production adapters and calibrate
-review thresholds from observed error and business impact. Never advertise an accuracy percentage
+**Build next:** assemble the protected redacted dataset under the committed two-reviewer protocol,
+freeze its acceptance targets, run the production adapters and calibrate product review-routing
+thresholds from observed error and business impact. Never advertise an accuracy percentage
 until the sample, model/prompt version and grading method are visible.
 
 ### P0 — source-level review now includes rendered evidence and boundary controls
@@ -674,6 +681,14 @@ missed escalation or time to a useful human response.
     Homi income/asset/credit states now use the same current-evidence dimensions, stale profile
     evidence is labeled for refresh, and the generic income loader cannot apply positive rental
     income unless its caller explicitly opts in after resolving decision-grade proof.
+57. Re-audited the protected extraction evaluator before collecting borrower data. Closed the
+    vacuous-pass path where empty labels scored as perfect, added a separate critical-field metric
+    and a 0.98 production-claim floor, required an opaque reviewer roster plus two reviewers on every
+    case, rejected truth the selected extractor cannot emit, exposed claim blockers in dry-run and
+    stopped provider spend when a production dataset is not claim-ready. Added a versioned labeling
+    protocol, private-workspace templates and a guarded command that binds labels to the manifest
+    without error-prone circular hash edits. The remaining evidence gap is still external: populate
+    the protected corpus with representative reviewed documents and run it.
 
 ## Sources
 
