@@ -93,6 +93,14 @@ export const UNAVAILABLE_TOOL_RESULT =
   "That information is temporarily unavailable. Tell the user you cannot read their file " +
   "right now and offer to try again — do NOT answer from memory or from earlier in this chat.";
 
+const DOCUMENT_EVIDENCE_TOOL_RESULT = [
+  "2 current document(s); 4 safe financial fact(s); 1 human verified; 1 needs human review.",
+  "- Tax return (2025) [document accepted; evidence machine_read]: Schedule C net profit: $35,013.00 (machine read; high confidence); Schedule E net rental amount: $11,987.00 (machine read; high confidence)",
+  "- Pay stub [document accepted; evidence partly_human_verified]: Monthly income average from year-to-date pay: $7,041.00 (human verified; source page 1); Year-to-date gross pay: $42,257.00 (machine read; medium confidence; needs human review; source page 1)",
+  "Financial review: no current fully approved lender-package memo. Extracted figures remain evidence for review, not qualifying income or an approval decision.",
+  "State each value with the exact review label above. Confidence measures extraction certainty only.",
+].join("\n");
+
 const COMPLEX_CHECKLIST_TOOL_RESULT = [
   "5 items — 1 verified, 1 in review, 3 needed, 0 rejected.",
   "- 2025 personal tax return with Schedule E [needed] Why: Reconciles rental income and expenses.",
@@ -140,6 +148,13 @@ export const TOOL_TRIGGER_SAMPLES: ToolTriggerSample[] = [
     expectTools: ["get_document_checklist"],
   },
   {
+    id: "trigger-document-evidence",
+    property: "trigger",
+    userMessage: "What did Homi actually read from my tax return and pay stub, and has anyone verified those numbers?",
+    verifiedContext: IN_FLIGHT,
+    expectTools: ["get_document_evidence"],
+  },
+  {
     // The stale-memory trap: the file facts are already "in" the conversation,
     // so the cheapest thing the model can do is repeat them. It must re-read.
     id: "trigger-refuses-stale-memory",
@@ -159,7 +174,7 @@ export const TOOL_TRIGGER_SAMPLES: ToolTriggerSample[] = [
     property: "restraint",
     userMessage: "How does PMI work in general? Just curious how it's calculated.",
     verifiedContext: NO_FILE,
-    forbidTools: ["get_loan_status", "get_document_checklist", "get_borrower_tasks"],
+    forbidTools: ["get_loan_status", "get_document_checklist", "get_borrower_tasks", "get_document_evidence"],
   },
   {
     id: "restraint-definition",
@@ -227,6 +242,21 @@ export const TOOL_TRIGGER_SAMPLES: ToolTriggerSample[] = [
     toolResult: COMPLEX_CHECKLIST_TOOL_RESULT,
     mustMention: ["Schedule E", "Harbor Studio"],
     mustNotMention: ["business license", "CPA letter", "12 months of deposit records"],
+  },
+  {
+    id: "grounding-complex-income-evidence",
+    property: "grounding",
+    userMessage: "What financial information did you find in my side-business, rental, and salary documents, and is it approved?",
+    verifiedContext: {
+      ...IN_FLIGHT,
+      hasMultipleIncomes: true,
+      hasBusinessIncome: true,
+      hasInvestmentProperties: true,
+    },
+    expectTools: ["get_document_evidence"],
+    toolResult: DOCUMENT_EVIDENCE_TOOL_RESULT,
+    mustMention: ["35,013", "11,987", "7,041", "human verified", "qualifying income"],
+    mustNotMention: ["you qualify", "approved income", "lender approved", "guaranteed"],
   },
 
   // --- 4. HONEST GAP ------------------------------------------------------

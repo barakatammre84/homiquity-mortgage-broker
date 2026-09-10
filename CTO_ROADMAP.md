@@ -106,7 +106,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Live · production canary proven · outcome collection built** | Collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
+| Guide the borrower with Homi | **Live · production canary proven · outcome collection and document-evidence read built** | Verify the new evidence read on the deployed build; then collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
 | Review complicated income | **Built · production repeatability proven** | Keep the scheduled mixed-income production canary current; a licensed reviewer must still reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
@@ -155,7 +155,12 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    prompt-attack regression suite is built. Homi now refreshes the readiness panel from the saved
    server file after a successful chat capture and records completed and failed turns, exact-repeat
    detection, server-truth reads, actual saved fields and staff secure-message response after a
-   handoff. The staff report separates legacy turns, measurement coverage and operational
+   handoff. Its document-evidence tool now reads a bounded allowlist of server-written OCR and tax
+   facts, separates machine-read values from individually human-verified fields, reports only a
+   current fully approved workpaper package as approved, and excludes raw OCR, filenames, account
+   identifiers, borrower notes and staff review notes. Low confidence routes to staff review and
+   does not create a borrower re-upload request unless the real checklist says the document was
+   rejected. The staff report separates legacy turns, measurement coverage and operational
    exceptions and refuses a reduced-friction claim without at least 30 measured turns across 10
    borrowers and a comparison cohort defined in advance. Collect that cohort; change guidance only
    when the measured journey shows less borrower or loan-officer effort.

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadFileTruth = vi.fn();
+const loadCoachDocumentEvidence = vi.fn();
 const createTask = vi.fn();
 const emitEvent = vi.fn();
 
@@ -21,6 +22,10 @@ vi.mock("../server/storage", () => ({
 
 vi.mock("../server/services/coachFileTruth", () => ({
   loadFileTruth: (...args: unknown[]) => loadFileTruth(...args),
+}));
+
+vi.mock("../server/services/coachDocumentEvidence", () => ({
+  loadCoachDocumentEvidence: (...args: unknown[]) => loadCoachDocumentEvidence(...args),
 }));
 
 vi.mock("../server/services/taskEngine", () => ({
@@ -74,6 +79,8 @@ describe("COACH_TOOLS definition stability (prompt-cache contract)", () => {
       "get_borrower_tasks",
       // Appended 2026-08-20 — explicit, auditable human assistance.
       "request_human_help",
+      // Appended 2026-09-10 — bounded OCR and financial-review truth.
+      "get_document_evidence",
     ]);
   });
 
@@ -396,5 +403,57 @@ describe("executeCoachTool: request_human_help", () => {
     expect(ctx.state.humanHelpRequest).toEqual({ taskId: "task-existing", alreadyOpen: true });
     expect(createTask).not.toHaveBeenCalled();
     expect(emitEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeCoachTool: get_document_evidence", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("distinguishes machine-read, human-verified, and approved financial evidence", async () => {
+    loadCoachDocumentEvidence.mockResolvedValue({
+      documents: [
+        {
+          documentType: "pay_stub",
+          label: "Pay stub",
+          documentReviewStatus: "accepted",
+          evidenceStatus: "partly_human_verified",
+          omittedFactCount: 0,
+          facts: [
+            { label: "Year-to-date gross pay", value: 42_000, format: "currency", reviewStatus: "machine_read", confidence: "medium", needsHumanReview: true, pageNumber: 1 },
+            { label: "Monthly income average from year-to-date pay", value: 7_000, format: "currency", reviewStatus: "human_verified", confidence: "not_applicable", needsHumanReview: false, pageNumber: 1 },
+          ],
+        },
+      ],
+      summary: { documentCount: 1, extractedFactCount: 2, humanVerifiedFactCount: 1, factsNeedingHumanReview: 1, omittedDocumentCount: 0 },
+      financialReview: { status: "approved_for_lender_package", income: "approved", assets: "approved" },
+    });
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+
+    const result = await executeCoachTool(ctx, "get_document_evidence", {});
+
+    expect(result.isError).toBeUndefined();
+    expect(loadCoachDocumentEvidence).toHaveBeenCalledWith("app-1", { id: "user-1", role: "active_buyer" });
+    expect(result.content).toContain("$42,000.00 (machine read; medium confidence; needs human review; source page 1)");
+    expect(result.content).toContain("$7,000.00 (human verified; source page 1)");
+    expect(result.content).toContain("approved for lender presentation");
+    expect(result.content).toMatch(/not qualifying income or an approval decision|Never turn/i);
+    expect(result.content).toMatch(/low-confidence fact needs STAFF review/i);
+    expect(result.content).toMatch(/unless get_document_checklist says it was rejected/i);
+  });
+
+  it("states the no-application case without inventing an extraction", async () => {
+    const { ctx } = makeCtx({ workableApplicationId: null });
+    const result = await executeCoachTool(ctx, "get_document_evidence", {});
+    expect(result.content).toMatch(/no application in progress/i);
+    expect(loadCoachDocumentEvidence).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the authorized evidence read fails", async () => {
+    loadCoachDocumentEvidence.mockRejectedValue(new Error("db unavailable"));
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const result = await executeCoachTool(ctx, "get_document_evidence", {});
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/temporarily unavailable/i);
+    expect(result.content).toMatch(/do NOT answer from memory/i);
   });
 });

@@ -18,6 +18,10 @@ import type { User } from "@shared/schema";
 import { ACTIVE_TASK_STATUSES } from "@shared/schema";
 import { taskEngine } from "./taskEngine";
 import { emitEvent } from "./analyticsEventPipeline";
+import {
+  loadCoachDocumentEvidence,
+  type CoachDocumentEvidenceSnapshot,
+} from "./coachDocumentEvidence";
 
 // ---------------------------------------------------------------------------
 // Homi tool surface — Claude Sonnet 5 tool-use replaces the old
@@ -603,7 +607,7 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_loan_status",
     description:
-      "Read where this borrower's application ACTUALLY stands right now: stage, how far along, days in process, conditions cleared vs outstanding, and the single next action the server recommends. Call this EVERY time the user asks anything about status, progress, timing, what's happening, what's next, or 'where am I' — and before making any claim about their file. You do NOT know this from the conversation; it changes between messages. Never answer a status question from memory or from earlier in this chat.",
+      "Read where this borrower's APPLICATION PROCESS actually stands right now: stage, how far along, days in process, conditions cleared vs outstanding, and the single next action the server recommends. Call this when the user asks about application status, progress, timing, what's happening, what's next, or 'where am I' — and before making any claim about their process stage. Do not call it for OCR results, document-value verification, or financial-analysis approval; get_document_evidence owns those questions. You do NOT know process status from the conversation; it changes between messages. Never answer from memory or from earlier in this chat.",
     input_schema: {
       type: "object" as const,
       additionalProperties: false,
@@ -665,6 +669,17 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["topic"],
+    },
+  },
+  {
+    name: "get_document_evidence",
+    description:
+      "Read the safe financial facts Homiquity ACTUALLY extracted from this borrower's uploaded documents, each fact's machine-read or human-verified status, whether low-confidence values need staff review, and whether a current approved financial package exists. Call whenever the borrower asks what Homiquity found in their documents, whether OCR worked, whether a value was verified, how tax/pay-stub/bank evidence compares, or what financial analysis is complete. Never call an unreviewed value verified or qualifying income; only the review status returned by this tool may authorize those words. Low confidence is a staff-review signal, not a borrower re-upload request: ask for a replacement only when get_document_checklist says rejected and gives the reason.",
+    input_schema: {
+      type: "object" as const,
+      additionalProperties: false,
+      properties: {},
+      required: [],
     },
   },
 ];
@@ -1085,6 +1100,54 @@ export async function executeCoachTool(
       }
     }
 
+    case "get_document_evidence": {
+      const evidence = await loadEvidenceForTool(ctx);
+      if (evidence === "no_application") {
+        return {
+          content:
+            "This borrower has no application in progress, so there is no application document evidence to report. " +
+            "Say so plainly; do not describe hypothetical extraction as if it ran.",
+        };
+      }
+      if (evidence === "unavailable") return FILE_TRUTH_UNAVAILABLE;
+      if (evidence.documents.length === 0) {
+        return {
+          content:
+            "No current accepted or pending-review document has extracted financial evidence on this application. " +
+            `Financial package review: ${evidence.financialReview.status}. ` +
+            "Do not say OCR failed; no safe extracted facts are available to this tool.",
+        };
+      }
+
+      const lines = evidence.documents.map((document) => {
+        const facts = document.facts.length > 0
+          ? document.facts.map((fact) => {
+              const value = fact.format === "currency"
+                ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(fact.value)
+                : String(fact.value);
+              const review = fact.reviewStatus === "human_verified"
+                ? "human verified"
+                : `machine read; ${fact.confidence} confidence${fact.needsHumanReview ? "; needs human review" : ""}`;
+              return `${fact.label}: ${value} (${review}${fact.pageNumber ? `; source page ${fact.pageNumber}` : ""})`;
+            }).join("; ")
+          : "no allowlisted financial facts extracted";
+        const omitted = document.omittedFactCount > 0 ? `; ${document.omittedFactCount} additional fact(s) omitted from this bounded view` : "";
+        return `- ${document.label} [document ${document.documentReviewStatus}; evidence ${document.evidenceStatus}]: ${facts}${omitted}`;
+      });
+      const packageLine = evidence.financialReview.status === "approved_for_lender_package"
+        ? `Financial review: approved for lender presentation (income ${evidence.financialReview.income}; assets ${evidence.financialReview.assets}).`
+        : "Financial review: no current fully approved lender-package memo. Extracted figures remain evidence for review, not qualifying income or an approval decision.";
+      return {
+        content:
+          `${evidence.summary.documentCount} current document(s); ${evidence.summary.extractedFactCount} safe financial fact(s); ` +
+          `${evidence.summary.humanVerifiedFactCount} human verified; ${evidence.summary.factsNeedingHumanReview} need human review.\n` +
+          `${lines.join("\n")}\n${packageLine}\n` +
+          "State each value with the exact review label above. Confidence measures extraction certainty only. " +
+          "A low-confidence fact needs STAFF review; do not ask the borrower to replace the document unless get_document_checklist says it was rejected. " +
+          "Never turn gross income, AGI, gross pay, deposits, or rent into qualifying income unless a current approved workpaper explicitly supplies that conclusion.",
+      };
+    }
+
     default:
       return { content: `Unknown tool: ${name}`, isError: true };
   }
@@ -1124,6 +1187,22 @@ async function loadTruthForTool(
     return truth ?? "unavailable";
   } catch (err) {
     console.error("[Coach] file-truth load failed:", err);
+    return "unavailable";
+  }
+}
+
+async function loadEvidenceForTool(
+  ctx: CoachToolContext,
+): Promise<CoachDocumentEvidenceSnapshot | "no_application" | "unavailable"> {
+  if (!ctx.workableApplicationId) return "no_application";
+  try {
+    const evidence = await loadCoachDocumentEvidence(ctx.workableApplicationId, {
+      id: ctx.userId,
+      role: ctx.userRole,
+    } as Pick<User, "id" | "role">);
+    return evidence ?? "unavailable";
+  } catch (err) {
+    console.error("[Coach] document-evidence load failed:", err);
     return "unavailable";
   }
 }
