@@ -242,18 +242,42 @@ function isCurrentOutcome(payload: Record<string, unknown>): boolean {
     && payload.completionBasis === "server_file_snapshot";
 }
 
+function responseKey(applicationId: string | null, recipientId: string): string {
+  return `${applicationId ?? ""}\u0000${recipientId}`;
+}
+
+function indexStaffResponses(
+  staffMessages: HomiStaffMessageMetricRow[],
+): Map<string, number[]> {
+  const index = new Map<string, number[]>();
+  for (const message of staffMessages) {
+    const timestamp = message.createdAt.getTime();
+    if (!Number.isFinite(timestamp)) continue;
+    const key = responseKey(message.applicationId, message.recipientId);
+    const timestamps = index.get(key) ?? [];
+    timestamps.push(timestamp);
+    index.set(key, timestamps);
+  }
+  for (const timestamps of index.values()) timestamps.sort((a, b) => a - b);
+  return index;
+}
+
 function firstRecordedStaffResponse(
   task: HomiHandoffMetricRow,
-  staffMessages: HomiStaffMessageMetricRow[],
+  responseIndex: Map<string, number[]>,
 ): Date | null {
-  const matches = staffMessages
-    .filter((message) =>
-      message.applicationId === task.applicationId
-      && message.recipientId === task.borrowerUserId
-      && message.createdAt.getTime() >= task.createdAt.getTime()
-    )
-    .map((message) => message.createdAt.getTime());
-  return matches.length > 0 ? new Date(Math.min(...matches)) : null;
+  const timestamps = responseIndex.get(responseKey(task.applicationId, task.borrowerUserId));
+  if (!timestamps || timestamps.length === 0) return null;
+
+  const target = task.createdAt.getTime();
+  let low = 0;
+  let high = timestamps.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (timestamps[middle] < target) low = middle + 1;
+    else high = middle;
+  }
+  return low < timestamps.length ? new Date(timestamps[low]) : null;
 }
 
 /**
@@ -301,9 +325,10 @@ export function buildHomiOutcomeMetrics(input: {
     && (!Number.isFinite(turn.responseMs) || turn.responseMs < 0 || turn.responseMs > MAX_VALID_TURN_RESPONSE_MS)
   ).length;
 
+  const responseIndex = indexStaffResponses(input.staffMessages);
   const handoffResponses = input.handoffs.map((task) => ({
     task,
-    responseAt: firstRecordedStaffResponse(task, input.staffMessages),
+    responseAt: firstRecordedStaffResponse(task, responseIndex),
   }));
   const responseDurations = handoffResponses
     .filter((item): item is typeof item & { responseAt: Date } => item.responseAt !== null)

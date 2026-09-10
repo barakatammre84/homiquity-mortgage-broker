@@ -219,7 +219,7 @@ export async function getAutomationMetrics(daysBack: number = 30): Promise<{
 export async function getHomiOutcomeMetrics(daysBack = 30): Promise<HomiOutcomeMetrics> {
   const boundedDays = Math.min(365, Math.max(1, daysBack));
   const since = sql`now() - (${boundedDays} * interval '1 day')`;
-  const [turnEvents, handoffTasks, staffMessages] = await Promise.all([
+  const [turnEvents, handoffTasks] = await Promise.all([
     db.select({
       eventName: analyticsEvents.eventName,
       userId: analyticsEvents.userId,
@@ -245,17 +245,28 @@ export async function getHomiOutcomeMetrics(daysBack = 30): Promise<HomiOutcomeM
       gte(tasks.createdAt, since),
       sql`${tasks.triggerMetadata}->>'source' = 'homi_handoff'`,
     )),
-    db.select({
-      applicationId: teamMessages.applicationId,
-      recipientId: teamMessages.recipientId,
-      createdAt: teamMessages.createdAt,
-    }).from(teamMessages)
-      .innerJoin(users, eq(teamMessages.senderId, users.id))
-      .where(and(
-        gte(teamMessages.createdAt, since),
-        inArray(users.role, [...STAFF_ROLES]),
-      )),
   ]);
+
+  const applicationIds = [...new Set(handoffTasks.map((task) => task.applicationId))];
+  const borrowerUserIds = [...new Set(handoffTasks.map((task) => task.borrowerUserId))];
+  const earliestHandoffAt = handoffTasks.reduce<Date | null>((earliest, task) => {
+    if (!task.createdAt) return earliest;
+    return !earliest || task.createdAt.getTime() < earliest.getTime() ? task.createdAt : earliest;
+  }, null);
+  const staffMessages = applicationIds.length === 0 || borrowerUserIds.length === 0 || !earliestHandoffAt
+    ? []
+    : await db.select({
+        applicationId: teamMessages.applicationId,
+        recipientId: teamMessages.recipientId,
+        createdAt: teamMessages.createdAt,
+      }).from(teamMessages)
+        .innerJoin(users, eq(teamMessages.senderId, users.id))
+        .where(and(
+          gte(teamMessages.createdAt, earliestHandoffAt),
+          inArray(teamMessages.applicationId, applicationIds),
+          inArray(teamMessages.recipientId, borrowerUserIds),
+          inArray(users.role, [...STAFF_ROLES]),
+        ));
 
   return buildHomiOutcomeMetrics({
     daysBack: boundedDays,

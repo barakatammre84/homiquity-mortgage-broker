@@ -556,7 +556,7 @@ export default function IntelligenceTab() {
                           : `Median first staff reply: ${homiOutcomes.medianRecordedStaffResponseMinutes} minutes; average ${homiOutcomes.averageRecordedStaffResponseMinutes} minutes.`}
                       </p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.openHumanHelpRequests} open · {homiOutcomes.pastDueWithoutRecordedStaffResponse} past due without a reply · {homiOutcomes.completedWithoutRecordedStaffResponse} completed without a recorded reply
+                        {homiOutcomes.openHumanHelpRequests} open · {homiOutcomes.pastDueWithoutRecordedStaffResponse} past due without a secure-message reply · {homiOutcomes.completedWithoutRecordedStaffResponse} completed without a secure-message reply
                       </p>
                     </div>
                     <div className="rounded-lg border p-3 text-sm">

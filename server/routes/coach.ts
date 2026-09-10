@@ -124,7 +124,10 @@ async function refreshReadinessAfterCapture(input: {
   if ((input.result.state.captureOutcome?.appliedFields.length ?? 0) === 0) return before;
 
   try {
-    const graph = await buildBorrowerGraph(input.userId);
+    const graph = await buildBorrowerGraph(
+      input.userId,
+      input.result.state.syncedApplicationId ?? undefined,
+    );
     if (!graph) return null;
     const refreshedContext: VerifiedUserContext = {
       ...input.verifiedContext,
