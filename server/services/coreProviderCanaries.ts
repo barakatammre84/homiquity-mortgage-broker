@@ -24,7 +24,7 @@ import {
 import {
   assertRasterOnlyPdf,
   buildSyntheticPayStatementPdf,
-  syntheticPayStatementExtractionPasses,
+  syntheticPayStatementExtractionFailures,
 } from "./coreCanaryFixtures";
 import {
   CoreExtractionRestartProofError,
@@ -250,7 +250,9 @@ async function runExtractionCanary(): Promise<void> {
   }
 
   const extracted = await extractPayStubData(pdf, "application/pdf");
-  if (!syntheticPayStatementExtractionPasses(extracted)) {
+  const invariantFailures = syntheticPayStatementExtractionFailures(extracted);
+  if (invariantFailures.length > 0) {
+    console.warn(`[core-canary] document_extraction invariant mismatches (${invariantFailures.join(",")})`);
     throw new CanaryExecutionError("extraction_invariant");
   }
 }
