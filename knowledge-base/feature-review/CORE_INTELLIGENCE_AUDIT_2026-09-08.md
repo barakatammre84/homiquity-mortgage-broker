@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-10
 
-**Code reviewed:** production `e6ae28ae4e221caf8554d58c6e2cc3dce0fb4619`
+**Code reviewed:** production `d65007bcffd3ac89f4a77d4fa809739576a89492`
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -68,7 +68,7 @@ for the borrowers that a standardized fast lane handles poorly.
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
 | Homi | Server-grounded tools, prompt lineage, PII input guard, bounded turns, streaming, safe offline guidance, real staff-task handoff, outcome measures, provider canary ledger, a successful grounded production status-turn proof and a mortgage regression/attack suite | Measured reduction in completion time, repeated questions and handoff latency is not yet recorded | Strong assistant foundation; grounded production operability is proven while production usefulness remains unmeasured |
-| Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; the real synthetic pay-statement path and provider-before-persist restart recovery pass in production | No protected human-labeled accuracy set spanning born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
+| Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, reconciliations, review checkpoints, cited memo and hashed lender package; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement and DSCR math wait on lender matrices | Strong and appropriately conservative |
 | Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, evidence gates, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS is not live and no signed provider findings have been received | Strong internal engine, incomplete external decision chain |
@@ -253,7 +253,18 @@ explicit document and complex-situation scope, and pre-approved quality threshol
 meet every threshold overall and inside each claimed segment; sound evidence alone cannot turn
 poor measured performance into an accuracy claim.
 
-**Build next:** assemble the protected redacted dataset, run the production model and calibrate
+**Built:** the scorer now has an execution path. A local-only runner reads a
+private manifest outside the public repository, checks user-only permissions, MIME signatures,
+unique source and adjudicated-label hashes, source page counts and exact case identity before provider use.
+It sends in-memory bytes through the production pay-stub, W-2, bank, lease and bounded multi-form
+tax adapters without importing the product database. Provider calls and their case IDs are reserved
+atomically before use, each case checkpoints privately, completed cases resume without another call,
+restart cannot reset a per-case limit, and the report
+is claim-ineligible when the run, provider result or model/prompt/response-hash lineage is incomplete.
+Raw provider responses, encrypted response payloads, document bytes, warnings and source paths are
+never serialized by the runner.
+
+**Build next:** assemble the protected redacted dataset, run the production adapters and calibrate
 review thresholds from observed error and business impact. Never advertise an accuracy percentage
 until the sample, model/prompt version and grading method are visible.
 
@@ -411,7 +422,7 @@ or page rows. The tax proof also removed every synthetic object and row.
 
 - Ordinary document normalization, logical routing, box review and boundary correction are built.
 - Bring consented tax forms onto the same rendered evidence model.
-- Populate and run the versioned human-graded evaluation set.
+- Populate and run the versioned human-graded evaluation set through the protected evaluator.
 
 **Exit:** a mixed 100-page complex-income packet becomes the correct logical documents; every used
 value opens its source page; uncertain fields route to review; replacement and correction preserve
@@ -578,6 +589,15 @@ missed escalation or time to a useful human response.
     can start or cleanup can run, and the one-hour proof age is measured after completion polling.
     Exact production commit `e6ae28ae` passed the proof with 100 pages, four forms and 28 grounded
     facts, followed by a 5/5 core-capability sweep.
+49. Replaced the ordinary canary's embedded-text fixture with a verified one-page raster PDF. A
+    Linux font-rendering defect was exposed by three failed production sweeps, fixed with versioned
+    font assets and pre-provider pixel guards, then proven by a 5/5 live sweep and a same-commit
+    restart that persisted one page and ten grounded facts before complete cleanup.
+50. Added the missing protected-evaluation runner around the production extractors: private paths
+    and permissions, source/label/manifest hashes, MIME and page-count checks, bounded call budgets,
+    atomic pre-call reservations, resumable strict checkpoints, explicit production lineage and an
+    aggregate-only report. Building this execution rail does not supply the independently reviewed
+    document population or establish an accuracy result.
 
 ## Sources
 

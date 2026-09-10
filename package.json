@@ -65,6 +65,7 @@
     "db:seed": "tsx server/scripts/runSeed.ts",
     "coach:tools": "tsx scripts/coachToolTrigger.ts",
     "benchmark:extraction": "tsx scripts/extraction-benchmark.ts",
+    "benchmark:extraction:run": "tsx scripts/extraction-evaluation.ts",
     "handoff:facts": "node scripts/handoff-facts.cjs",
     "brand:assets": "node scripts/generate-brand-assets.mjs",
     "brand:og": "node scripts/generate-og-card.mjs"
