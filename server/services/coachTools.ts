@@ -360,6 +360,9 @@ export interface CoachToolContext {
   workableApplicationId: string | null;
   emit: CoachEmit;
   state: CoachToolTurnState;
+  /** Read-only snapshots reused across model calls in this one Homi turn. */
+  fileTruthCache?: FileTruth | "unavailable";
+  documentEvidenceCache?: CoachDocumentEvidenceSnapshot | "unavailable";
 }
 
 // ---------------------------------------------------------------------------
@@ -743,6 +746,9 @@ export async function executeCoachTool(
       try {
         const sync = await syncCoachIntakeToApplication(ctx.req, ctx.userId, parsed.data, ctx.conversationId);
         ctx.state.syncedApplicationId = sync.applicationId;
+        // The write can change readiness and invalidate approved analysis.
+        ctx.fileTruthCache = undefined;
+        ctx.documentEvidenceCache = undefined;
         ctx.state.captureOutcome = {
           attempts: ctx.state.captureOutcome.attempts,
           createdApplication: ctx.state.captureOutcome.createdApplication || sync.created,
@@ -1076,6 +1082,8 @@ export async function executeCoachTool(
           topic: parsed.data.topic,
         });
         ctx.state.humanHelpRequest = { taskId: task.id, alreadyOpen: false };
+        // A later task read in this turn must include the newly-created item.
+        ctx.fileTruthCache = undefined;
         await emitEvent("borrower", "homi_human_help_requested", {
           applicationId: ctx.workableApplicationId!,
           userId: ctx.userId,
@@ -1177,6 +1185,7 @@ async function loadTruthForTool(
   ctx: CoachToolContext,
 ): Promise<FileTruth | "no_application" | "unavailable"> {
   if (!ctx.workableApplicationId) return "no_application";
+  if (ctx.fileTruthCache) return ctx.fileTruthCache;
   try {
     const truth = await loadFileTruth(ctx.workableApplicationId, {
       id: ctx.userId,
@@ -1184,9 +1193,12 @@ async function loadTruthForTool(
     } as Pick<User, "id" | "role">);
     // A null here means the access check refused — treat it as unavailable, not
     // as "no application": we must never describe a file we could not authorize.
-    return truth ?? "unavailable";
+    const result = truth ?? "unavailable";
+    ctx.fileTruthCache = result;
+    return result;
   } catch (err) {
     console.error("[Coach] file-truth load failed:", err);
+    ctx.fileTruthCache = "unavailable";
     return "unavailable";
   }
 }
@@ -1195,14 +1207,18 @@ async function loadEvidenceForTool(
   ctx: CoachToolContext,
 ): Promise<CoachDocumentEvidenceSnapshot | "no_application" | "unavailable"> {
   if (!ctx.workableApplicationId) return "no_application";
+  if (ctx.documentEvidenceCache) return ctx.documentEvidenceCache;
   try {
     const evidence = await loadCoachDocumentEvidence(ctx.workableApplicationId, {
       id: ctx.userId,
       role: ctx.userRole,
     } as Pick<User, "id" | "role">);
-    return evidence ?? "unavailable";
+    const result = evidence ?? "unavailable";
+    ctx.documentEvidenceCache = result;
+    return result;
   } catch (err) {
     console.error("[Coach] document-evidence load failed:", err);
+    ctx.documentEvidenceCache = "unavailable";
     return "unavailable";
   }
 }

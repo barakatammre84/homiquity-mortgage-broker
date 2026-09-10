@@ -406,6 +406,38 @@ describe("executeCoachTool: request_human_help", () => {
   });
 });
 
+describe("executeCoachTool: shared file-truth reads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadFileTruth.mockResolvedValue({
+      applicationId: "app-1",
+      status: {
+        hasApplication: true,
+        stage: null,
+        pipeline: null,
+        journey: [],
+        nextAction: null,
+        lastActivityAt: null,
+      },
+      checklist: {
+        documents: [],
+        stats: { total: 0, verified: 0, uploaded: 0, needed: 0, rejected: 0 },
+      },
+      tasks: [],
+    });
+  });
+
+  it("reuses one authorized snapshot for status, checklist, and tasks in a turn", async () => {
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+
+    await executeCoachTool(ctx, "get_loan_status", {});
+    await executeCoachTool(ctx, "get_document_checklist", {});
+    await executeCoachTool(ctx, "get_borrower_tasks", {});
+
+    expect(loadFileTruth).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("executeCoachTool: get_document_evidence", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -455,5 +487,19 @@ describe("executeCoachTool: get_document_evidence", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toMatch(/temporarily unavailable/i);
     expect(result.content).toMatch(/do NOT answer from memory/i);
+  });
+
+  it("reuses one authorized evidence snapshot across repeated calls in a turn", async () => {
+    loadCoachDocumentEvidence.mockResolvedValue({
+      documents: [],
+      summary: { documentCount: 0, extractedFactCount: 0, humanVerifiedFactCount: 0, factsNeedingHumanReview: 0, omittedDocumentCount: 0 },
+      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved" },
+    });
+    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+
+    await executeCoachTool(ctx, "get_document_evidence", {});
+    await executeCoachTool(ctx, "get_document_evidence", {});
+
+    expect(loadCoachDocumentEvidence).toHaveBeenCalledTimes(1);
   });
 });

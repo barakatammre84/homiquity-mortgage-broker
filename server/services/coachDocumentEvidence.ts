@@ -61,6 +61,19 @@ type EvidenceTaxInsight = Pick<
 const MAX_DOCUMENTS = 12;
 const MAX_FACTS_PER_DOCUMENT = 8;
 
+function sortCurrentDocuments(
+  documents: EvidenceDocument[],
+  applicationId: string,
+): EvidenceDocument[] {
+  return documents
+    .filter((document) => document.applicationId === applicationId && document.status !== DOCUMENT_STATUS.REJECTED)
+    .sort((left, right) => {
+      const rightCreatedAt = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+      const leftCreatedAt = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+      return rightCreatedAt - leftCreatedAt || right.id.localeCompare(left.id);
+    });
+}
+
 const FACT_PRESENTATION: Record<string, { label: string; format: "currency" | "number" }> = {
   monthly_income_ytd_avg: { label: "Monthly income average from year-to-date pay", format: "currency" },
   gross_pay: { label: "Gross pay", format: "currency" },
@@ -177,9 +190,7 @@ export function buildCoachDocumentEvidence(input: {
   approvedIncomeWorkpaperId: string | null;
   approvedAssetWorkpaperId: string | null;
 }): CoachDocumentEvidenceSnapshot {
-  const currentDocuments = input.documents
-    .filter((document) => document.applicationId === input.applicationId && document.status !== DOCUMENT_STATUS.REJECTED)
-    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")) || right.id.localeCompare(left.id));
+  const currentDocuments = sortCurrentDocuments(input.documents, input.applicationId);
   const shownDocuments = currentDocuments.slice(0, MAX_DOCUMENTS);
   const factsByDocument = new Map<string, DocumentFactRow[]>();
   for (const fact of input.facts) {
@@ -244,9 +255,15 @@ export async function loadCoachDocumentEvidence(
   const application = await storage.getLoanApplicationWithAccess(applicationId, user.id, user.role);
   if (!application) return null;
 
-  const documents = (await storage.getDocumentsByApplication(applicationId))
-    .filter((document) => document.applicationId === applicationId && document.status !== DOCUMENT_STATUS.REJECTED);
-  const documentIds = documents.map((document) => document.id);
+  const documents = sortCurrentDocuments(
+    await storage.getDocumentsByApplication(applicationId),
+    applicationId,
+  );
+  // Bound the database-backed extraction read to the exact same newest-first
+  // window that can reach the model. The full document list still reaches the
+  // pure projection so omittedDocumentCount remains honest.
+  const evidenceDocuments = documents.slice(0, MAX_DOCUMENTS);
+  const documentIds = evidenceDocuments.map((document) => document.id);
   // These modules own database-backed extraction and workpaper reads. Keep
   // them lazy so importing Homi's production tool definitions remains usable
   // by the no-database live model-trigger harness.
