@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { render as rtlRender, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
-import { ConnectedFilePanel, DocumentChecklistPanel, FileSnapshotPanel, ReadinessPanel, StatusPanel } from "./panels";
+import { ConnectedFilePanel, DocumentChecklistPanel, DocumentEvidencePanel, FileSnapshotPanel, ReadinessPanel, StatusPanel } from "./panels";
 import type { ChecklistItemView } from "@/lib/documentChecklist";
 import type { CoachProfile, LoanStatusView } from "./types";
 
@@ -173,6 +173,32 @@ describe("FileSnapshotPanel — one source of truth", () => {
     expect(screen.getByTestId("file-snapshot-stage").textContent).toMatch(/planning/i);
     expect(screen.getByTestId("link-file-snapshot-next").getAttribute("href")).toBe("/gap-calculator");
   });
+
+  it("shows account-level planning documents without calling them a mortgage checklist", () => {
+    render(
+      <FileSnapshotPanel
+        status={{ ...status, hasApplication: false, stage: null, nextAction: null }}
+        docs={[]}
+        planningDocuments={{ total: 2, verified: 0, underReview: 2, rejected: 0 }}
+      />,
+    );
+    expect(screen.getByTestId("file-snapshot-planning-documents").textContent).toMatch(/2 saved to your account/i);
+    expect(screen.getByTestId("file-snapshot-planning-documents").textContent).toMatch(/2 being reviewed/i);
+    expect(screen.getByTestId("button-view-planning-documents").getAttribute("href")).toBe("/documents");
+  });
+
+  it("keeps uploaded file evidence visible before the first exact request exists", () => {
+    render(
+      <FileSnapshotPanel
+        status={{ ...status, stage: { ...status.stage!, status: "draft", label: "Incomplete" } }}
+        docs={[]}
+        fileDocuments={{ total: 2, verified: 0, underReview: 2, rejected: 0 }}
+      />,
+    );
+    expect(screen.getByTestId("file-snapshot-uploaded-documents").textContent).toMatch(/2 saved to this application/i);
+    expect(screen.getByTestId("file-snapshot-uploaded-documents").textContent).toMatch(/2 being reviewed/i);
+    expect(screen.getByTestId("button-view-file-documents").getAttribute("href")).toBe("/documents");
+  });
 });
 
 describe("ConnectedFilePanel", () => {
@@ -181,6 +207,48 @@ describe("ConnectedFilePanel", () => {
 
     expect(screen.getByTestId("coach-side-panel-unavailable").textContent).toMatch(/no connected file/i);
     expect(screen.queryByTestId("coach-side-panel-loading")).toBeNull();
+  });
+
+  it("shows a recoverable error instead of claiming there is no file", () => {
+    const onRetry = vi.fn();
+    render(<ConnectedFilePanel status={null} docs={[]} loading={false} error onRetry={onRetry} />);
+
+    expect(screen.getByTestId("coach-side-panel-error").textContent).toMatch(/won't guess|will not guess/i);
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("coach-side-panel-unavailable")).toBeNull();
+  });
+});
+
+describe("DocumentEvidencePanel — traceable file evidence", () => {
+  it("separates machine-read and human-verified facts and links the exact source page", () => {
+    render(
+      <DocumentEvidencePanel
+        evidence={{
+          documents: [{
+            documentId: "doc-1",
+            documentType: "pay_stub",
+            label: "Pay stub",
+            documentReviewStatus: "accepted",
+            evidenceStatus: "partly_human_verified",
+            omittedFactCount: 0,
+            facts: [
+              { label: "Year-to-date gross pay", value: 42_000, format: "currency", reviewStatus: "machine_read", confidence: "medium", needsHumanReview: true, pageNumber: 1 },
+              { label: "Monthly income average", value: 7_000, format: "currency", reviewStatus: "human_verified", confidence: "not_applicable", needsHumanReview: false, pageNumber: 1 },
+            ],
+          }],
+          summary: { documentCount: 1, extractedFactCount: 2, humanVerifiedFactCount: 1, factsNeedingHumanReview: 1, omittedDocumentCount: 0 },
+          financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved", liabilities: "not_approved" },
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/machine read · medium/i)).toBeTruthy();
+    expect(screen.getAllByText(/human verified/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/staff review needed/i)).toBeTruthy();
+    expect(screen.getByTestId("link-evidence-source-doc-1-0").getAttribute("href"))
+      .toBe("/api/documents/doc-1/pages/1/image");
+    expect(screen.getByTestId("card-document-evidence").textContent).toMatch(/does not by itself approve a loan/i);
   });
 });
 

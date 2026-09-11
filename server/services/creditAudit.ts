@@ -13,6 +13,7 @@ import { ADVERSE_ACTION_REASONS, CURRENT_DISCLOSURE_VERSION, FCRA_DISCLOSURE_TEX
 import { getActiveConsent, getConsentById } from "./creditConsents";
 import { getCreditPullsByApplication } from "./creditPulls";
 import { getAdverseActionsByApplication } from "./creditAdverseActions";
+import { normalizeBorrowerCreditScores } from "./decisionCredit";
 
 export async function getCreditAuditLog(
   applicationId: string,
@@ -195,6 +196,13 @@ export interface ExternalSoftPullVendorData {
   equifaxScore: number;
   transunionScore: number;
   representativeScore: number;
+  borrowerScores?: Array<{
+    borrowerSequenceNumber: number;
+    experianScore: number | null;
+    equifaxScore: number | null;
+    transunionScore: number | null;
+    representativeScore: number;
+  }>;
   vantageScore4: number;
   tradelines: Array<{
     creditor: string;
@@ -237,6 +245,28 @@ export async function recordExternalSoftPull(params: {
 
   const { vendor } = params;
   const bureaus = ["experian", "equifax", "transunion"];
+  const borrowerScores = normalizeBorrowerCreditScores(
+    vendor.borrowerScores?.length
+      ? vendor.borrowerScores.map(row => ({
+          borrowerSequenceNumber: row.borrowerSequenceNumber,
+          scores: {
+            experian: row.experianScore,
+            equifax: row.equifaxScore,
+            transunion: row.transunionScore,
+          },
+        }))
+      : [{
+          borrowerSequenceNumber: 1,
+          scores: {
+            experian: vendor.experianScore,
+            equifax: vendor.equifaxScore,
+            transunion: vendor.transunionScore,
+          },
+        }],
+  );
+  const controllingBorrower = borrowerScores.reduce(
+    (lowest, borrower) => borrower.representativeScore < lowest.representativeScore ? borrower : lowest,
+  );
 
   const [pull] = await db
     .insert(creditPulls)
@@ -248,10 +278,11 @@ export async function recordExternalSoftPull(params: {
       bureaus,
       status: "completed",
       externalRequestId: vendor.vendorRequestId,
-      experianScore: vendor.experianScore,
-      equifaxScore: vendor.equifaxScore,
-      transunionScore: vendor.transunionScore,
-      representativeScore: vendor.representativeScore,
+      experianScore: controllingBorrower.experianScore,
+      equifaxScore: controllingBorrower.equifaxScore,
+      transunionScore: controllingBorrower.transunionScore,
+      representativeScore: controllingBorrower.representativeScore,
+      borrowerScores,
       vantageScore4: vendor.vantageScore4,
       totalTradelines: vendor.tradelines.length,
       openTradelines: vendor.tradelines.length,
@@ -293,7 +324,8 @@ export async function recordExternalSoftPull(params: {
     creditPullId: pull.id,
     action: "pull_completed",
     actionDetails: {
-      representativeScore: vendor.representativeScore,
+      representativeScore: controllingBorrower.representativeScore,
+      borrowerCount: borrowerScores.length,
       bureausReturned: bureaus,
       vendorRequestId: vendor.vendorRequestId,
       simulated: vendor.simulated,
@@ -564,4 +596,3 @@ export async function generateCSVExport(applicationId: string): Promise<string> 
 }
 
 // Draft Consent Progress - Save & Resume functionality
-

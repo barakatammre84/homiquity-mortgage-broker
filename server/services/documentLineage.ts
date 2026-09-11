@@ -25,11 +25,12 @@ import {
   DocumentRequestWorkflowError,
   validateRequestedDocumentResponse,
 } from "./documentRequestWorkflow";
-import { documentTypesMatch } from "@shared/documentTypes";
+import { documentTypesMatch, isTaxReturnDocumentType } from "@shared/documentTypes";
 import { isAdmin, isInternalStaffRole } from "@shared/roles";
 import type { DocumentSubjectOption, DocumentSubjectType, UpdateDocumentLineage } from "@shared/documentLineage";
 import { conditionsToRevertAfterRejection } from "./documentConditionWorkflow";
 import { currentDocumentEvidencePredicate } from "./currentDocumentEvidence";
+import { withActiveTaxDocumentConsent } from "./taxConsentWorkflow";
 
 export type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DocumentLineageActor = { id: string; role: string };
@@ -217,9 +218,10 @@ async function validateSubject(
   }
   if (subjectType === "business") {
     const [business] = await transaction.select({ id: borrowerBusinessEntities.id }).from(borrowerBusinessEntities).where(and(
-      eq(borrowerBusinessEntities.id, subjectId), eq(borrowerBusinessEntities.applicationId, applicationId),
+      eq(borrowerBusinessEntities.id, subjectId),
+      inArray(borrowerBusinessEntities.userId, borrowerIds),
     )).limit(1);
-    if (!business) throw new DocumentLineageError("Choose a business on this application");
+    if (!business) throw new DocumentLineageError("Choose a business reported by a borrower on this application");
     return;
   }
   const [property] = await transaction.select({ id: applicationProperties.id }).from(applicationProperties).where(and(
@@ -531,10 +533,12 @@ export async function reviewCurrentDocument(input: ReviewCurrentDocumentInput) {
     }
 
     let borrowerIds: string[] = [];
+    let primaryBorrowerUserId = candidate.userId;
     if (candidate.applicationId) {
       await lockDocumentWorkflow(transaction, candidate.applicationId);
       const context = await applicationAndBorrowerIds(transaction, candidate.applicationId);
       borrowerIds = context.borrowerIds;
+      primaryBorrowerUserId = context.application.userId;
       if (!isAdmin(input.actor)) {
         const [membership] = await transaction
           .select({ id: dealTeamMembers.id })
@@ -561,6 +565,24 @@ export async function reviewCurrentDocument(input: ReviewCurrentDocumentInput) {
       .for("update")
       .limit(1);
     if (!document) throw new DocumentLineageError("Document not found", 404);
+
+    // A final verdict necessarily uses the tax document. Keep that use inside
+    // the same borrower-scoped lock as extraction persistence and revocation;
+    // otherwise a staffer could accept/reject a return they can no longer open
+    // after the borrower revoked authorization.
+    if (isTaxReturnDocumentType(document.documentType)) {
+      const consent = await withActiveTaxDocumentConsent(
+        primaryBorrowerUserId,
+        async () => true,
+        transaction,
+      );
+      if (!consent.authorized) {
+        throw new DocumentLineageError(
+          "Tax document authorization is no longer active",
+          403,
+        );
+      }
+    }
 
     if (document.applicationId) {
       const lineage = await ensureLegacyLineage(
@@ -768,12 +790,21 @@ export async function subjectOptions(
   transaction: DatabaseTransaction,
   applicationId: string,
 ): Promise<DocumentSubjectOption[]> {
-  const { borrowerIds } = await applicationAndBorrowerIds(transaction, applicationId);
+  const { application, borrowerIds } = await applicationAndBorrowerIds(transaction, applicationId);
+  const { syncReportedBusinessEntities } = await import("./reportedBusinessEntities");
+  await syncReportedBusinessEntities(
+    application.userId,
+    applicationId,
+    (application.incomeSources as import("@shared/schema").IncomeSourceEntry[] | null) ?? [],
+    transaction,
+  );
   const [borrowers, businesses, properties] = await Promise.all([
     borrowerIds.length ? transaction.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email })
       .from(users).where(inArray(users.id, borrowerIds)) : [],
-    transaction.select({ id: borrowerBusinessEntities.id, name: borrowerBusinessEntities.name })
-      .from(borrowerBusinessEntities).where(eq(borrowerBusinessEntities.applicationId, applicationId)),
+    borrowerIds.length
+      ? transaction.select({ id: borrowerBusinessEntities.id, name: borrowerBusinessEntities.name })
+        .from(borrowerBusinessEntities).where(inArray(borrowerBusinessEntities.userId, borrowerIds))
+      : [],
     transaction.select({ id: applicationProperties.id, address: applicationProperties.address })
       .from(applicationProperties).where(eq(applicationProperties.applicationId, applicationId)),
   ]);

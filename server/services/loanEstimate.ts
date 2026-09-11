@@ -9,6 +9,7 @@ import { resolveCompensation } from "@shared/compliance/loCompensation";
 import { toActualFeeMap, type ActualFeeMap } from "@shared/compliance/feeProvenance";
 import type { LoanApplication } from "@shared/schema";
 import { monthlyPrincipalAndInterest } from "@shared/lib/amortization";
+import { assessSubjectPropertyFinancing } from "@shared/subjectPropertyFinancing";
 
 export interface LoanEstimateData {
   applicationId: string;
@@ -469,6 +470,16 @@ export interface PaymentProjection {
    * must gap the file rather than decision it.
    */
   associationDuesUncaptured: boolean;
+  monthlyFloodInsurance: number;
+  monthlyGroundRent: number;
+  monthlySpecialAssessments: number;
+  monthlySubordinateFinancingPayment: number;
+  subordinateFinancingExists: boolean | null;
+  cltv: number | null;
+  hcltv: number | null;
+  /** Once the full URLA property section exists, every unknown B3-6-03 cost is
+   * named here so decision callers cannot silently treat it as $0. */
+  housingExpenseMissingItems: string[];
   /**
    * P&I + MI + escrow. Byte-identical to the Loan Estimate's
    * projectedPayments.years1Through5.estimatedTotal — same derivation, same
@@ -565,15 +576,20 @@ async function computePaymentProjectionInternal(
   const propertyInfo = await storage.getUrlaPropertyInfo(applicationId);
   const rawDues = propertyInfo?.monthlyAssociationDues;
   const monthlyAssociationDues = rawDues === null || rawDues === undefined ? null : Number(rawDues);
-  const duesForPitia = monthlyAssociationDues !== null && Number.isFinite(monthlyAssociationDues)
-    ? monthlyAssociationDues
-    : 0;
 
   // A null on a condo/co-op/PUD is "not captured", never zero. Surfacing it lets
   // the decision path gap the file instead of qualifying on a housing expense it
   // knows is incomplete.
   const associationDuesUncaptured =
     monthlyAssociationDues === null && isAssociationBearingPropertyType(application.propertyType);
+  const propertyValue = Number(application.propertyValue ?? purchasePrice);
+  const subjectFinancing = assessSubjectPropertyFinancing({
+    propertyInfo,
+    firstMortgageAmount: loanAmount,
+    salesPrice: purchasePrice,
+    appraisedValue: Number.isFinite(propertyValue) && propertyValue > 0 ? propertyValue : purchasePrice,
+    associationDuesRequired: isAssociationBearingPropertyType(application.propertyType),
+  });
 
   return {
     loanAmount,
@@ -583,9 +599,17 @@ async function computePaymentProjectionInternal(
     monthlyEscrow: Math.round(monthlyEscrow * 100) / 100,
     monthlyAssociationDues,
     associationDuesUncaptured,
+    monthlyFloodInsurance: subjectFinancing.monthlyFloodInsurance,
+    monthlyGroundRent: subjectFinancing.monthlyGroundRent,
+    monthlySpecialAssessments: subjectFinancing.monthlySpecialAssessments,
+    monthlySubordinateFinancingPayment: subjectFinancing.monthlySubordinateFinancingPayment,
+    subordinateFinancingExists: subjectFinancing.subordinateFinancingExists,
+    cltv: subjectFinancing.cltv,
+    hcltv: subjectFinancing.hcltv,
+    housingExpenseMissingItems: subjectFinancing.missingItems,
     estimatedMonthlyTotal: Math.round((monthlyPandI + monthlyPMI + monthlyEscrow) * 100) / 100,
     qualifyingPitia:
-      Math.round((monthlyPandI + monthlyPMI + monthlyEscrow + duesForPitia) * 100) / 100,
+      Math.round((monthlyPandI + monthlyPMI + monthlyEscrow + subjectFinancing.monthlyHousingExpenseAdditions) * 100) / 100,
   };
 }
 
@@ -605,8 +629,10 @@ export async function computePaymentProjection(
 export async function computeDecisionPaymentProjection(
   applicationId: string,
   decisionLoanProgram: "conventional" | "fha" | "va" | "usda",
+  /** A verified bureau score may override the intake estimate for this decision only. */
+  overrides?: Pick<PricingOverrides, "creditScore">,
 ): Promise<PaymentProjection> {
-  return computePaymentProjectionInternal(applicationId, undefined, decisionLoanProgram);
+  return computePaymentProjectionInternal(applicationId, overrides, decisionLoanProgram);
 }
 
 export async function generateLoanEstimate(applicationId: string): Promise<LoanEstimateData> {

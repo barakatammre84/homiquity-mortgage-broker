@@ -6,11 +6,16 @@ import type {
   RentalPropertyEntry,
   UrlaAsset,
 } from "@shared/schema";
-import type { FinancialEvidenceComparison } from "@shared/financialReview";
+import type {
+  FinancialEvidenceComparison,
+  FinancialReviewBlocker,
+  FinancialSourceReference,
+} from "@shared/financialReview";
 import { canonicalDocumentType } from "@shared/documentTypes";
 
 type ReconciliationInput = {
   documents: Document[];
+  logicalDocuments?: LogicalDocument[];
   factsByDocument: Map<string, ExtractedField[]>;
   employment: EmploymentHistory[];
   assets: UrlaAsset[];
@@ -24,6 +29,45 @@ type SelfEmploymentReconciliationInput = {
   employment: EmploymentHistory;
   businessEntityId: string;
 };
+
+type BusinessLiquidityReconciliationInput = SelfEmploymentReconciliationInput;
+
+/**
+ * A document-level acceptance says the file was reviewed, not that the dollar
+ * used by a calculation was checked. Financial workpapers must carry at least
+ * one human-reviewed numeric fact before that evidence can support approval.
+ */
+export function financialSourceReviewBlockers(
+  sources: FinancialSourceReference[],
+  relevantDocumentCount: number,
+  requireReviewedNumericFact = true,
+): FinancialReviewBlocker[] {
+  const blockers: FinancialReviewBlocker[] = [];
+  if (!sources.length) {
+    blockers.push({
+      code: relevantDocumentCount ? "unverified_evidence" : "missing_evidence",
+      message: relevantDocumentCount
+        ? "Review and accept at least one relevant source document."
+        : "Add a relevant source document before approving this workpaper.",
+    });
+  }
+  if (sources.some(source => !source.contentFingerprint)) {
+    blockers.push({
+      code: "missing_byte_fingerprint",
+      message: "Replace legacy source evidence with a fingerprinted version before approval.",
+    });
+  }
+  const sourcesWithoutReviewedNumbers = requireReviewedNumericFact
+    ? sources.filter(source => (source.verifiedFacts?.length ?? 0) === 0)
+    : [];
+  if (sourcesWithoutReviewedNumbers.length > 0) {
+    blockers.push({
+      code: "unverified_evidence",
+      message: `Review at least one numeric source field on each accepted source used by this calculation (${sourcesWithoutReviewedNumbers.length} remaining).`,
+    });
+  }
+  return blockers;
+}
 
 function normalized(value: string | null | undefined) {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -112,10 +156,21 @@ function comparison(input: {
 export function reconcileFinancialEvidence(input: ReconciliationInput): FinancialEvidenceComparison[] {
   const comparisons: FinancialEvidenceComparison[] = [];
   const verifiedDocuments = input.documents.filter(document => document.status === "verified");
+  const logicalTypeById = new Map((input.logicalDocuments ?? []).map(form => [form.id, form.documentType]));
 
   for (const document of verifiedDocuments) {
-    const rows = input.factsByDocument.get(document.id) ?? [];
-    const type = canonicalDocumentType(document.documentType);
+    const allRows = input.factsByDocument.get(document.id) ?? [];
+    const units = new Map<string, { type: string; rows: ExtractedField[] }>();
+    for (const row of allRows) {
+      const key = row.logicalDocumentId ?? "source";
+      const rawType = row.logicalDocumentId ? logicalTypeById.get(row.logicalDocumentId) : document.documentType;
+      if (!rawType) continue;
+      const unit = units.get(key) ?? { type: canonicalDocumentType(rawType), rows: [] };
+      unit.rows.push(row);
+      units.set(key, unit);
+    }
+
+    for (const { type, rows } of units.values()) {
 
     if (type === "pay_stub") {
       const amountFact = fact(rows, "monthly_income_ytd_avg");
@@ -138,6 +193,37 @@ export function reconcileFinancialEvidence(input: ReconciliationInput): Financia
           unmatchedDetail: employerName
             ? "This employer does not tie uniquely to one employment record. Link or correct the employment record before approval."
             : "Confirm the employer name on this pay statement before approval so its income can be tied to one employment record.",
+        }));
+      }
+    }
+
+    if (type === "w2") {
+      const amountFact = fact(rows, "w2_box_1_wages");
+      const evidenceValue = effectiveNumber(amountFact);
+      if (amountFact && evidenceValue !== null) {
+        const employerFact = fact(rows, "employer_name");
+        const employerName = effectiveString(employerFact);
+        const yearFact = fact(rows, "tax_year");
+        const taxYear = effectiveString(yearFact);
+        const matches = employerName
+          ? input.employment.filter(row => normalized(row.employerName) === normalized(employerName))
+          : [];
+        const monthly = matches.length === 1 ? monthlyEmploymentIncome(matches[0]) : null;
+        const calculationValue = monthly === null ? null : monthly * 12;
+        comparisons.push(comparison({
+          kind: "income",
+          documentId: document.id,
+          facts: [amountFact, ...(employerFact ? [employerFact] : []), ...(yearFact ? [yearFact] : [])],
+          label: `${taxYear ? `${taxYear} ` : ""}W-2${employerName ? ` · ${employerName}` : ""}`,
+          evidenceValue,
+          calculationValue,
+          // A W-2 is prior-year history while the application holds current
+          // monthly earnings. A visible 20% movement needs explanation, but a
+          // normal raise should not become a false hard mismatch.
+          tolerance: Math.max(100, Math.round(evidenceValue * 0.2 * 100) / 100),
+          unmatchedDetail: employerName
+            ? "This employer does not tie uniquely to one employment record. Link or correct the employment record before approval."
+            : "Confirm the employer name on this W-2 before approval so its wages can be tied to one employment record.",
         }));
       }
     }
@@ -193,6 +279,7 @@ export function reconcileFinancialEvidence(input: ReconciliationInput): Financia
         }));
       }
     }
+    }
   }
 
   return comparisons.sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
@@ -234,19 +321,25 @@ export function reconcileSelfEmploymentEvidence(input: SelfEmploymentReconciliat
   if (!years) return [];
   const yearRows = [years.currentYear, years.priorYear].filter((year): year is NonNullable<typeof year> => !!year);
   const comparisons: FinancialEvidenceComparison[] = [];
+  const eligibleForms = input.forms.filter(form =>
+    form.documentType === formType
+    && form.businessEntityId === input.businessEntityId
+    && !!form.sourceDocumentId
+    && verifiedDocumentIds.has(form.sourceDocumentId),
+  );
+  const usedFormIds = new Set<string>();
 
   for (const year of yearRows) {
-    const taxYear = numeric(year.taxYear);
-    if (taxYear === null) continue;
-    const matchingForms = input.forms.filter(form =>
-      form.documentType === formType
-      && form.businessEntityId === input.businessEntityId
-      && form.taxYear === taxYear
-      && !!form.sourceDocumentId
-      && verifiedDocumentIds.has(form.sourceDocumentId),
+    const requestedTaxYear = numeric(year.taxYear);
+    const unusedForms = eligibleForms.filter(form => !usedFormIds.has(form.id));
+    const inferredTaxYear = requestedTaxYear ?? Math.max(
+      ...unusedForms.map(form => form.taxYear ?? Number.NEGATIVE_INFINITY),
     );
+    if (!Number.isFinite(inferredTaxYear)) continue;
+    const matchingForms = unusedForms.filter(form => form.taxYear === inferredTaxYear);
     if (matchingForms.length !== 1) continue;
     const form = matchingForms[0];
+    usedFormIds.add(form.id);
     const rows = (input.factsByDocument.get(form.sourceDocumentId!) ?? [])
       .filter(row => row.logicalDocumentId === form.id);
     for (const mapping of SELF_EMPLOYMENT_MAPPINGS.filter(item => item.formType === formType)) {
@@ -258,13 +351,104 @@ export function reconcileSelfEmploymentEvidence(input: SelfEmploymentReconciliat
         kind: "income",
         documentId: form.sourceDocumentId!,
         facts: [evidenceFact],
-        label: `${taxYear} ${mapping.worksheetField}`,
+        label: `${form.taxYear ?? "Current"} ${mapping.worksheetField}`,
         evidenceValue,
         calculationValue,
         tolerance: 1,
         unmatchedDetail: "This reviewed tax figure could not be tied to the confirmed self-employment worksheet.",
       }));
     }
+  }
+
+  return comparisons.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+
+/**
+ * Tie the three figures used by the business-liquidity ratio to the reviewed
+ * Schedule L components that produced the smart-fill draft. The worksheet is
+ * still borrower-confirmed and editable; an edit becomes a visible variance
+ * instead of silently breaking the evidence chain.
+ */
+export function reconcileBusinessLiquidityEvidence(
+  input: BusinessLiquidityReconciliationInput,
+): FinancialEvidenceComparison[] {
+  const worksheet = input.employment.selfEmploymentIncome;
+  const liquidity = worksheet?.k1?.liquidity;
+  if (!worksheet || !liquidity) return [];
+  const formType = worksheet.businessStructure === "partnership"
+    ? "business_tax_return_1065"
+    : worksheet.businessStructure === "s_corporation"
+      ? "business_tax_return_1120s"
+      : null;
+  if (!formType) return [];
+
+  const verifiedDocumentIds = new Set(
+    input.documents.filter(document => document.status === "verified").map(document => document.id),
+  );
+  const eligible = input.forms.filter(form =>
+    form.documentType === formType
+    && form.businessEntityId === input.businessEntityId
+    && !!form.sourceDocumentId
+    && verifiedDocumentIds.has(form.sourceDocumentId),
+  );
+  const worksheetTaxYear = numeric(worksheet.k1?.currentYear.taxYear);
+  const latestTaxYear = worksheetTaxYear ?? Math.max(
+    ...eligible.map(form => form.taxYear ?? Number.NEGATIVE_INFINITY),
+  );
+  const matching = Number.isFinite(latestTaxYear)
+    ? eligible.filter(form => form.taxYear === latestTaxYear)
+    : eligible;
+  if (matching.length !== 1) return [];
+
+  const form = matching[0];
+  const rows = (input.factsByDocument.get(form.sourceDocumentId!) ?? [])
+    .filter(row => row.logicalDocumentId === form.id);
+  const comparisons: FinancialEvidenceComparison[] = [];
+  const addDerived = (
+    label: string,
+    fieldNames: string[],
+    calculationValue: number,
+  ) => {
+    const facts = fieldNames
+      .map(fieldName => fact(rows, fieldName))
+      .filter((row): row is ExtractedField => !!row && effectiveNumber(row) !== null);
+    if (!facts.length) return;
+    const evidenceValue = facts.reduce((sum, row) => sum + effectiveNumber(row)!, 0);
+    comparisons.push(comparison({
+      kind: "business_liquidity",
+      documentId: form.sourceDocumentId!,
+      facts,
+      label: `${form.taxYear ?? "Current"} Schedule L ${label}`,
+      evidenceValue,
+      calculationValue,
+      tolerance: 1,
+      unmatchedDetail: `The reviewed Schedule L ${label.toLowerCase()} could not be tied to the confirmed business-liquidity worksheet.`,
+    }));
+  };
+
+  addDerived("current assets", [
+    "scheduleLCashEndOfYear",
+    "scheduleLReceivablesEndOfYear",
+    "scheduleLInventoriesEndOfYear",
+  ], liquidity.currentAssets);
+  addDerived("current liabilities", [
+    "scheduleLAccountsPayableEndOfYear",
+    "scheduleLShortTermDebtEndOfYear",
+    "scheduleLOtherCurrentLiabilitiesEndOfYear",
+  ], liquidity.currentLiabilities);
+  const inventoryFact = fact(rows, "scheduleLInventoriesEndOfYear");
+  const inventoryValue = effectiveNumber(inventoryFact);
+  if (inventoryFact && inventoryValue !== null) {
+    comparisons.push(comparison({
+      kind: "business_liquidity",
+      documentId: form.sourceDocumentId!,
+      facts: [inventoryFact],
+      label: `${form.taxYear ?? "Current"} Schedule L inventory`,
+      evidenceValue: inventoryValue,
+      calculationValue: liquidity.inventory,
+      tolerance: 1,
+      unmatchedDetail: "The reviewed Schedule L inventory could not be tied to the confirmed business-liquidity worksheet.",
+    }));
   }
 
   return comparisons.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));

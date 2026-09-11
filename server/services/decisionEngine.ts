@@ -26,6 +26,18 @@ import {
 } from "./income/orchestrator";
 import type { IncomeOrchestrationResult } from "@shared/incomePaths";
 import { getCurrentDecisionGrade } from "./currentDecisionGrade";
+import { loadProfitLossActivity } from "./profitLossActivity";
+import type { DecisionCreditPicture } from "./decisionCredit";
+import {
+  assessMultipleFinancedProperties,
+  reoQualificationPicture,
+  type MultipleFinancedPropertiesAssessment,
+} from "@shared/realEstateFinancing";
+import { assessLiabilities } from "../underwriting";
+import {
+  adjustedBureauDebtAfterReviewedTreatments,
+  liabilitiesWithCurrentReviewedTreatments,
+} from "./liabilityTreatments";
 
 // =============================================================================
 // INSTANT DECISION ORCHESTRATOR (Tinman-style)
@@ -72,12 +84,17 @@ export interface InstantDecision {
   };
   metrics: {
     ltv: number;
+    cltv: number;
+    hcltv: number;
     dti: number;
     monthlyPiti: number;
     pmiMonthly: number;
     loanAmount: number;
     monthlyIncome: number;
     monthlyDebts: number;
+    creditScore: number;
+    creditScoreSource: "bureau_report" | "application";
+    monthlyDebtsSource: "bureau_reconciled" | "application_or_urla";
     borrowerCount: number;
     /** "urla_line_items" (fact-based, per-borrower) or "application_summary" (fallback). */
     incomeBasis: "urla_line_items" | "application_summary";
@@ -90,6 +107,12 @@ export interface InstantDecision {
      * reserve pictures for the same borrower. Floored at 0.
      */
     monthsOfReserves: number;
+    /** Minimum subject-property reserves plus the B3-4.1-01 other-property UPB requirement. */
+    requiredReserves: number;
+    /** Haircut-adjusted liquid assets remaining after the down payment. */
+    postClosingLiquidAssets: number;
+    /** Subject purchase plus every qualifying financed property in URLA 2c. */
+    financedPropertiesCount: number | null;
   } | null;
 }
 
@@ -224,6 +247,9 @@ interface AggregatedFinancials {
   variableMonthlyIncome: number;
   totalMonthlyIncome: number;
   monthlyDebts: number;
+  disclosedMonthlyDebts: number;
+  bureauMonthlyDebts: number | null;
+  creditReviewReasons: string[];
   borrowerCount: number;
   incomeBasis: "urla_line_items" | "application_summary";
   assets: AssetProfile[];
@@ -233,6 +259,9 @@ interface AggregatedFinancials {
   incomeEvaluationFingerprint: string;
   /** B3-5.3-07 events declared on URLA Section 5, across all borrowers. */
   declaredDerogatoryEvents: string[];
+  multipleFinancedProperties: MultipleFinancedPropertiesAssessment;
+  realEstateQualificationMissingItems: string[];
+  openThirtyDayChargeBalance: number;
 }
 
 /**
@@ -277,8 +306,12 @@ export function summarizeDeclaredDerogatoryEvents(
   return events;
 }
 
-async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: boolean): Promise<AggregatedFinancials> {
-  const [employment, otherIncome, liabilities, urlaAssets, bankStatementAnalysis, propertyInfo, declarations] =
+async function aggregateBorrowerFinancials(
+  app: LoanApplication,
+  decisionGrade: boolean,
+  decisionCredit: DecisionCreditPicture | null,
+): Promise<AggregatedFinancials> {
+  const [employment, otherIncome, liabilities, urlaAssets, bankStatementAnalysis, propertyInfo, declarations, realEstateOwned] =
     await Promise.all([
       storage.getEmploymentHistory(app.id),
       storage.getOtherIncomeSources(app.id),
@@ -288,6 +321,7 @@ async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: 
       storage.getUrlaPropertyInfo(app.id),
       // B3-5.3-07 — across ALL borrowers, not just the primary (see G-15).
       storage.getAllBorrowerDeclarations(app.id),
+      storage.getRealEstateOwnedByApplication(app.id),
     ]);
 
   // Assets across all borrowers, bucketed for the engine's reserve haircuts.
@@ -305,20 +339,37 @@ async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: 
   // figure, plus surfaces rental / gated non-QM paths. The engine only uses
   // base+bonus as a sum, so the split is free; self-employment folds into base
   // (stable income), keeping wage-only decisions byte-identical to before.
-  const rentalProperties = ((app.incomeSources as IncomeSourceEntry[] | null) ?? [])
+  const intakeRentalProperties = ((app.incomeSources as IncomeSourceEntry[] | null) ?? [])
     .filter((s) => s.type === "rental")
     .flatMap((s) => s.rentalProperties ?? []);
+  const reoQualification = reoQualificationPicture(realEstateOwned);
+  // Once URLA 2c has an explicit ownership answer, it is the canonical source
+  // for every existing property's rent and PITIA. The three-minute intake list
+  // is only a bridge until that section is answered.
+  const rentalProperties = app.ownsOtherRealEstate == null
+    ? intakeRentalProperties
+    : reoQualification.rentalProperties;
+  const multipleFinancedProperties = assessMultipleFinancedProperties({
+    ownsOtherRealEstate: app.ownsOtherRealEstate,
+    properties: realEstateOwned,
+    subjectOccupancyType: propertyInfo?.occupancyType ?? app.occupancyType,
+  });
+  const profitLossActivity = await loadProfitLossActivity(app.id, employment);
   const incomeInput: IncomePathsCoreInput = {
     employment,
     otherIncome,
     rentalProperties,
     fallbackAnnualIncome: app.annualIncome,
+    expectedNoteDate: app.closingDate,
+    applyVerifiedOtherIncomeAdjustments: decisionGrade,
     bankStatementAnalysis,
+    profitLossActivity: profitLossActivity.signals,
+    profitLossActivityIssues: profitLossActivity.issues,
     // B3-3.8-01 rental application (docs/fannie-mae/rental-income-reference.md):
     // positive offsets and subject-property rent only on decision-grade
     // provenance; losses always (platform-rental-preliminary-asymmetry).
     applyRentalToDti: decisionGrade,
-    hasMortgageLiabilityRows: hasMortgageTypeLiability(liabilities),
+    hasMortgageLiabilityRows: app.ownsOtherRealEstate == null && hasMortgageTypeLiability(liabilities),
     subjectProperty: propertyInfo
       ? {
           numberOfUnits: propertyInfo.numberOfUnits,
@@ -328,7 +379,7 @@ async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: 
         }
       : null,
     // S-07: a converting departing residence joins the per-property offsets.
-    departingResidence: departingResidenceInput(app),
+    departingResidence: app.ownsOtherRealEstate == null ? departingResidenceInput(app) : null,
   };
   const income = computeIncomePaths(incomeInput);
 
@@ -336,9 +387,57 @@ async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: 
   // plus an applied net rental LOSS — B3-3.8-01 puts it in monthly
   // obligations, the numerator of DTI, never in income as a negative.
   for (const l of liabilities) borrowerSeqs.add(l.borrowerSequenceNumber ?? 1);
-  const monthlyDebts =
-    sumOpenMonthlyLiabilities(liabilities, app.monthlyDebts) +
-    income.primaryBreakdown.rentalLiabilityApplied;
+  // A current approved liability workpaper is the authorization boundary for
+  // borrower-favorable documented treatments. Its fingerprint contains these
+  // source/pull links, so any row edit, replacement document or new pull makes
+  // decisionGrade false and falls back to the conservative payment.
+  const currentTreatmentDocumentIds = decisionGrade
+    ? new Set(liabilities.flatMap(liability => liability.treatmentSourceDocumentId
+        ? [liability.treatmentSourceDocumentId]
+        : []))
+    : new Set<string>();
+  const effectiveLiabilities = liabilitiesWithCurrentReviewedTreatments(
+    liabilities,
+    decisionGrade ? decisionCredit : null,
+    currentTreatmentDocumentIds,
+  );
+  const liabilityAssessment = assessLiabilities(effectiveLiabilities, {
+    allowReviewedTreatments: decisionGrade,
+  });
+  const nonMortgageLiabilities = effectiveLiabilities.filter(
+    liability => !hasMortgageTypeLiability([liability]),
+  );
+  const nonMortgageLiabilityAssessment = assessLiabilities(nonMortgageLiabilities, {
+    allowReviewedTreatments: decisionGrade,
+  });
+  const disclosedMonthlyDebts = app.ownsOtherRealEstate == null
+    ? liabilities.length > 0
+      ? liabilityAssessment.totalMonthlyPayment
+      : safe(app.monthlyDebts)
+    : liabilities.length > 0
+      ? nonMortgageLiabilityAssessment.totalMonthlyPayment + reoQualification.nonRentalMonthlyObligation
+      : Math.max(safe(app.monthlyDebts), reoQualification.nonRentalMonthlyObligation);
+  const bureauMonthlyDebts = decisionGrade
+    ? adjustedBureauDebtAfterReviewedTreatments(
+        decisionCredit,
+        liabilities,
+        currentTreatmentDocumentIds,
+      )
+    : null;
+  const creditReviewReasons: string[] = [];
+  if (
+    bureauMonthlyDebts !== null
+    && Math.abs(disclosedMonthlyDebts - bureauMonthlyDebts) > 1
+  ) {
+    creditReviewReasons.push(
+      `The bureau report shows ${bureauMonthlyDebts.toLocaleString("en-US", { style: "currency", currency: "USD" })} in qualifying monthly credit obligations, while the application liability schedule shows ${disclosedMonthlyDebts.toLocaleString("en-US", { style: "currency", currency: "USD" })}. Reconcile the difference before an automated approval.`,
+    );
+  }
+  // A decision-grade screen takes the greater household debt total until the
+  // application schedule and bureau ledger agree. This avoids a false approval
+  // while still preserving non-bureau obligations disclosed on the URLA.
+  const monthlyDebts = Math.max(disclosedMonthlyDebts, bureauMonthlyDebts ?? 0)
+    + income.primaryBreakdown.rentalLiabilityApplied;
 
   // Engine split (base+bonus, used only as a sum): agency variable is "bonus";
   // agency base + self-employment are "base"; applied rental income (non-
@@ -353,8 +452,16 @@ async function aggregateBorrowerFinancials(app: LoanApplication, decisionGrade: 
       income.primaryBreakdown.subjectRentalIncomeApplied,
     totalMonthlyIncome: income.primaryMonthlyQualifyingIncome,
     monthlyDebts,
+    disclosedMonthlyDebts,
+    bureauMonthlyDebts,
+    creditReviewReasons,
     borrowerCount: Math.max(borrowerSeqs.size, 1),
     declaredDerogatoryEvents: summarizeDeclaredDerogatoryEvents(declarations),
+    multipleFinancedProperties,
+    realEstateQualificationMissingItems: reoQualification.missingItems,
+    openThirtyDayChargeBalance: app.ownsOtherRealEstate == null
+      ? liabilityAssessment.openThirtyDayBalance
+      : nonMortgageLiabilityAssessment.openThirtyDayBalance,
     incomeBasis: income.incomeBasis,
     assets,
     income,
@@ -370,7 +477,8 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   }
 
   const currentGrade = await getCurrentDecisionGrade(app);
-  const isVerified = currentGrade.isDecisionGrade;
+  const isVerified = currentGrade.isDecisionGrade && currentGrade.decisionCredit !== null;
+  const decisionCredit = isVerified ? currentGrade.decisionCredit : null;
   const qualifier: InstantDecision["qualifier"] = isVerified ? "VERIFIED" : "PRELIMINARY";
   const selectedLoanProgram = requestedUnderwritingProgram(app.preferredLoanType);
   // The fast application deliberately does not ask a novice borrower to pick a
@@ -383,7 +491,8 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       ? "preliminary_conventional_candidate"
       : null;
 
-  const fin = await aggregateBorrowerFinancials(app, isVerified);
+  const fin = await aggregateBorrowerFinancials(app, isVerified, decisionCredit);
+  const effectiveCreditScore = decisionCredit?.representativeScore ?? app.creditScore;
 
   // A policy fingerprint proves which rules were used; this separate digest
   // proves which borrower facts were evaluated. Keep the payload explicit so
@@ -412,6 +521,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       creditVerified: app.creditVerified,
       currentPropertyDisposition: app.currentPropertyDisposition,
       departingResidence: app.departingResidence,
+      ownsOtherRealEstate: app.ownsOtherRealEstate,
     },
     incomeInputsFingerprint: fin.incomeInputsFingerprint,
     incomeEvaluationFingerprint: fin.incomeEvaluationFingerprint,
@@ -419,6 +529,17 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       isDecisionGrade: currentGrade.isDecisionGrade,
       evidence: currentGrade.evidence,
     },
+    decisionCredit: decisionCredit
+      ? {
+          pullId: decisionCredit.pullId,
+          representativeScore: decisionCredit.representativeScore,
+          reportedMonthlyPayments: decisionCredit.reportedMonthlyPayments,
+          adjustedMonthlyDebt: decisionCredit.adjustedMonthlyDebt,
+          fingerprint: decisionCredit.fingerprint,
+        }
+      : null,
+    multipleFinancedProperties: fin.multipleFinancedProperties,
+    openThirtyDayChargeBalance: fin.openThirtyDayChargeBalance,
     underwritingProgram: {
       evaluated: requestedLoanProgram,
       selection: loanProgramSelection,
@@ -466,7 +587,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
         : "Income (no employment or income sources on file)",
     );
   }
-  if (!app.creditScore) missing.push("Credit score");
+  if (!effectiveCreditScore) missing.push("Credit score");
   if (!requestedLoanProgram) missing.push("Preferred loan program");
   if (!purchasePrice || purchasePrice <= 0) missing.push("Purchase price");
   if (isNaN(downPayment) || downPayment < 0) missing.push("Down payment");
@@ -476,6 +597,8 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     missing.push("Down payment must be less than the purchase price");
   }
   if (!app.propertyState) missing.push("Property state");
+  missing.push(...fin.multipleFinancedProperties.missingItems);
+  missing.push(...fin.realEstateQualificationMissingItems);
   // VA path: the residual-income evaluation needs both of these — surface them
   // as named gaps here instead of letting the engine throw its protocol error.
   if (requestedLoanProgram === "VA" && app.isVeteran) {
@@ -560,11 +683,14 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   // The disclosable generator keeps its guard; files missing a genuine pricing
   // input (price, down payment, credit score, state) still gap honestly here.
   let monthlyPiti: number;
+  let subordinateFinancingExists: boolean | null = null;
+  let calculatedCltv: number | null = null;
+  let calculatedHcltv: number | null = null;
   try {
-    const projection = await computeDecisionPaymentProjection(
-      applicationId,
-      requestedLoanProgram!.toLowerCase() as "conventional" | "fha" | "va" | "usda",
-    );
+    const program = requestedLoanProgram!.toLowerCase() as "conventional" | "fha" | "va" | "usda";
+    const projection = decisionCredit
+      ? await computeDecisionPaymentProjection(applicationId, program, { creditScore: decisionCredit.representativeScore })
+      : await computeDecisionPaymentProjection(applicationId, program);
 
     // B3-6-03: owners' association and co-op dues belong inside the qualifying
     // housing expense. On a condo, co-op, PUD or townhouse we cannot treat an
@@ -577,6 +703,17 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
         decision: null,
         reasons: [],
         missingItems: ["Monthly homeowners association (HOA) or co-op dues for the property"],
+        metrics: null,
+        resolvedPolicy: null,
+        ...base,
+      };
+    }
+    if ((projection.housingExpenseMissingItems ?? []).length > 0) {
+      return {
+        status: "NEEDS_MORE_INFO",
+        decision: null,
+        reasons: [],
+        missingItems: projection.housingExpenseMissingItems ?? [],
         metrics: null,
         resolvedPolicy: null,
         ...base,
@@ -600,6 +737,9 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       );
     }
     monthlyPiti = projection.qualifyingPitia;
+    subordinateFinancingExists = projection.subordinateFinancingExists;
+    calculatedCltv = projection.cltv;
+    calculatedHcltv = projection.hcltv;
   } catch (err) {
     // A database/system fault must never masquerade as a borrower-info gap —
     // the underwriting catch below already rethrows faults; this catch must
@@ -624,9 +764,13 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     originalLoanAmount: purchasePrice - downPayment,
     contractSalesPrice: purchasePrice,
     appraisalValue: toNumber(app.propertyValue) || purchasePrice,
-    representativeFico: app.creditScore!, // guaranteed non-null by the completeness check above
+    subordinateFinancingExists,
+    combinedLoanToValue: calculatedCltv,
+    homeEquityCombinedLoanToValue: calculatedHcltv,
+    representativeFico: effectiveCreditScore!, // guaranteed non-null by the completeness check above
     proposedPiti: monthlyPiti,
     assets: fin.assets,
+    multipleFinancedProperties: fin.multipleFinancedProperties,
     subjectPropertyState: app.propertyState ?? undefined,
     occupancyType: propertyInfo?.occupancyType ?? undefined,
     numberOfUnits: propertyInfo?.numberOfUnits ?? undefined,
@@ -679,28 +823,35 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     throw err;
   }
 
-  const selfEmploymentRequiresReview =
-    selfEmploymentPath?.status === "applicable" && selfEmploymentPath.requiresManualReview;
-  const incomeReviewReasons = selfEmploymentRequiresReview
-    ? selfEmploymentPath.notes.filter((note) => note.trim().length > 0)
+  const incomeReviewReasons = fin.income.requiresManualReview
+    ? fin.income.paths
+        .filter(path => path.requiresManualReview)
+        .flatMap(path => path.notes)
+        .filter((note) => note.trim().length > 0)
     : [];
+  const creditRequiresReview = fin.creditReviewReasons.length > 0;
 
   return {
     status: "DECISION_READY",
-    decision: selfEmploymentRequiresReview ? "MANUAL_REVIEW" : result.decision,
+    decision: fin.income.requiresManualReview || creditRequiresReview ? "MANUAL_REVIEW" : result.decision,
     // Rejections and review reasons both explain the outcome to the borrower/LO;
     // the decision field distinguishes a decline from a "needs a human" review.
-    reasons: [...result.rejectionReasons, ...result.reviewReasons, ...incomeReviewReasons],
+    reasons: [...result.rejectionReasons, ...result.reviewReasons, ...incomeReviewReasons, ...fin.creditReviewReasons],
     missingItems: [],
     resolvedPolicy: result.resolvedPolicy,
     metrics: {
       ltv: result.calculatedLtv,
+      cltv: result.calculatedCltv,
+      hcltv: result.calculatedHcltv,
       dti: result.calculatedDti,
       monthlyPiti,
       pmiMonthly: result.resolvedPmiMonthlyPremium,
       loanAmount: input.originalLoanAmount,
       monthlyIncome: fin.totalMonthlyIncome,
       monthlyDebts: fin.monthlyDebts,
+      creditScore: effectiveCreditScore!,
+      creditScoreSource: decisionCredit ? "bureau_report" : "application",
+      monthlyDebtsSource: decisionCredit ? "bureau_reconciled" : "application_or_urla",
       borrowerCount: fin.borrowerCount,
       incomeBasis: fin.incomeBasis,
       liquidAssets: result.calculatedLiquidAssets,
@@ -710,6 +861,9 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       monthsOfReserves: monthlyPiti > 0
         ? Math.round((Math.max(result.calculatedLiquidAssets - downPayment, 0) / monthlyPiti) * 10) / 10
         : 0,
+      requiredReserves: result.calculatedRequiredReserves,
+      postClosingLiquidAssets: result.calculatedPostClosingLiquidAssets,
+      financedPropertiesCount: result.financedPropertiesCount,
     },
     ...base,
     inputsFingerprint: pricedInputsFingerprint,

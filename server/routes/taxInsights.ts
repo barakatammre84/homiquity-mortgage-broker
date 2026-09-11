@@ -11,6 +11,7 @@ import {
   kickDocumentExtractionWorker,
 } from "../services/documentExtractionJobs";
 import { resolveDocumentBorrowerUserId } from "../services/documentBorrower";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
 
 /**
  * Tax Return Insight — consumer-direct: the borrower processes their OWN
@@ -59,7 +60,7 @@ export function registerTaxInsightRoutes(app: Express, storage: IStorage) {
       if (borrowerUserId !== user.id) {
         return res.status(403).json({ error: "Unauthorized" });
       }
-      if (document.documentType !== "tax_return") {
+      if (!isTaxReturnDocumentType(document.documentType)) {
         return res.status(400).json({ error: "Document is not a tax return" });
       }
 

@@ -195,6 +195,17 @@ export function buildDocumentFacts(
     add("securityDeposit", "security_deposit", "property", extracted.securityDeposit, "currency");
   }
 
+  if (documentType === "profit_loss") {
+    add("businessName", "business_name", "identity", extracted.businessName, "string");
+    add("periodStartDate", "pnl_period_start_date", "income", extracted.periodStartDate, "string");
+    add("periodEndDate", "pnl_period_end_date", "income", extracted.periodEndDate, "string");
+    add("revenue", "pnl_revenue", "income", extracted.revenue, "currency");
+    add("costOfGoodsSold", "pnl_cost_of_goods_sold", "income", extracted.costOfGoodsSold, "currency");
+    add("grossProfit", "pnl_gross_profit", "income", extracted.grossProfit, "currency");
+    add("totalExpenses", "pnl_total_expenses", "income", extracted.totalExpenses, "currency");
+    add("netProfitLoss", "pnl_net_profit_loss", "income", extracted.netProfitLoss, "currency");
+  }
+
   return facts;
 }
 
@@ -266,6 +277,8 @@ export async function clearUnverifiedDocumentFacts(
 
 export interface DocumentFactRow {
   documentId: string;
+  /** Page-classified type when the fact came from a logical segment in a mixed packet. */
+  logicalDocumentType?: string | null;
   fieldName: string;
   fieldCategory: string | null;
   valueType: string;
@@ -282,7 +295,11 @@ export async function getFactsForDocuments(documentIds: string[]): Promise<Docum
   if (documentIds.length === 0) return [];
 
   const rows = await db
-    .select({ field: extractedFields, sourceDocumentId: logicalDocuments.sourceDocumentId })
+    .select({
+      field: extractedFields,
+      sourceDocumentId: logicalDocuments.sourceDocumentId,
+      logicalDocumentType: logicalDocuments.documentType,
+    })
     .from(extractedFields)
     .leftJoin(logicalDocuments, eq(extractedFields.logicalDocumentId, logicalDocuments.id))
     .where(
@@ -298,8 +315,9 @@ export async function getFactsForDocuments(documentIds: string[]): Promise<Docum
       ),
     );
 
-  return rows.map(({ field, sourceDocumentId }) => ({
+  return rows.map(({ field, sourceDocumentId, logicalDocumentType }) => ({
     documentId: (field.documentId ?? sourceDocumentId) as string,
+    logicalDocumentType,
     fieldName: field.fieldName,
     fieldCategory: field.fieldCategory,
     valueType: field.valueType,

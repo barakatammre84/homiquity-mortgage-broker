@@ -1,7 +1,10 @@
 import PDFDocument from "pdfkit";
 import { createCanvas } from "@napi-rs/canvas";
 import { describe, expect, it } from "vitest";
-import { renderNormalizedDocumentPages } from "../server/services/documentPageMaterialization";
+import {
+  packetSegmentExtractorType,
+  renderNormalizedDocumentPages,
+} from "../server/services/documentPageMaterialization";
 
 async function syntheticPdf(): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -17,6 +20,15 @@ async function syntheticPdf(): Promise<Buffer> {
 }
 
 describe("normalized document page rendering", () => {
+  it("routes every supported mixed-packet financial segment, including P&L", () => {
+    expect(packetSegmentExtractorType("paystub")).toBe("pay_stub");
+    expect(packetSegmentExtractorType("w2")).toBe("w2");
+    expect(packetSegmentExtractorType("business_bank_statement")).toBe("bank_statement");
+    expect(packetSegmentExtractorType("lease_agreement")).toBe("lease_agreement");
+    expect(packetSegmentExtractorType("profit_loss_statement")).toBe("profit_loss");
+    expect(packetSegmentExtractorType("drivers_license")).toBeNull();
+  });
+
   it("materializes every PDF page as a numbered PNG", async () => {
     const pages = await renderNormalizedDocumentPages(await syntheticPdf(), "application/pdf");
     expect(pages.map((page) => page.pageNumber)).toEqual([1, 2]);

@@ -68,7 +68,6 @@ describe("COACH_TOOLS definition stability (prompt-cache contract)", () => {
     expect(COACH_TOOLS.map((t) => t.name)).toEqual([
       "record_intake",
       "set_action_plan",
-      "generate_borrower_package",
       "suggest_next_steps",
       // Appended 2026-08-04 (renter-incubation adjudication Leg C) — new tools
       // append at the END only.
@@ -99,6 +98,7 @@ describe("COACH_TOOLS definition stability (prompt-cache contract)", () => {
     const names = COACH_TOOLS.map((t) => t.name);
     expect(names).not.toContain("set_document_checklist");
     expect(names).not.toContain("update_readiness");
+    expect(names).not.toContain("generate_borrower_package");
   });
 
   it("refuses to execute the removed tools even if a stale model call arrives", async () => {
@@ -178,6 +178,7 @@ describe("executeCoachTool: record_intake", () => {
     );
     expect(ctx.state.intake).toEqual({ annualIncome: "85000", creditScore: "720" });
     expect(ctx.state.syncedApplicationId).toBe("app-1");
+    expect(ctx.workableApplicationId).toBe("app-1");
     expect(ctx.state.captureOutcome).toEqual({
       attempts: 1,
       createdApplication: false,
@@ -239,26 +240,28 @@ describe("executeCoachTool: panel tools", () => {
     expect(events.at(-1)).toEqual(expect.objectContaining({ type: "panel" }));
   });
 
-  it("generate_borrower_package strips model-authored access links", async () => {
-    const { ctx } = makeCtx();
-    const pkg = {
-      generatedDate: "2026-07-12",
-      borrowerOverview: { borrowerNames: "A B", householdComposition: "Single Borrower", primaryResidenceState: "IL", incomeProfileType: "W-2" },
-      householdOverview: { firstTimeBuyer: "Yes", veteranStatus: "No" },
-      transactionIntent: { transactionType: "Purchase", propertyIntent: "Primary Residence", targetTimeframe: "Not Provided" },
-      incomeSources: [{ source: "Acme", type: "W-2", frequency: "Annual", documentationStatus: "Pending" }],
-      assetSummary: [{ assetType: "Savings Account", accountCategory: "Liquid", ownershipType: "Individual", documentationStatus: "Pending", lastStatementDate: "Not Provided", validationNotes: "", accessLink: "https://evil.example/exfil" }],
-      creditAndDebt: { creditScore: "720", creditScoreVerification: "Tier 3", monthlyDebts: "1200", monthlyDebtsVerification: "Tier 3", dtiRatio: "Insufficient Data", dtiNote: "Preparatory calculation only." },
-      propertyContext: { propertyAddress: "Not Provided", estimatedValueOrPrice: "350000", occupancyIntent: "Primary Residence" },
-      documentInventory: [{ docType: "pay_stub", label: "Pay Stub", status: "Not Yet Received", flags: [] }],
-      readinessStatus: { intakeStatus: "Complete", documentStatus: "Not Started", packageStatus: "Pending Items", pendingItems: ["pay stub"] },
-      auditTrail: { intakeStartDate: "2026-07-12", lastUpdateDate: "2026-07-12", events: [{ date: "2026-07-12", activity: "Intake started" }] },
-      validationNotes: { recencyChecks: [], completenessChecks: [], consistencyObservations: [] },
-      complianceFooter: "This intake summary is prepared for informational purposes only.",
-    };
-    const result = await executeCoachTool(ctx, "generate_borrower_package", pkg);
-    expect(result.isError).toBeUndefined();
-    expect(ctx.state.borrowerPackage?.assetSummary[0].accessLink).toBe("");
+  it("retires the model-authored package tool even when a stale turn calls it", async () => {
+    const { ctx, events } = makeCtx();
+    const result = await executeCoachTool(ctx, "generate_borrower_package", {});
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/retired|server-recorded/i);
+    expect(ctx.state.borrowerPackage).toBeUndefined();
+    expect(events).toHaveLength(0);
+  });
+
+  it("blocks prohibited approval language in structured plans and reply chips", async () => {
+    const { ctx, events } = makeCtx();
+    const plan = await executeCoachTool(ctx, "set_action_plan", {
+      items: [{ id: "a", phase: 1, title: "Guaranteed approval", description: "Upload this file.", priority: "high", category: "credit", completed: false }],
+    });
+    const suggestion = await executeCoachTool(ctx, "suggest_next_steps", {
+      suggestions: ["How do I get guaranteed approval?"],
+    });
+    expect(plan.isError).toBe(true);
+    expect(suggestion.isError).toBe(true);
+    expect(ctx.state.actionPlan).toBeUndefined();
+    expect(ctx.state.suggestions).toBeUndefined();
+    expect(events).toHaveLength(0);
   });
 
   it("suggest_next_steps enforces the 1-3 chip contract", async () => {
@@ -352,7 +355,7 @@ describe("executeCoachTool: request_human_help", () => {
   });
 
   it("creates an owned, redacted follow-up and records the handoff", async () => {
-    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const { ctx, events } = makeCtx({ workableApplicationId: "app-1" });
     const result = await executeCoachTool(ctx, "request_human_help", { topic: "complex_income" });
 
     expect(result.isError).toBeUndefined();
@@ -445,6 +448,7 @@ describe("executeCoachTool: get_document_evidence", () => {
     loadCoachDocumentEvidence.mockResolvedValue({
       documents: [
         {
+          documentId: "doc-1",
           documentType: "pay_stub",
           label: "Pay stub",
           documentReviewStatus: "accepted",
@@ -457,9 +461,9 @@ describe("executeCoachTool: get_document_evidence", () => {
         },
       ],
       summary: { documentCount: 1, extractedFactCount: 2, humanVerifiedFactCount: 1, factsNeedingHumanReview: 1, omittedDocumentCount: 0 },
-      financialReview: { status: "approved_for_lender_package", income: "approved", assets: "approved" },
+      financialReview: { status: "approved_for_lender_package", income: "approved", assets: "approved", liabilities: "approved" },
     });
-    const { ctx } = makeCtx({ workableApplicationId: "app-1" });
+    const { ctx, events } = makeCtx({ workableApplicationId: "app-1" });
 
     const result = await executeCoachTool(ctx, "get_document_evidence", {});
 
@@ -471,6 +475,12 @@ describe("executeCoachTool: get_document_evidence", () => {
     expect(result.content).toMatch(/not qualifying income or an approval decision|Never turn/i);
     expect(result.content).toMatch(/low-confidence fact needs STAFF review/i);
     expect(result.content).toMatch(/unless get_document_checklist says it was rejected/i);
+    expect(ctx.state.documentEvidence?.documents[0].documentId).toBe("doc-1");
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      type: "panel",
+      source: "file",
+      documentEvidence: expect.objectContaining({ summary: expect.objectContaining({ documentCount: 1 }) }),
+    }));
   });
 
   it("states the no-application case without inventing an extraction", async () => {
@@ -493,7 +503,7 @@ describe("executeCoachTool: get_document_evidence", () => {
     loadCoachDocumentEvidence.mockResolvedValue({
       documents: [],
       summary: { documentCount: 0, extractedFactCount: 0, humanVerifiedFactCount: 0, factsNeedingHumanReview: 0, omittedDocumentCount: 0 },
-      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved" },
+      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved", liabilities: "not_approved" },
     });
     const { ctx } = makeCtx({ workableApplicationId: "app-1" });
 
@@ -506,6 +516,7 @@ describe("executeCoachTool: get_document_evidence", () => {
   it("discloses a bounded document view instead of implying omitted files are absent", async () => {
     loadCoachDocumentEvidence.mockResolvedValue({
       documents: [{
+        documentId: "doc-1",
         documentType: "pay_stub",
         label: "Pay stub",
         documentReviewStatus: "accepted",
@@ -514,7 +525,7 @@ describe("executeCoachTool: get_document_evidence", () => {
         facts: [],
       }],
       summary: { documentCount: 1, extractedFactCount: 0, humanVerifiedFactCount: 0, factsNeedingHumanReview: 0, omittedDocumentCount: 3 },
-      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved" },
+      financialReview: { status: "not_approved", income: "not_approved", assets: "not_approved", liabilities: "not_approved" },
     });
     const { ctx } = makeCtx({ workableApplicationId: "app-1" });
 

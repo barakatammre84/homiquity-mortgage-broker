@@ -123,6 +123,7 @@ vi.mock("../server/extractionService", () => ({
     accountType: "checking",
   })),
   extractLeaseData: vi.fn(async () => ({ confidence: "high" as const, extractedFields: [] })),
+  extractProfitLossData: vi.fn(async () => ({ confidence: "high" as const, extractedFields: [] })),
 }));
 
 // Coarse confidence bookkeeping is its own unit (tests/documentConfidence.test.ts);
@@ -238,7 +239,18 @@ describe("durable borrower document extraction", () => {
       }),
     });
 
-  it.each(["pay_stub", "bank_statement", "lease_agreement"])(
+  it.each([
+    "pay_stub",
+    "paystub",
+    "bank_statement",
+    "bank_statement_checking",
+    "bank_statement_savings",
+    "bank_statement_business",
+    "business_bank_statement",
+    "lease_agreement",
+    "profit_loss",
+    "profit_loss_statement",
+  ])(
     "atomically registers a durable standard job for %s",
     async (documentType) => {
       const res = await upload({ documentType });
@@ -252,6 +264,46 @@ describe("durable borrower document extraction", () => {
       expect(h.updates).toEqual([]);
     },
   );
+
+  it("persists a catalog paystub through the pay-stub fact and readiness mappings", async () => {
+    const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
+    await applyExtractionToDocument({
+      storage: storageStub,
+      userId: "borrower-1",
+      documentId: "catalog-paystub",
+      documentType: "paystub",
+      applicationId: "app-1",
+      extracted: PAY_STUB,
+    });
+
+    expect(persistDocumentFacts.mock.calls[0]?.[1]).toBe("pay_stub");
+    expect(wireExtractionToReadiness.mock.calls[0]?.[2]).toBe("pay_stub");
+  });
+
+  it("extracts a business statement without crediting it as a personal asset", async () => {
+    const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
+    await applyExtractionToDocument({
+      storage: storageStub,
+      userId: "borrower-1",
+      documentId: "business-statement",
+      documentType: "bank_statement_business",
+      applicationId: "app-1",
+      extracted: {
+        confidence: "high",
+        extractedFields: ["closingBalance"],
+        warnings: [],
+        closingBalance: 42_000,
+        fieldEvidence: { closingBalance: { pageNumber: 1, confidence: 0.97 } },
+        documentClassification: {
+          pageCount: 1,
+          pages: [{ pageNumber: 1, documentType: "business_bank_statement", confidence: 0.97 }],
+        },
+      },
+    });
+
+    expect(persistDocumentFacts.mock.calls[0]?.[1]).toBe("bank_statement");
+    expect(wireExtractionToReadiness.mock.calls[0]?.[2]).toBe("bank_statement_business");
+  });
 
   it("does not create paid extraction work for an unsupported type", async () => {
     const res = await upload({ documentType: "government_id" });

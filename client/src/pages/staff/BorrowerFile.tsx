@@ -42,6 +42,7 @@ import { formatCurrency } from "@/lib/formatters";
 import { DocumentReviewPanel } from "@/components/staff/DocumentReviewPanel";
 import { CREDIT_DECISION_ROLES, FINANCIAL_VERIFICATION_ROLES } from "@shared/loanApplicationStatus";
 import type { RealEstateOwned, UrlaPersonalInfo } from "@shared/schema";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
 import { type ApplicationData, type PipelineData } from "./borrowerFile/model";
 import { StatusUpdateDialog } from "./borrowerFile/StatusUpdateDialog";
 import { CompensationCard } from "./borrowerFile/CompensationCard";
@@ -183,6 +184,7 @@ export default function BorrowerFile() {
   const acceptedDocuments = documents.filter(document => document.status === "verified").length;
   const conditionProgress = pipelineData?.progress.conditions;
   const personalInfo = urlaData?.personalInfo;
+  const borrowerProfile = appData?.borrowerProfile;
   const ownedProperties = urlaData?.realEstateOwned ?? [];
 
   if (!application) {
@@ -285,7 +287,8 @@ export default function BorrowerFile() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-bold" data-testid="text-borrower-name">
-                    {personalInfo?.firstName || "Borrower"} {personalInfo?.lastName || ""}
+                    {personalInfo?.firstName || borrowerProfile?.firstName || "Borrower"}{" "}
+                    {personalInfo?.lastName || borrowerProfile?.lastName || ""}
                   </h1>
                   <p className="text-muted-foreground">
                     Loan #{application.id.substring(0, 8).toUpperCase()}
@@ -463,9 +466,9 @@ export default function BorrowerFile() {
                       <CardContent className="space-y-3">
                         <div className="grid gap-2 text-sm sm:grid-cols-2">
                           <span className="text-muted-foreground">Name:</span>
-                          <span>{personalInfo?.firstName || "N/A"} {personalInfo?.lastName || ""}</span>
+                          <span>{personalInfo?.firstName || borrowerProfile?.firstName || "N/A"} {personalInfo?.lastName || borrowerProfile?.lastName || ""}</span>
                           <span className="text-muted-foreground">Email:</span>
-                          <span>{personalInfo?.email || "N/A"}</span>
+                          <span>{personalInfo?.email || borrowerProfile?.email || "N/A"}</span>
                           <span className="text-muted-foreground">Phone:</span>
                           <span>{personalInfo?.cellPhone || personalInfo?.homePhone || "N/A"}</span>
                           <span className="text-muted-foreground">SSN:</span>
@@ -622,6 +625,7 @@ export default function BorrowerFile() {
                       documents={documents}
                       application={application}
                       canReview={canReviewDocuments(user?.role)}
+                      taxDocumentUseAuthorized={appData?.taxDocumentUseAuthorized !== false}
                       selectedDocumentId={selectedDocumentId}
                       onSelectDocument={(documentId) => {
                         setSelectedDocumentId(documentId);
@@ -636,7 +640,16 @@ export default function BorrowerFile() {
                     />
                     {(() => {
                       const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
-                      return selectedDocument ? (
+                      const taxPreviewBlocked = selectedDocument
+                        && isTaxReturnDocumentType(selectedDocument.documentType)
+                        && appData?.taxDocumentUseAuthorized === false;
+                      return selectedDocument && taxPreviewBlocked ? (
+                        <Card className="flex min-h-80 items-center justify-center" data-testid="tax-preview-authorization-required">
+                          <CardContent className="max-w-md py-10 text-center text-sm text-muted-foreground">
+                            The borrower’s tax-document authorization is inactive. Preview and analysis will become available after the borrower renews it.
+                          </CardContent>
+                        </Card>
+                      ) : selectedDocument ? (
                         <Suspense
                           fallback={<Skeleton className="h-[560px] w-full" data-testid="viewer-suspense" />}
                         >

@@ -2,13 +2,14 @@ import type { Express, NextFunction, Response } from "express";
 import { requireRole } from "../auth";
 import { INTERNAL_STAFF_ROLES } from "@shared/roles";
 import { FINANCIAL_VERIFICATION_ROLES } from "@shared/loanApplicationStatus";
-import { reviewFinancialArtifactSchema } from "@shared/financialReview";
+import { liabilityTreatmentReviewSchema, reviewFinancialArtifactSchema } from "@shared/financialReview";
 import { routeParam } from "../http/routeParams";
 import {
   buildCreditMemo,
   FinancialReviewError,
   getFinancialReview,
   prepareFinancialWorkpapers,
+  recordLiabilityUnderwritingTreatment,
   reviewCreditMemo,
   reviewFinancialWorkpaper,
 } from "../services/financialReview";
@@ -47,6 +48,26 @@ export function registerFinancialReviewRoutes(app: Express) {
       res.set("Cache-Control", "private, no-store");
       const result = await prepareFinancialWorkpapers(routeParam(req, "id"), req.user!);
       res.status(result.replayed ? 200 : 201).json(result);
+    } catch (error) {
+      financialReviewError(error, res, next);
+    }
+  });
+
+  app.post("/api/loan-applications/:id/financial-review/liabilities/:liabilityId/treatment", requireRole(...FINANCIAL_VERIFICATION_ROLES), async (req, res, next) => {
+    try {
+      res.set("Cache-Control", "private, no-store");
+      const parsed = liabilityTreatmentReviewSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Choose a supported treatment, accepted source document, and current bureau tradeline." });
+        return;
+      }
+      const result = await recordLiabilityUnderwritingTreatment(
+        routeParam(req, "id"),
+        routeParam(req, "liabilityId"),
+        req.user!,
+        parsed.data,
+      );
+      res.json(result);
     } catch (error) {
       financialReviewError(error, res, next);
     }

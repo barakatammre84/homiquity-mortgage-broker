@@ -9,6 +9,7 @@ const serviceMocks = vi.hoisted(() => ({
   getLatestTaxIntelligence: vi.fn(),
   getTaxPackageExtractionJob: vi.fn(),
   getDealTeamMembers: vi.fn(async () => [{ userId: "lo-1" }]),
+  getFinancialReview: vi.fn(),
 }));
 
 vi.mock("../server/auth", () => ({
@@ -43,6 +44,7 @@ vi.mock("../server/services/income/reviewTriage", () => ({
   resolveReviewItem: vi.fn(),
 }));
 vi.mock("../server/services/decisionEngine", () => ({ recalculateDecision: vi.fn() }));
+vi.mock("../server/services/financialReview", () => ({ getFinancialReview: serviceMocks.getFinancialReview }));
 
 const application = { id: "app-1", userId: "borrower-1" };
 const storage = {
@@ -104,6 +106,17 @@ describe("staff tax intelligence application scope", () => {
       generatedAt: new Date(),
       inputsFingerprint: "fingerprint",
       profile: {},
+    });
+    serviceMocks.getFinancialReview.mockResolvedValue({
+      bankStatementEvidence: {
+        documentCount: 5,
+        reviewedDepositFactCount: 5,
+        observedTotalDeposits: 100000,
+        datedStatementCount: 5,
+        consecutiveMonthCoverage: 5,
+        periodStart: "2026-05-01",
+        periodEnd: "2026-09-30",
+      },
     });
   });
 
@@ -171,5 +184,17 @@ describe("staff tax intelligence application scope", () => {
     // rejected by the unrelated tax-document consent gate.
     expect(response.status).toBe(400);
     expect(serviceMocks.hasUserConsent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bank-statement analysis without the selected evidence period", async () => {
+    const response = await fetch(`${base}/api/applications/app-1/bank-statement-analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ months: 12, totalEligibleDeposits: 240000 }),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/5 consecutive months/i);
+    expect(serviceMocks.getFinancialReview).toHaveBeenCalledWith("app-1", expect.objectContaining({ id: "lo-1" }));
   });
 });

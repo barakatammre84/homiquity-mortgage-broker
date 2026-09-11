@@ -265,8 +265,8 @@ export default function Dashboard() {
   // only shows if the payload predates the field (stale cache mid-deploy).
   const dominant: NextActionData = data?.nextAction ?? {
     kind: "in_review",
-    title: "Your application is being reviewed",
-    description: "We're analyzing your information. You'll hear back shortly.",
+    title: "Your file is ready for loan-team review",
+    description: "Check the requested steps so the team has what it needs to verify your file.",
     href: "/dashboard",
     buttonLabel: "View Status",
   };

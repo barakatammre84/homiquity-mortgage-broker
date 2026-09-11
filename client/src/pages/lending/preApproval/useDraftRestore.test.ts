@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftHasAnswers, draftToFormValues } from "./useDraftRestore";
+import { draftHasAnswers, draftToFormValues, restoredServerDraftStep } from "./useDraftRestore";
 import { defaultPreApprovalFormValues, type PreApprovalFormData } from "@shared/preApprovalForm";
 import type { LoanApplication } from "@shared/schema";
 
@@ -57,5 +57,42 @@ describe("draftToFormValues — server-backed funnel answers", () => {
     );
     expect(values.householdFamilySize).toBe("");
     expect(values.homeSquareFootage).toBe("");
+  });
+});
+
+describe("restoredServerDraftStep — owner-bound exact resume", () => {
+  it("returns an exact saved step for the same borrower", () => {
+    expect(
+      restoredServerDraftStep(
+        draft({ userId: "borrower-1" }),
+        {
+          values: current,
+          stepId: "propertyType",
+          ownerId: "borrower-1",
+          savedAt: Date.now(),
+        },
+      ),
+    ).toBe("propertyType");
+  });
+
+  it.each([
+    ["a different borrower", "borrower-2"],
+    ["an older unbound snapshot", undefined],
+  ])("falls back to the first question for %s", (_label, ownerId) => {
+    expect(
+      restoredServerDraftStep(
+        draft({ userId: "borrower-1" }),
+        { values: current, stepId: "propertyType", ownerId },
+      ),
+    ).toBe("loanPurpose");
+  });
+
+  it("never resumes to the intro after adopting a server draft", () => {
+    expect(
+      restoredServerDraftStep(
+        draft({ userId: "borrower-1" }),
+        { values: current, stepId: "intro", ownerId: "borrower-1" },
+      ),
+    ).toBe("loanPurpose");
   });
 });

@@ -1,5 +1,49 @@
 import { z } from "zod";
 import type { IncomeOrchestrationResult } from "./incomePaths";
+import type { SubjectPropertyFinancingAssessment } from "./subjectPropertyFinancing";
+
+export const LIABILITY_UNDERWRITING_TREATMENTS = [
+  "exclude_short_term_installment",
+  "documented_zero_student_loan",
+] as const;
+export type LiabilityUnderwritingTreatment = typeof LIABILITY_UNDERWRITING_TREATMENTS[number];
+
+export const liabilityTreatmentReviewSchema = z.object({
+  treatment: z.enum(LIABILITY_UNDERWRITING_TREATMENTS).nullable(),
+  sourceDocumentId: z.string().uuid().nullable(),
+  creditPullId: z.string().uuid().nullable(),
+  tradelineIndex: z.number().int().min(0).max(500).nullable(),
+}).superRefine((value, ctx) => {
+  const hasCompleteSupport = value.sourceDocumentId !== null
+    && value.creditPullId !== null
+    && value.tradelineIndex !== null;
+  if (value.treatment !== null && !hasCompleteSupport) {
+    ctx.addIssue({ code: "custom", message: "A reviewed treatment needs source evidence and a bureau tradeline." });
+  }
+  if (value.treatment === null && (
+    value.sourceDocumentId !== null
+    || value.creditPullId !== null
+    || value.tradelineIndex !== null
+  )) {
+    ctx.addIssue({ code: "custom", message: "Clear the treatment evidence and bureau selection together." });
+  }
+});
+
+export type LiabilityTreatmentCandidate = {
+  liabilityId: string;
+  borrowerSequenceNumber: number;
+  creditorName: string | null;
+  liabilityType: string;
+  remainingTermMonths: number | null;
+  studentLoanRepaymentPlan: string | null;
+  recommendedTreatment: LiabilityUnderwritingTreatment;
+  currentTreatment: LiabilityUnderwritingTreatment | null;
+  sourceDocumentId: string | null;
+  creditPullId: string | null;
+  tradelineIndex: number | null;
+  evidenceCurrent: boolean;
+  bureauLinkCurrent: boolean;
+};
 
 export type FinancialSelfEmploymentResult = {
   monthlyQualifyingIncome: number;
@@ -24,6 +68,7 @@ export type FinancialAssetResult = {
 export type FinancialLiabilityResult = {
   totalMonthlyPayment: number;
   excludedDebts: number;
+  openThirtyDayBalance: number;
   breakdown: Array<{ type: string; payment: number; remainingMonths?: number; included: boolean; reason: string }>;
 };
 
@@ -79,7 +124,7 @@ export type FinancialVerifiedFact = {
 
 export type FinancialEvidenceComparison = {
   id: string;
-  kind: "income" | "asset" | "rental";
+  kind: "income" | "business_liquidity" | "asset" | "rental" | "liability";
   status: "match" | "variance" | "unlinked";
   documentId: string;
   verifiedFactIds: string[];
@@ -112,11 +157,62 @@ export type BusinessLiquidityOutput = {
 
 export type FinancialWorkpaperOutput =
   | { kind: "income_summary"; evaluation: IncomeOrchestrationResult; borrowerBreakdown: Array<{ borrowerSequenceNumber: number; monthlyIncome: number }> }
-  | { kind: "self_employment"; result: FinancialSelfEmploymentResult; borrowerSequenceNumber: number; businessStructure: string; ownershipPercent: number | null }
+  | { kind: "self_employment"; result: FinancialSelfEmploymentResult; borrowerSequenceNumber: number; businessStructure: string; ownershipPercent: number | null; currentActivity?: {
+      documentId: string;
+      periodStart: string;
+      periodEnd: string;
+      periodMonths: number;
+      businessNetProfitLoss: number;
+      borrowerMonthlyNet: number;
+      taxBasedMonthlyIncome: number;
+      direction: "higher_or_equal" | "declining";
+    } | null }
   | ({ kind: "business_liquidity" } & BusinessLiquidityOutput)
   | { kind: "rental_cash_flow"; result: IncomeOrchestrationResult["paths"][number] }
-  | { kind: "asset_reconciliation"; result: FinancialAssetResult; borrowerSequences: number[] }
-  | { kind: "liability_reconciliation"; result: FinancialLiabilityResult; borrowerSequences: number[] };
+  | { kind: "asset_reconciliation"; result: FinancialAssetResult; borrowerSequences: number[]; realEstateReserves?: {
+      financedPropertiesCount: number | null;
+      aggregateReserveUpb: number | null;
+      reserveFactor: number | null;
+      baseReserveMonths: number;
+      baseReserveRequirement: number;
+      additionalReserveRequirement: number | null;
+      totalReserveRequirement: number | null;
+      postClosingLiquidAssets: number;
+      openThirtyDayChargeBalance: number;
+      combinedPostClosingRequirement: number | null;
+    } }
+  | {
+      kind: "liability_reconciliation";
+      result: FinancialLiabilityResult;
+      borrowerSequences: number[];
+      bureau: {
+        pullId: string;
+        representativeScore: number;
+        borrowerScores: Array<{
+          borrowerSequenceNumber: number;
+          experianScore: number | null;
+          equifaxScore: number | null;
+          transunionScore: number | null;
+          representativeScore: number;
+        }>;
+        reportedMonthlyPayments: number;
+        adjustedMonthlyDebt: number;
+        tradelineCount: number;
+        fingerprint: string;
+        tradelines: Array<{
+          creditor: string;
+          type: string;
+          balance: number;
+          monthlyPayment: number;
+          deferred: boolean;
+          openedDaysAgo: number | null;
+        }>;
+      } | null;
+      decisionMonthlyPayment: number;
+      openThirtyDayBalance: number;
+      treatmentCandidates: LiabilityTreatmentCandidate[];
+      subjectPropertyFinancing: SubjectPropertyFinancingAssessment;
+    };
 
 export type FinancialReviewBlocker = {
   code: "missing_evidence" | "unverified_evidence" | "missing_byte_fingerprint" | "unconfirmed_worksheet" | "missing_dependency" | "stale_version";
@@ -153,6 +249,8 @@ export type CreditMemoReference = {
   type: "workpaper" | "document" | "verified_fact";
   id: string;
   label: string;
+  /** Source document for a page-grounded reference; absent on workpapers and legacy memos. */
+  documentId?: string;
   pageNumber?: number;
 };
 
@@ -200,6 +298,10 @@ export type FinancialReviewWorkspace = {
     documentCount: number;
     reviewedDepositFactCount: number;
     observedTotalDeposits: number;
+    datedStatementCount: number;
+    consecutiveMonthCoverage: number;
+    periodStart: string | null;
+    periodEnd: string | null;
   };
 };
 

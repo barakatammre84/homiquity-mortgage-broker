@@ -6,6 +6,7 @@ import { storage } from "../storage";
 import { logAudit } from "../auditLog";
 import { isPrelaunchGated } from "./prelaunchGate";
 import { evaluateTridTrigger } from "./trid";
+import { attachPlanningDocumentsToApplication } from "./planningDocumentHandoff";
 
 // ---------------------------------------------------------------------------
 // Coach → loan-application writeback.
@@ -352,16 +353,21 @@ export async function syncCoachIntakeToApplication(
     if (mapping.appliedFields.length === 0) {
       return { applicationId: null, created: false, applied: [], skipped: mapping.skipped };
     }
-    const createdApp = await storage.createLoanApplication({
-      userId,
-      status: "draft",
-      ...(mapping.applied as object),
-    } as Parameters<typeof storage.createLoanApplication>[0]);
+    const createdApp = await storage.createLoanApplication({ userId, status: "draft" });
+    const handoff = await attachPlanningDocumentsToApplication(userId, createdApp.id);
+    if (handoff.documents > 0) {
+      await logAudit(req, "planning_documents.attached", "loan_application", createdApp.id, handoff);
+    }
+    await storage.updateLoanApplication(createdApp.id, mapping.applied as Partial<LoanApplication>);
     await afterWrite(req, createdApp.id, mapping, conversationId, true);
     return { applicationId: createdApp.id, created: true, applied: mapping.appliedFields, skipped: mapping.skipped };
   }
 
   const mapping = mapIntakeToApplicationFields(intake, draft);
+  const handoff = await attachPlanningDocumentsToApplication(userId, draft.id);
+  if (handoff.documents > 0) {
+    await logAudit(req, "planning_documents.attached", "loan_application", draft.id, handoff);
+  }
   if (mapping.appliedFields.length === 0) {
     return { applicationId: draft.id, created: false, applied: [], skipped: mapping.skipped };
   }

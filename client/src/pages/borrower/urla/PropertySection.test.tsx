@@ -38,11 +38,11 @@ const loanDetails: UrlaLoanDetails = {
   amortizationType: "fixed",
 };
 
-function renderSection(onLoanDetailsChange = vi.fn()) {
+function renderSection(onLoanDetailsChange = vi.fn(), onChange = vi.fn(), propertyInfo: Record<string, unknown> = {}) {
   render(
     <PropertySection
-      propertyInfo={{}}
-      onChange={vi.fn()}
+      propertyInfo={propertyInfo}
+      onChange={onChange}
       loanDetails={loanDetails}
       onLoanDetailsChange={onLoanDetailsChange}
       app={app}
@@ -98,5 +98,28 @@ describe("PropertySection — section 4a loan details", () => {
     renderSection();
     const purpose = screen.getByTestId("select-loan-purpose") as HTMLButtonElement;
     expect(purpose.disabled).toBe(true);
+  });
+
+  it("collects every remaining housing cost and reveals second-lien details only when applicable", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection(vi.fn(), onChange);
+    expect(screen.getByTestId("input-monthly-flood-insurance")).toBeTruthy();
+    expect(screen.getByTestId("input-monthly-ground-rent")).toBeTruthy();
+    expect(screen.getByTestId("input-monthly-special-assessments")).toBeTruthy();
+    expect(screen.queryByTestId("subordinate-financing-details")).toBeNull();
+
+    await user.click(screen.getByTestId("select-subordinate-financing"));
+    await user.click(await screen.findByRole("option", { name: "Yes" }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ subordinateFinancingExists: true }));
+  });
+
+  it("shows the exact second-mortgage and HELOC fields after a yes answer", () => {
+    renderSection(vi.fn(), vi.fn(), { subordinateFinancingExists: true });
+    expect(screen.getByTestId("subordinate-financing-details")).toBeTruthy();
+    expect(screen.getByLabelText(/second-mortgage amount/i)).toBeTruthy();
+    expect(screen.getByLabelText(/HELOC amount drawn/i)).toBeTruthy();
+    expect(screen.getByLabelText(/full HELOC credit limit/i)).toBeTruthy();
+    expect(screen.getByLabelText(/combined monthly payment/i)).toBeTruthy();
   });
 });

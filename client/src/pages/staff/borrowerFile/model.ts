@@ -22,6 +22,8 @@ export interface LoanOption {
 
 export interface ApplicationData {
   application: LoanApplication;
+  borrowerProfile?: { firstName: string | null; lastName: string | null; email: string | null } | null;
+  taxDocumentUseAuthorized?: boolean;
   currentDecisionGrade: boolean;
   currentVerification: { income: boolean; assets: boolean; credit: boolean };
   decisionGradeBlockers: string[];

@@ -168,6 +168,7 @@ export async function runCoachTurn(opts: CoachTurnOptions): Promise<CoachTurnRes
     workableApplicationId: opts.verifiedContext.workableApplicationId ?? null,
     emit: guardedEmit,
     state,
+    fileTruthCache: opts.verifiedContext.fileTruth,
   };
 
   const system = buildCoachSystemPrompt(opts.verifiedContext, opts.existingProfile);
@@ -414,6 +415,119 @@ function formatNextRequiredInput(what: string, why: string, effort: string, unlo
   return `**What's needed:** ${what}\n**Why:** ${why}\n**Effort:** ${effort}\n**What it unlocks:** ${unlocks}`;
 }
 
+function summarizeUploadedDocuments(
+  documents: NonNullable<VerifiedUserContext["uploadedDocuments"]>,
+): string[] {
+  const counts = new Map<string, { total: number; statuses: Map<string, number> }>();
+  for (const document of documents) {
+    const current = counts.get(document.documentType) ?? { total: 0, statuses: new Map<string, number>() };
+    current.total += 1;
+    current.statuses.set(document.status, (current.statuses.get(document.status) ?? 0) + 1);
+    counts.set(document.documentType, current);
+  }
+  return [...counts.entries()].map(([type, summary]) => {
+    const label = type
+      .replace(/^tax_return_(?:1040|1065|1120s?|k1)_?/i, "tax return ")
+      .replace(/_/g, " ")
+      .trim()
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+    const statuses = [...summary.statuses.entries()]
+      .map(([status, count]) => `${count} ${status.replace(/_/g, " ")}`)
+      .join(", ");
+    return `- **${label || "Document"}:** ${summary.total} saved (${statuses})`;
+  });
+}
+
+function parseReportedAmount(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const amount = Number(value.replace(/[,$]/g, ""));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function formatReportedMoney(value: number): string {
+  return `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+/**
+ * A deterministic connected-income view for provider outages. Every number is
+ * explicitly scoped to what the borrower reported; no extracted value becomes
+ * verified and no planning calculation becomes qualifying income.
+ */
+function formatOfflineIncomeMap(ctx: VerifiedUserContext): string {
+  const lines: string[] = ["## Income already connected to this application"];
+  const householdTotal = parseReportedAmount(ctx.annualIncome);
+  if (householdTotal !== null) {
+    lines.push(`- **Reported household total:** ${formatReportedMoney(householdTotal)}/year. The itemized sources below are already inside this total and must not be added again.`);
+  } else {
+    lines.push("- **Reported household total:** not yet provided.");
+  }
+
+  const employmentLabel = ctx.employmentType === "self_employed"
+    ? "self-employed"
+    : (ctx.employmentType?.replace(/_/g, " ") ?? "not yet provided");
+  if ((ctx.employmentHistory?.length ?? 0) > 0) {
+    for (const employment of ctx.employmentHistory ?? []) {
+      const amount = parseReportedAmount(employment.totalMonthlyIncome);
+      const details = [
+        employment.employerName || "Employer not named",
+        employment.positionTitle,
+        employment.isSelfEmployed ? "self-employed" : null,
+        amount !== null ? `${formatReportedMoney(amount)}/month reported` : "amount not separately itemized",
+      ].filter(Boolean);
+      lines.push(`- **Employment:** ${details.join("; ")}.`);
+    }
+  } else {
+    lines.push(`- **Primary employment:** ${employmentLabel}; employer and primary-income amount are not separately itemized in the connected application.`);
+  }
+
+  const sources = ctx.incomeSources ?? [];
+  for (const source of sources.filter((item) => item.type !== "rental")) {
+    const amount = parseReportedAmount(source.annualAmount);
+    const label = source.type === "self_employed" ? "Business/1099" : source.type.replace(/_/g, " ");
+    const details = [
+      source.employerName || null,
+      amount !== null ? `${formatReportedMoney(amount)}/year reported` : "amount not itemized",
+      source.businessStructure?.replace(/_/g, " ") || null,
+      source.ownershipPercent ? `${source.ownershipPercent}% ownership` : null,
+      source.yearsInRole ? `${source.yearsInRole} years reported` : null,
+    ].filter(Boolean);
+    lines.push(`- **${label}:** ${details.join("; ")}.`);
+  }
+
+  const rentals = sources
+    .filter((item) => item.type === "rental")
+    .flatMap((item) => item.rentalProperties ?? []);
+  if (rentals.length > 0) {
+    let totalRent = 0;
+    let totalPayments = 0;
+    for (const rental of rentals) {
+      const rent = parseReportedAmount(rental.monthlyRentalIncome) ?? 0;
+      const payment = parseReportedAmount(rental.monthlyDebtPayment) ?? 0;
+      const planningRent = rent * 0.75;
+      const net = planningRent - payment;
+      totalRent += rent;
+      totalPayments += payment;
+      lines.push(`- **Rental — ${rental.address}:** ${formatReportedMoney(rent)}/month gross rent; ${formatReportedMoney(planningRent)} after the 25% vacancy/expense planning factor; ${formatReportedMoney(payment)} reported property payment; ${net >= 0 ? "+" : "−"}${formatReportedMoney(Math.abs(net))}/month preliminary offset.`);
+    }
+    const planningRent = totalRent * 0.75;
+    const net = planningRent - totalPayments;
+    lines.push(`- **Rental total:** ${formatReportedMoney(totalRent)}/month gross; ${formatReportedMoney(planningRent)}/month after the planning factor; ${formatReportedMoney(totalPayments)}/month property payments; ${net >= 0 ? "+" : "−"}${formatReportedMoney(Math.abs(net))}/month preliminary offset.`);
+  }
+
+  const stats = ctx.fileTruth?.checklist.stats;
+  if (stats) {
+    lines.push(`\n## Evidence status\n- **Verified:** ${stats.verified}\n- **Submitted and under review:** ${stats.uploaded}\n- **Still needed:** ${stats.needed + stats.rejected}`);
+  } else if ((ctx.uploadedDocuments?.length ?? 0) > 0) {
+    lines.push(`\n## Evidence received\n${summarizeUploadedDocuments(ctx.uploadedDocuments ?? []).join("\n")}`);
+  }
+
+  lines.push("\nThese are application-reported amounts and a preliminary rental calculation. They are not verified qualifying income. The loan team must reconcile the salary records, business tax returns and current P&L, leases or Schedule E, and property obligations before relying on them.");
+  if (ctx.documentsMissing?.length) {
+    lines.push(`\n**Next document:** ${ctx.documentsMissing[0]}. Open Documents for the full personalized list and current review status.`);
+  }
+  return lines.join("\n");
+}
+
 function getNextMissingInput(ctx?: VerifiedUserContext): { what: string; why: string; effort: string; unlocks: string } | null {
   if (!ctx) return null;
 
@@ -484,6 +598,50 @@ export function generateOfflineResponse(
 ): CoachResponse {
   const isFirstMessage = history.length <= 1;
   const completion = verifiedContext?.completionPercentage || 0;
+  const lowerMsg = userMessage.toLowerCase();
+  const asksAboutDocuments = lowerMsg.includes("document") || lowerMsg.includes("paperwork") || lowerMsg.includes("what do i need");
+  const asksForIncomeMap = /(map|organize|show|explain|break down|breakdown).{0,40}(income|salary|business|rental)|income.{0,40}(map|story|evidence|connected|breakdown)/i.test(userMessage);
+
+  if (asksForIncomeMap && verifiedContext?.hasApplication) {
+    return { message: formatOfflineIncomeMap(verifiedContext) };
+  }
+
+  // Intent wins over the generic welcome, even on the first turn. This is the
+  // provider-outage safety net, so it must remain useful and grounded in the
+  // same server context as the connected-file panel.
+  if (asksAboutDocuments && !verifiedContext?.hasApplication) {
+    const planningDocuments = verifiedContext?.uploadedDocuments ?? [];
+    if (planningDocuments.length > 0) {
+      const lines = summarizeUploadedDocuments(planningDocuments);
+      return {
+        message: `I can see ${planningDocuments.length} planning document${planningDocuments.length === 1 ? "" : "s"} saved to your account:\n\n${lines.join("\n")}\n\nNo mortgage application is active yet, so Homiquity has not generated a loan-specific checklist. Start the application when you're ready; the checklist will be based on your actual income, assets, property, and loan goal.`,
+      };
+    }
+    return {
+      message: "You do not have an active mortgage application or any planning documents on your account yet. Start the application when you're ready; Homiquity will build a focused checklist from your actual income, assets, property, and loan goal.",
+    };
+  }
+
+  if (asksAboutDocuments && verifiedContext?.hasApplication) {
+    const uploadedDocuments = verifiedContext.uploadedDocuments ?? [];
+    const received = uploadedDocuments.length > 0
+      ? `On this application I can see ${uploadedDocuments.length} document${uploadedDocuments.length === 1 ? "" : "s"}:\n\n${summarizeUploadedDocuments(uploadedDocuments).join("\n")}`
+      : "I do not see any documents on this application yet.";
+    if (verifiedContext.documentsMissing && verifiedContext.documentsMissing.length > 0) {
+      return {
+        message: `${received}\n\nThe current checklist still needs **${verifiedContext.documentsMissing[0]}**. Open Documents to see the reason, accepted file types, and current review status.`,
+      };
+    }
+    if (verifiedContext.applicationStatus === "draft") {
+      const nextInput = getNextMissingInput(verifiedContext);
+      return {
+        message: `${received}\n\nThis draft does not have a loan-specific checklist yet. Finish the application questions so Homiquity can request only what applies to this loan.${nextInput ? `\n\n${formatNextRequiredInput(nextInput.what, nextInput.why, nextInput.effort, nextInput.unlocks)}` : ""}`,
+      };
+    }
+    return {
+      message: `${received}\n\nThere are no open document requests on the current checklist. If review identifies another item, it will appear in Documents with the reason it is needed.`,
+    };
+  }
 
   if (isFirstMessage && verifiedContext?.hasApplication) {
     const app = verifiedContext;
@@ -545,8 +703,6 @@ ${formatNextRequiredInput(
 )}`,
     };
   }
-
-  const lowerMsg = userMessage.toLowerCase();
 
   if (lowerMsg.includes("credit") || lowerMsg.includes("score")) {
     return {

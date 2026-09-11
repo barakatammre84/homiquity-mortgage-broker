@@ -52,7 +52,7 @@ sites actually use it.
 | `Heading` / `Text` (`ui/typography.tsx`) | **BUILT · ADOPTED 0%** | zero call sites — allowlisted in `scripts/orphan-scan.cjs` as known-unused |
 | `Logo` + `BrandingProvider` | **BUILT · ADOPTED** | 26 call site(s) |
 | Raw `<button>` with no height, padding or `.touch-target` | **NEEDS REVIEW** | 36 in 27 file(s) — each is EITHER a sub-44px control or a button wrapping a large area; only a human can tell which |
-| `EmptyState` | **BUILT** | 10 file(s) use it |
+| `EmptyState` | **BUILT** | 11 file(s) use it |
 | `bg-surface` app ground | **ADOPTED (via layout)** | set once on `PrivateLayout`'s `<main>`; 6 file(s) name it directly — pages inherit it |
 | Component tests / `components/ui` primitives | **BUILT** | colocated `*.test.tsx` beside components; 34 primitives — *pnpm test:client* |
 | `pageShellDrift` — PageShell drift (hand-rolled min-h-screen in a file that also imports PageShell) | **HELD** | **0** file(s) — **at zero; any hit is a regression** |
@@ -63,7 +63,7 @@ sites actually use it.
 | `arbitraryTypeScale` — arbitrary size/length value (text-[11px], w-[240px]) | ratcheting down | **147** occurrence(s) |
 | `blindSpotPaletteClasses` — palette class in a shape the token guard cannot see | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
 | `subMinTouchTarget` — Button size="sm" (h-9 = 36px) with no .touch-target | **HELD** | **0** occurrence(s) — **at zero; any hit is a regression** |
-| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **57** occurrence(s) |
+| `unprefixedMultiColGrid` — multi-column grid with no responsive prefix (mobile breakage) | ratcheting down | **56** occurrence(s) |
 
 <!-- END GENERATED -->
 

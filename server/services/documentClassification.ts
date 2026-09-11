@@ -12,9 +12,16 @@ export interface DocumentClassificationSegment {
 
 const COMPATIBLE_PAGE_TYPES: Record<string, ReadonlySet<string>> = {
   pay_stub: new Set(["paystub"]),
+  paystub: new Set(["paystub"]),
   w2: new Set(["w2"]),
-  bank_statement: new Set(["bank_statement_checking", "bank_statement_savings"]),
+  bank_statement: new Set(["bank_statement_checking", "bank_statement_savings", "business_bank_statement"]),
+  bank_statement_checking: new Set(["bank_statement_checking"]),
+  bank_statement_savings: new Set(["bank_statement_savings"]),
+  bank_statement_business: new Set(["business_bank_statement"]),
+  business_bank_statement: new Set(["business_bank_statement"]),
   lease_agreement: new Set(["lease_agreement"]),
+  profit_loss: new Set(["profit_loss_statement"]),
+  profit_loss_statement: new Set(["profit_loss_statement"]),
 };
 
 export function classificationSegments(

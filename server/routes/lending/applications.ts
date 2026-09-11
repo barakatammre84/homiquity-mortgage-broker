@@ -21,6 +21,9 @@ import { updatePipelineStage } from "../../pipelineEngine";
 import { routeParam } from "../../http/routeParams";
 import { clientIpForRecord } from "../../clientIp";
 import { getCurrentDecisionGrade } from "../../services/currentDecisionGrade";
+import { attachPlanningDocumentsToApplication } from "../../services/planningDocumentHandoff";
+import { hasUserConsent } from "../../consentGate";
+import { syncReportedBusinessEntities } from "../../services/reportedBusinessEntities";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -103,6 +106,10 @@ export function registerApplicationRoutes(
 
       let application;
       if (existingDraft) {
+        const handoff = await attachPlanningDocumentsToApplication(userId, existingDraft.id);
+        if (handoff.documents > 0) {
+          logAudit(req, "planning_documents.attached", "loan_application", existingDraft.id, handoff);
+        }
         await storage.updateLoanApplication(existingDraft.id, draftFields);
         await updatePipelineStage(existingDraft.id, "submitted");
         application = (await storage.getLoanApplication(existingDraft.id))!;
@@ -110,7 +117,16 @@ export function registerApplicationRoutes(
           consumedDraftId: existingDraft.id,
         });
       } else {
-        application = await storage.createLoanApplication(applicationData);
+        // Start with a recoverable draft so an unlikely handoff failure cannot
+        // leave an invisible submitted file and mint a duplicate on retry.
+        const createdDraft = await storage.createLoanApplication({ userId, status: "draft" });
+        const handoff = await attachPlanningDocumentsToApplication(userId, createdDraft.id);
+        if (handoff.documents > 0) {
+          logAudit(req, "planning_documents.attached", "loan_application", createdDraft.id, handoff);
+        }
+        await storage.updateLoanApplication(createdDraft.id, draftFields);
+        await updatePipelineStage(createdDraft.id, "submitted");
+        application = (await storage.getLoanApplication(createdDraft.id))!;
         logAudit(req, "loan_application.created", "loan_application", application.id);
       }
 
@@ -135,6 +151,11 @@ export function registerApplicationRoutes(
         const syncedRentalProperties = await storage.syncIntakeRentalProperties(
           application.id,
           userId,
+          formData.incomeSources,
+        );
+        await syncReportedBusinessEntities(
+          userId,
+          application.id,
           formData.incomeSources,
         );
         if (syncedRentalProperties.length > 0) {
@@ -310,7 +331,7 @@ export function registerApplicationRoutes(
         userId,
         type: "application_submitted",
         title: "Application Received",
-        body: "Your mortgage application has been submitted and is being reviewed.",
+        body: "Your mortgage application has been submitted and your personalized next steps are being prepared.",
         entityType: "loan_application",
         entityId: application.id,
         status: "unread",
@@ -364,9 +385,17 @@ export function registerApplicationRoutes(
         (a) => a.status === "draft",
       );
       if (existing) {
+        const handoff = await attachPlanningDocumentsToApplication(userId, existing.id);
+        if (handoff.documents > 0) {
+          logAudit(req, "planning_documents.attached", "loan_application", existing.id, handoff);
+        }
         return res.json(existing);
       }
       const draft = await storage.createLoanApplication({ userId, status: "draft" });
+      const handoff = await attachPlanningDocumentsToApplication(userId, draft.id);
+      if (handoff.documents > 0) {
+        logAudit(req, "planning_documents.attached", "loan_application", draft.id, handoff);
+      }
       logAudit(req, "loan_application.draft_created", "loan_application", draft.id);
       res.status(201).json(draft);
     } catch (error) {
@@ -397,11 +426,16 @@ export function registerApplicationRoutes(
         return res.status(404).json({ error: "Application not found" });
       }
       
-      const [options, documents, activities, currentGrade] = await Promise.all([
+      const staffRequest = isStaffRole(req.user!.role);
+      const [options, documents, activities, currentGrade, borrowerProfile, taxDocumentUseAuthorized] = await Promise.all([
         storage.getLoanOptionsByApplication(routeParam(req, "id")),
         storage.getDocumentsByApplication(routeParam(req, "id")),
         storage.getDealActivitiesByApplication(routeParam(req, "id")),
         getCurrentDecisionGrade(application),
+        staffRequest ? storage.getUser(application.userId) : Promise.resolve(undefined),
+        staffRequest
+          ? hasUserConsent("tax_document_use", application.userId)
+          : Promise.resolve(undefined),
       ]);
 
       res.json({
@@ -409,6 +443,16 @@ export function registerApplicationRoutes(
         currentDecisionGrade: currentGrade.isDecisionGrade,
         currentVerification: currentGrade.verification,
         decisionGradeBlockers: currentGrade.reasons,
+        ...(staffRequest && {
+          borrowerProfile: borrowerProfile
+            ? {
+                firstName: borrowerProfile.firstName,
+                lastName: borrowerProfile.lastName,
+                email: borrowerProfile.email,
+              }
+            : null,
+          taxDocumentUseAuthorized: taxDocumentUseAuthorized === true,
+        }),
         options,
         // Ciphertext trio never ships; reviewedByUserId is staff-only —
         // see shared/borrowerDocumentView.ts.

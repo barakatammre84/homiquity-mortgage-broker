@@ -67,6 +67,8 @@ describe("getPersonalizedGreeting", () => {
     expect(getPersonalizedGreeting(null, app({ status: "pre_approved", financialDataProvenance: "self_reported" }), false).subtitle).toContain("initial review");
     expect(getPersonalizedGreeting(null, app({ status: "expired" })).subtitle).toContain("expired");
     expect(getPersonalizedGreeting(null, app({ status: "funded" })).subtitle).toContain("Congratulations");
+    expect(getPersonalizedGreeting(null, app({ status: "under_review" })).subtitle).toContain("requested steps");
+    expect(getPersonalizedGreeting(null, app({ status: "under_review" })).subtitle).not.toMatch(/is being reviewed/i);
   });
 });
 

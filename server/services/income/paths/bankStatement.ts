@@ -17,9 +17,9 @@ import { roundCents } from "@shared/incomePaths";
  * WHAT THIS PATH DELIBERATELY DOES NOT DO: scrub deposits. Which deposits are
  * ELIGIBLE (transfer exclusions etc.) is portal-gated, so the calculator takes
  * eligible-deposit totals as input and every result flags manual review until
- * the AE deposit-eligibility rules are transcribed. There is also no capture
- * surface for the analysis yet (that is the P5 workbench) — the orchestrator
- * path reports the program as available and says exactly what is missing.
+ * the AE deposit-eligibility rules are transcribed. The financial workbench
+ * captures an append-only analysis and requires the complete reviewed statement
+ * period, while the orchestrator says exactly what is missing before capture.
  */
 
 export const BANK_STATEMENT_PROGRAM = {
@@ -161,7 +161,7 @@ export function computeBankStatementPath(
       requiresManualReview: false,
       notes: hasSelfEmployment
         ? [
-            "Program available (12/24-month statements, 50% default expense factor — cited), but no bank-statement deposit analysis has been captured for this application yet. The capture surface lands with the P5 workbench.",
+            "Program available (12/24-month statements, 50% default expense factor — cited), but no bank-statement deposit analysis has been captured for this application yet. Complete the reviewed statement period in the financial workbench.",
           ]
         : [],
     };

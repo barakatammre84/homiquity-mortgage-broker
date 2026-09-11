@@ -1,4 +1,4 @@
-import type { Document, TaxInsight, User } from "@shared/schema";
+import type { Document, User } from "@shared/schema";
 import { canonicalDocumentType } from "@shared/documentTypes";
 import { DOCUMENT_STATUS } from "@shared/documentStatus";
 import { storage } from "../storage";
@@ -19,6 +19,8 @@ export interface CoachDocumentEvidenceFact {
 }
 
 export interface CoachDocumentEvidenceItem {
+  /** Authorized document identifier used only for borrower source links. */
+  documentId: string;
   documentType: string;
   label: string;
   documentReviewStatus: "uploaded" | "in_review" | "accepted";
@@ -40,24 +42,11 @@ export interface CoachDocumentEvidenceSnapshot {
     status: "approved_for_lender_package" | "not_approved";
     income: "approved" | "not_approved";
     assets: "approved" | "not_approved";
+    liabilities: "approved" | "not_approved" | "not_required";
   };
 }
 
 type EvidenceDocument = Pick<Document, "id" | "applicationId" | "documentType" | "status" | "createdAt">;
-type EvidenceTaxInsight = Pick<
-  TaxInsight,
-  | "documentId"
-  | "taxYear"
-  | "wagesW2"
-  | "grossIncome"
-  | "adjustedGrossIncome"
-  | "scheduleCNetProfit"
-  | "scheduleENetRental"
-  | "scheduleEGrossRents"
-  | "rentalPropertyCount"
-  | "confidence"
->;
-
 const MAX_DOCUMENTS = 12;
 const MAX_FACTS_PER_DOCUMENT = 8;
 
@@ -83,21 +72,25 @@ const FACT_PRESENTATION: Record<string, { label: string; format: "currency" | "n
   total_deposits: { label: "Statement-period deposits", format: "currency" },
   average_daily_balance: { label: "Average daily balance", format: "currency" },
   monthly_rent: { label: "Lease monthly rent", format: "currency" },
+  pnl_revenue: { label: "P&L revenue", format: "currency" },
+  pnl_total_expenses: { label: "P&L total expenses", format: "currency" },
+  pnl_net_profit_loss: { label: "P&L net profit or loss", format: "currency" },
+  // Page-grounded fields from the multi-form tax packet. Aggregate
+  // tax_insights are deliberately excluded below because they do not retain a
+  // source-page pointer.
+  wagesSalariesTips: { label: "Wages, salaries, and tips", format: "currency" },
+  totalIncome: { label: "Tax-return total income", format: "currency" },
+  adjustedGrossIncome: { label: "Adjusted gross income", format: "currency" },
+  grossReceipts: { label: "Schedule C gross receipts", format: "currency" },
+  netProfitOrLoss: { label: "Schedule C net profit or loss", format: "currency" },
+  ordinaryBusinessIncomeOrLoss: { label: "K-1 ordinary business income or loss", format: "currency" },
+  guaranteedPayments: { label: "K-1 guaranteed payments", format: "currency" },
+  distributionsTotal: { label: "K-1 distributions", format: "currency" },
+  rentsReceivedTotal: { label: "Schedule E rents received", format: "currency" },
+  grossRentsTotal: { label: "Schedule E gross rents", format: "currency" },
+  netRentalRealEstateIncomeOrLoss: { label: "Schedule E net rental income or loss", format: "currency" },
+  propertyCount: { label: "Rental properties found on Schedule E", format: "number" },
 };
-
-const TAX_FACTS: Array<{
-  key: keyof EvidenceTaxInsight;
-  label: string;
-  format: "currency" | "number";
-}> = [
-  { key: "wagesW2", label: "W-2 wages reported on return", format: "currency" },
-  { key: "grossIncome", label: "Tax-return gross income", format: "currency" },
-  { key: "adjustedGrossIncome", label: "Adjusted gross income", format: "currency" },
-  { key: "scheduleCNetProfit", label: "Schedule C net profit", format: "currency" },
-  { key: "scheduleENetRental", label: "Schedule E net rental amount", format: "currency" },
-  { key: "scheduleEGrossRents", label: "Schedule E gross rents", format: "currency" },
-  { key: "rentalPropertyCount", label: "Rental properties found on Schedule E", format: "number" },
-];
 
 const DOCUMENT_LABELS: Record<string, string> = {
   pay_stub: "Pay stub",
@@ -105,6 +98,7 @@ const DOCUMENT_LABELS: Record<string, string> = {
   bank_statement: "Bank statement",
   tax_return: "Tax return",
   lease_agreement: "Lease agreement",
+  profit_loss: "Profit and loss statement",
 };
 
 function normalizeDocumentType(value: string): string {
@@ -149,25 +143,6 @@ function factFromRow(type: string, row: DocumentFactRow): CoachDocumentEvidenceF
   };
 }
 
-function factsFromTaxInsight(type: string, insight: EvidenceTaxInsight): CoachDocumentEvidenceFact[] {
-  const numericConfidence = insight.confidence === "high" ? 0.9 : insight.confidence === "medium" ? 0.7 : 0.4;
-  const facts: CoachDocumentEvidenceFact[] = [];
-  for (const definition of TAX_FACTS) {
-    const value = finiteNumber(insight[definition.key]);
-    if (value === null) continue;
-    facts.push({
-      label: definition.label,
-      value,
-      format: definition.format,
-      reviewStatus: "machine_read",
-      confidence: confidenceBand(numericConfidence),
-      needsHumanReview: numericConfidence < getReviewThreshold(type),
-      pageNumber: null,
-    });
-  }
-  return facts;
-}
-
 function evidenceStatus(facts: CoachDocumentEvidenceFact[]): CoachDocumentEvidenceItem["evidenceStatus"] {
   if (facts.length === 0) return "not_extracted";
   const verified = facts.filter((fact) => fact.reviewStatus === "human_verified").length;
@@ -185,10 +160,10 @@ export function buildCoachDocumentEvidence(input: {
   applicationId: string;
   documents: EvidenceDocument[];
   facts: DocumentFactRow[];
-  taxInsights: EvidenceTaxInsight[];
   approvedMemoId: string | null;
   approvedIncomeWorkpaperId: string | null;
   approvedAssetWorkpaperId: string | null;
+  approvedLiabilityWorkpaperId: string | null;
 }): CoachDocumentEvidenceSnapshot {
   const currentDocuments = sortCurrentDocuments(input.documents, input.applicationId);
   const shownDocuments = currentDocuments.slice(0, MAX_DOCUMENTS);
@@ -199,30 +174,26 @@ export function buildCoachDocumentEvidence(input: {
     rows.push(fact);
     factsByDocument.set(fact.documentId, rows);
   }
-  const taxByDocument = new Map(
-    input.taxInsights
-      .filter((insight): insight is EvidenceTaxInsight & { documentId: string } =>
-        !!insight.documentId && shownDocuments.some((document) => document.id === insight.documentId))
-      .map((insight) => [insight.documentId, insight]),
-  );
-
   const documents = shownDocuments.map((document): CoachDocumentEvidenceItem => {
     const type = normalizeDocumentType(document.documentType);
-    const extracted = (factsByDocument.get(document.id) ?? [])
-      .map((row) => factFromRow(type, row))
-      .filter((fact): fact is CoachDocumentEvidenceFact => fact !== null);
-    const tax = taxByDocument.get(document.id);
-    const allFacts = [
-      ...extracted,
-      ...(tax ? factsFromTaxInsight(type, tax) : []),
-    ].sort((left, right) =>
-      Number(right.reviewStatus === "human_verified") - Number(left.reviewStatus === "human_verified") ||
-      left.label.localeCompare(right.label),
-    );
+    const documentFacts = factsByDocument.get(document.id) ?? [];
+    const logicalTypes = [...new Set(documentFacts.flatMap(row =>
+      row.logicalDocumentType ? [normalizeDocumentType(row.logicalDocumentType)] : [],
+    ))].sort();
+    const allFacts = documentFacts
+      .map((row) => factFromRow(row.logicalDocumentType ? normalizeDocumentType(row.logicalDocumentType) : type, row))
+      .filter((fact): fact is CoachDocumentEvidenceFact => fact !== null)
+      .sort((left, right) =>
+        Number(right.reviewStatus === "human_verified") - Number(left.reviewStatus === "human_verified") ||
+        left.label.localeCompare(right.label),
+      );
     const facts = allFacts.slice(0, MAX_FACTS_PER_DOCUMENT);
     return {
+      documentId: document.id,
       documentType: type,
-      label: tax ? `${documentLabel(type)} (${tax.taxYear})` : documentLabel(type),
+      label: (type === "other" || type === "unknown") && logicalTypes.length > 0
+        ? `Document packet: ${logicalTypes.map(documentLabel).join(", ")}`
+        : documentLabel(type),
       documentReviewStatus: documentReviewStatus(document.status),
       evidenceStatus: evidenceStatus(facts),
       facts,
@@ -244,6 +215,11 @@ export function buildCoachDocumentEvidence(input: {
       status: input.approvedMemoId ? "approved_for_lender_package" : "not_approved",
       income: input.approvedIncomeWorkpaperId ? "approved" : "not_approved",
       assets: input.approvedAssetWorkpaperId ? "approved" : "not_approved",
+      liabilities: input.approvedLiabilityWorkpaperId
+        ? "approved"
+        : input.approvedMemoId
+          ? "not_required"
+          : "not_approved",
     },
   };
 }
@@ -271,21 +247,18 @@ export async function loadCoachDocumentEvidence(
     import("./documentFacts"),
     import("./financialReview"),
   ]);
-  const [facts, userTaxInsights, approved] = await Promise.all([
+  const [facts, approved] = await Promise.all([
     getFactsForDocuments(documentIds),
-    storage.getTaxInsightsByUser(user.id),
     getCurrentApprovedFinancialVerificationEvidence(applicationId),
   ]);
-  const ids = new Set(documentIds);
-  const taxInsights = userTaxInsights.filter((insight) => insight.documentId && ids.has(insight.documentId));
 
   return buildCoachDocumentEvidence({
     applicationId,
     documents,
     facts,
-    taxInsights,
     approvedMemoId: approved.memo?.id ?? null,
     approvedIncomeWorkpaperId: approved.incomeWorkpaperId,
     approvedAssetWorkpaperId: approved.assetWorkpaperId,
+    approvedLiabilityWorkpaperId: approved.liabilityWorkpaperId,
   });
 }

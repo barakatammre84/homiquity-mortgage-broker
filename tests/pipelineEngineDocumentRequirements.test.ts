@@ -38,6 +38,7 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
       new Date().getFullYear() - 1,
       new Date().getFullYear() - 2,
     ]);
+    expect(requirements.map((requirement) => requirement.documentType)).not.toContain("other");
   });
 
   it("still asks 'employed' borrowers for a W-2 (no regression)", () => {
@@ -47,6 +48,16 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
     });
     const documentTypes = requirements.map((r) => r.documentType);
     expect(documentTypes).toContain("w2");
+  });
+
+  it("does not infer gift funds from a down payment below 20 percent", () => {
+    const requirements = determineDocumentRequirements({
+      ...baseProfile,
+      employmentType: "employed",
+      ltvRatio: 90,
+    });
+
+    expect(requirements.map((requirement) => requirement.documentType)).not.toContain("gift_letter");
   });
 
   it("does not ask a self-employed borrower for pay stubs", () => {

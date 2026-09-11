@@ -30,21 +30,29 @@ function evidenceFactLabel(fieldName: string) {
     .replace(/^./, value => value.toUpperCase());
 }
 
-function outputLines(output: FinancialWorkpaperOutput) {
+function outputLines(output: FinancialWorkpaperOutput, approved: boolean) {
   if (output.kind === "income_summary") {
     return [
-      ["Monthly qualifying income", formatCurrency(output.evaluation.primaryMonthlyQualifyingIncome)],
+      [approved ? "Monthly qualifying income" : "Calculated monthly income", formatCurrency(output.evaluation.primaryMonthlyQualifyingIncome)],
       ["Income basis", output.evaluation.incomeBasis.replaceAll("_", " ")],
       ["Borrowers represented", String(output.borrowerBreakdown.length)],
     ];
   }
   if (output.kind === "self_employment") {
-    return [
-      ["Monthly qualifying income", formatCurrency(output.result.monthlyQualifyingIncome)],
-      ["Two-year annual figure", formatCurrency(output.result.avgAnnualCashFlow)],
+    const lines = [
+      [approved ? "Monthly qualifying income" : "Calculated monthly income", formatCurrency(output.result.monthlyQualifyingIncome)],
+      [approved ? "Two-year annual figure" : "Calculated two-year annual figure", formatCurrency(output.result.avgAnnualCashFlow)],
       ["Trend", output.result.trend.replaceAll("_", " ")],
       ["Ownership", output.ownershipPercent === null ? "Not recorded" : `${output.ownershipPercent}%`],
     ];
+    if (output.currentActivity) {
+      lines.push(
+        ["Current P&L period", `${output.currentActivity.periodStart} to ${output.currentActivity.periodEnd}`],
+        ["Current P&L monthly net", formatCurrency(output.currentActivity.borrowerMonthlyNet)],
+        ["Current activity", output.currentActivity.direction === "declining" ? "Below tax-based calculation" : "Supports no increase above tax-based income"],
+      );
+    }
+    return lines;
   }
   if (output.kind === "business_liquidity") {
     const ratio = output.method === "quick_ratio" ? output.quickRatio : output.currentRatio;
@@ -56,8 +64,8 @@ function outputLines(output: FinancialWorkpaperOutput) {
   }
   if (output.kind === "rental_cash_flow") {
     return output.result.kind === "dti_income" ? [
-      ["Income applied", formatCurrency(output.result.appliedMonthlyIncome ?? 0)],
-      ["Obligation applied", formatCurrency(output.result.appliedMonthlyObligation ?? 0)],
+      [approved ? "Income applied" : "Calculated income contribution", formatCurrency(output.result.appliedMonthlyIncome ?? 0)],
+      [approved ? "Obligation applied" : "Calculated obligation contribution", formatCurrency(output.result.appliedMonthlyObligation ?? 0)],
       ["Manual review", output.result.requiresManualReview ? "Required" : "No flag"],
     ] : [
       ["Coverage ratio", output.result.coverageRatio?.toFixed(2) ?? "Unavailable"],
@@ -65,18 +73,183 @@ function outputLines(output: FinancialWorkpaperOutput) {
     ];
   }
   if (output.kind === "asset_reconciliation") {
-    return [
+    const lines = [
       ["Recorded assets", formatCurrency(output.result.totalAssets)],
-      ["Policy-adjusted liquid assets", formatCurrency(output.result.liquidAssets)],
+      ["Post-closing liquid assets", formatCurrency(output.result.liquidAssets)],
       ["Retirement assets", formatCurrency(output.result.retirementAssets)],
     ];
+    if (output.realEstateReserves) {
+      lines.push(
+        ["Financed properties", output.realEstateReserves.financedPropertiesCount === null ? "Needs property details" : String(output.realEstateReserves.financedPropertiesCount)],
+        ["Subject-property reserve", `${output.realEstateReserves.baseReserveMonths} months · ${formatCurrency(output.realEstateReserves.baseReserveRequirement)}`],
+        ["Other-property reserve", output.realEstateReserves.additionalReserveRequirement === null ? "Needs property details" : formatCurrency(output.realEstateReserves.additionalReserveRequirement)],
+        ["Total reserve requirement", output.realEstateReserves.totalReserveRequirement === null ? "Needs property details" : formatCurrency(output.realEstateReserves.totalReserveRequirement)],
+        ["Open 30-day balances", formatCurrency(output.realEstateReserves.openThirtyDayChargeBalance)],
+        ["Combined post-closing need", output.realEstateReserves.combinedPostClosingRequirement === null ? "Needs property details" : formatCurrency(output.realEstateReserves.combinedPostClosingRequirement)],
+      );
+    }
+    return lines;
   }
   if (output.kind === "liability_reconciliation") return [
-    ["Monthly obligations included", formatCurrency(output.result.totalMonthlyPayment)],
-    ["Monthly debts excluded", formatCurrency(output.result.excludedDebts)],
-    ["Liabilities reviewed", String(output.result.breakdown.length)],
+    ["Application monthly debt", formatCurrency(output.result.totalMonthlyPayment)],
+    ["Bureau-adjusted monthly debt", output.bureau ? formatCurrency(output.bureau.adjustedMonthlyDebt) : "No current bureau ledger"],
+    ["Monthly debt used", formatCurrency(output.decisionMonthlyPayment)],
+    ["Subject-property payment additions", formatCurrency(output.subjectPropertyFinancing.monthlyHousingExpenseAdditions)],
+    ["CLTV", output.subjectPropertyFinancing.cltv === null ? "Pending" : `${output.subjectPropertyFinancing.cltv.toFixed(2)}%`],
+    ["HCLTV", output.subjectPropertyFinancing.hcltv === null ? "Pending" : `${output.subjectPropertyFinancing.hcltv.toFixed(2)}%`],
+    ["Open 30-day balances covered by assets", formatCurrency(output.openThirtyDayBalance)],
   ];
   return [];
+}
+
+function LiabilityTreatmentPanel({
+  applicationId,
+  workpaper,
+  onSaved,
+}: {
+  applicationId: string;
+  workpaper: FinancialWorkpaperView;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const output = workpaper.output.kind === "liability_reconciliation" ? workpaper.output : null;
+  const [drafts, setDrafts] = useState<Record<string, { sourceDocumentId: string; tradelineIndex: string }>>({});
+  const treatment = useMutation({
+    mutationFn: async ({
+      liabilityId,
+      reviewedTreatment,
+      sourceDocumentId,
+      tradelineIndex,
+    }: {
+      liabilityId: string;
+      reviewedTreatment: "exclude_short_term_installment" | "documented_zero_student_loan" | null;
+      sourceDocumentId: string | null;
+      tradelineIndex: number | null;
+    }) => apiRequest(
+      "POST",
+      `/api/loan-applications/${applicationId}/financial-review/liabilities/${liabilityId}/treatment`,
+      {
+        treatment: reviewedTreatment,
+        sourceDocumentId,
+        creditPullId: reviewedTreatment ? output?.bureau?.pullId ?? null : null,
+        tradelineIndex,
+      },
+    ),
+    onSuccess: () => {
+      onSaved();
+      toast({ title: "Debt treatment saved", description: "Prepare a fresh workpaper so the reviewed payment flows into the decision." });
+    },
+    onError: (error: unknown) => toast({
+      title: "Could not save debt treatment",
+      description: friendlyApiError(error, "Refresh the file and verify the source and bureau account."),
+      variant: "destructive",
+    }),
+  });
+  if (!output || output.treatmentCandidates.length === 0) return null;
+
+  return (
+    <div className="space-y-3 rounded-md border p-3" data-testid="liability-treatment-opportunities">
+      <div>
+        <p className="text-sm font-medium">Documented debt treatment</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Link the current statement and exact bureau account before using a short remaining term or a documented $0 income-driven payment.
+        </p>
+      </div>
+      {output.treatmentCandidates.map(candidate => {
+        const draft = drafts[candidate.liabilityId] ?? {
+          sourceDocumentId: candidate.sourceDocumentId ?? "",
+          tradelineIndex: candidate.tradelineIndex === null ? "" : String(candidate.tradelineIndex),
+        };
+        const currentlyApplied = candidate.currentTreatment === candidate.recommendedTreatment
+          && candidate.evidenceCurrent
+          && candidate.bureauLinkCurrent;
+        const treatmentLabel = candidate.recommendedTreatment === "documented_zero_student_loan"
+          ? "Use documented $0 income-driven payment"
+          : `Review exclusion with ${candidate.remainingTermMonths ?? "?"} payments remaining`;
+        return (
+          <div key={candidate.liabilityId} className="space-y-3 rounded-md bg-muted/20 p-3" data-testid={`liability-treatment-${candidate.liabilityId}`}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">{candidate.creditorName || candidate.liabilityType}</p>
+                <p className="text-xs text-muted-foreground">Borrower {candidate.borrowerSequenceNumber} · {treatmentLabel}</p>
+              </div>
+              <Badge variant={currentlyApplied ? "secondary" : "outline"}>{currentlyApplied ? "Linked" : "Available"}</Badge>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Accepted source statement</Label>
+                <Select
+                  value={draft.sourceDocumentId}
+                  onValueChange={value => setDrafts(current => ({
+                    ...current,
+                    [candidate.liabilityId]: { ...draft, sourceDocumentId: value },
+                  }))}
+                >
+                  <SelectTrigger aria-label={`Source statement for ${candidate.creditorName || candidate.liabilityType}`}><SelectValue placeholder="Choose evidence..." /></SelectTrigger>
+                  <SelectContent>
+                    {workpaper.sources.map(source => <SelectItem key={source.documentId} value={source.documentId}>{source.documentName} · v{source.versionNumber}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Current bureau account</Label>
+                <Select
+                  value={draft.tradelineIndex}
+                  onValueChange={value => setDrafts(current => ({
+                    ...current,
+                    [candidate.liabilityId]: { ...draft, tradelineIndex: value },
+                  }))}
+                >
+                  <SelectTrigger aria-label={`Bureau account for ${candidate.creditorName || candidate.liabilityType}`}><SelectValue placeholder="Choose account..." /></SelectTrigger>
+                  <SelectContent>
+                    {(output.bureau?.tradelines ?? []).map((line, index) => (
+                      <SelectItem key={`${line.creditor}-${index}`} value={String(index)}>
+                        {line.creditor} · {line.type.replaceAll("_", " ")} · {formatCurrency(line.balance)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                className="touch-target"
+                onClick={() => treatment.mutate({
+                  liabilityId: candidate.liabilityId,
+                  reviewedTreatment: candidate.recommendedTreatment,
+                  sourceDocumentId: draft.sourceDocumentId || null,
+                  tradelineIndex: draft.tradelineIndex === "" ? null : Number(draft.tradelineIndex),
+                })}
+                disabled={treatment.isPending || !draft.sourceDocumentId || draft.tradelineIndex === "" || !output.bureau}
+                data-testid={`apply-liability-treatment-${candidate.liabilityId}`}
+              >
+                Apply reviewed treatment
+              </Button>
+              {candidate.currentTreatment && (
+                <Button
+                  size="sm"
+                  className="touch-target"
+                  variant="outline"
+                  onClick={() => treatment.mutate({
+                    liabilityId: candidate.liabilityId,
+                    reviewedTreatment: null,
+                    sourceDocumentId: null,
+                    tradelineIndex: null,
+                  })}
+                  disabled={treatment.isPending}
+                >
+                  Clear treatment
+                </Button>
+              )}
+            </div>
+            {workpaper.sources.length === 0 && <p className="text-xs text-muted-foreground">Verify the latest statement in Documents before applying this treatment.</p>}
+            {!output.bureau && <p className="text-xs text-muted-foreground">A current real bureau report is required before applying this treatment.</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function ReviewBadge({ artifact }: { artifact: { isCurrent: boolean; review: { action: "approve" | "reject" } | null } }) {
@@ -106,6 +279,12 @@ function WorkpaperCard({
   const comparisons = workpaper.input.evidenceComparisons ?? [];
   const comparisonsNeedingAttention = comparisons.filter(comparison => comparison.status !== "match");
   const allComparisonsAcknowledged = comparisonsNeedingAttention.every(comparison => acknowledgedComparisons.includes(comparison.id));
+  const approved = workpaper.isCurrent
+    && workpaper.blockers.length === 0
+    && workpaper.review?.action === "approve";
+  const displayTitle = workpaper.kind === "income_summary" && !approved
+    ? "Household income calculation"
+    : workpaper.title;
   const review = useMutation({
     mutationFn: async (action: "approve" | "reject") => apiRequest(
       "POST",
@@ -124,7 +303,7 @@ function WorkpaperCard({
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-base">{workpaper.title}</CardTitle>
+            <CardTitle className="text-base">{displayTitle}</CardTitle>
             <CardDescription>{workpaper.subjectLabel}{workpaper.versionNumber ? ` · version ${workpaper.versionNumber}` : " · not prepared"}</CardDescription>
           </div>
           <ReviewBadge artifact={workpaper} />
@@ -132,13 +311,61 @@ function WorkpaperCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <dl className="grid gap-2 text-sm sm:grid-cols-3">
-          {outputLines(workpaper.output).map(([label, value]) => (
+          {outputLines(workpaper.output, approved).map(([label, value]) => (
             <div key={label} className="rounded-md border bg-muted/20 p-3">
               <dt className="text-xs text-muted-foreground">{label}</dt>
               <dd className="mt-1 font-medium capitalize">{value}</dd>
             </div>
           ))}
         </dl>
+        {workpaper.output.kind === "liability_reconciliation" && workpaper.output.bureau && (
+          <details className="rounded-md border p-3 text-sm" data-testid="bureau-liability-ledger">
+            <summary className="cursor-pointer font-medium">
+              Bureau liability ledger · {workpaper.output.bureau.tradelineCount} open {workpaper.output.bureau.tradelineCount === 1 ? "account" : "accounts"}
+            </summary>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Representative score {workpaper.output.bureau.representativeScore} · reported payments {formatCurrency(workpaper.output.bureau.reportedMonthlyPayments)} · guideline-adjusted payments {formatCurrency(workpaper.output.bureau.adjustedMonthlyDebt)}
+            </p>
+            <dl className="mt-3 grid gap-2 sm:grid-cols-2" data-testid="bureau-borrower-scores">
+              {workpaper.output.bureau.borrowerScores.map(score => (
+                <div key={score.borrowerSequenceNumber} className="rounded-md bg-muted/30 p-2">
+                  <dt className="text-xs text-muted-foreground">Borrower {score.borrowerSequenceNumber}</dt>
+                  <dd>
+                    Representative {score.representativeScore}
+                    <span className="block text-xs text-muted-foreground">
+                      Experian {score.experianScore ?? "—"} · Equifax {score.equifaxScore ?? "—"} · TransUnion {score.transunionScore ?? "—"}
+                    </span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <dl className="mt-3 space-y-2">
+              {workpaper.output.bureau.tradelines.map((line, index) => (
+                <div key={`${line.creditor}-${line.type}-${index}`} className="grid gap-1 rounded-md bg-muted/30 p-2 sm:grid-cols-3">
+                  <div><dt className="text-xs text-muted-foreground">Creditor</dt><dd>{line.creditor}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Balance</dt><dd>{formatCurrency(line.balance)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Reported payment</dt><dd>{formatCurrency(line.monthlyPayment)}{line.deferred ? " · deferred" : ""}</dd></div>
+                </div>
+              ))}
+            </dl>
+          </details>
+        )}
+        {workpaper.output.kind === "liability_reconciliation" && workpaper.output.subjectPropertyFinancing.captured && (
+          <div className="rounded-md border p-3 text-sm" data-testid="subject-housing-expense-review">
+            <p className="font-medium">Subject-property housing costs</p>
+            <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div><dt className="text-xs text-muted-foreground">HOA / co-op dues</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.monthlyAssociationDues)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Flood insurance</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.monthlyFloodInsurance)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Ground rent</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.monthlyGroundRent)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Special assessments</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.monthlySpecialAssessments)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Second-lien payment</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.monthlySubordinateFinancingPayment)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Closed-end second</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.closedEndSubordinateBalance)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">HELOC drawn / limit</dt><dd>{formatCurrency(workpaper.output.subjectPropertyFinancing.helocDrawnBalance)} / {formatCurrency(workpaper.output.subjectPropertyFinancing.helocCreditLimit)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Combined ratios</dt><dd>{workpaper.output.subjectPropertyFinancing.cltv === null ? "Pending CLTV" : `${workpaper.output.subjectPropertyFinancing.cltv.toFixed(2)}% CLTV`} · {workpaper.output.subjectPropertyFinancing.hcltv === null ? "Pending HCLTV" : `${workpaper.output.subjectPropertyFinancing.hcltv.toFixed(2)}% HCLTV`}</dd></div>
+            </dl>
+          </div>
+        )}
+        <LiabilityTreatmentPanel applicationId={applicationId} workpaper={workpaper} onSaved={onSaved} />
         {comparisons.length > 0 && (
           <div className="space-y-2" data-testid={`evidence-reconciliation-${workpaper.key}`}>
             <p className="text-sm font-medium">Document-to-calculation checks</p>
@@ -206,7 +433,20 @@ function WorkpaperCard({
                   <dl className="mt-2 grid gap-1 text-xs text-muted-foreground">
                     {source.verifiedFacts!.map(fact => (
                       <div key={fact.id} className="flex flex-wrap justify-between gap-2">
-                        <dt>{evidenceFactLabel(fact.fieldName)}{fact.pageNumber ? ` · page ${fact.pageNumber}` : ""}</dt>
+                        <dt>
+                          {fact.pageNumber ? (
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="touch-target h-auto justify-start whitespace-normal p-0 text-left text-xs font-normal text-muted-foreground"
+                              onClick={() => onOpenEvidence(source.documentId, fact.pageNumber ?? undefined)}
+                              data-testid={`open-workpaper-fact-${fact.id}`}
+                            >
+                              {evidenceFactLabel(fact.fieldName)} · page {fact.pageNumber}
+                            </Button>
+                          ) : evidenceFactLabel(fact.fieldName)}
+                        </dt>
                         <dd className="font-medium text-foreground">
                           {fact.valueType === "currency" ? formatCurrency(fact.value) : fact.value.toLocaleString("en-US")}
                         </dd>
@@ -297,13 +537,13 @@ function MemoCard({
           <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
             {memo.references.map(reference => (
               <li key={`${reference.type}:${reference.id}`}>
-                {reference.type === "document" ? (
+                {reference.documentId ? (
                   <Button
                     type="button"
                     variant="link"
                     size="sm"
                     className="touch-target h-auto justify-start whitespace-normal p-0 text-left font-normal text-muted-foreground"
-                    onClick={() => onOpenEvidence(reference.id, reference.pageNumber)}
+                    onClick={() => onOpenEvidence(reference.documentId!, reference.pageNumber)}
                     data-testid={`open-memo-source-${reference.id}`}
                   >
                     {reference.label} · Open source
@@ -350,7 +590,11 @@ function BankStatementAnalysisCard({
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const parsedDeposits = Number(eligibleDeposits.replace(/[,$\s]/g, ""));
   const parsedExpensePercent = expenseFactorPercent.trim() === "" ? null : Number(expenseFactorPercent);
+  const requiredMonths = Number(months);
+  const evidenceComplete = evidence.reviewedDepositFactCount >= requiredMonths
+    && evidence.consecutiveMonthCoverage >= requiredMonths;
   const valid = Number.isFinite(parsedDeposits) && parsedDeposits > 0
+    && evidenceComplete
     && (parsedExpensePercent === null || (Number.isFinite(parsedExpensePercent) && parsedExpensePercent >= 0 && parsedExpensePercent < 100));
   const save = useMutation({
     mutationFn: async () => apiRequest("POST", `/api/applications/${applicationId}/bank-statement-analysis`, {
@@ -379,8 +623,9 @@ function BankStatementAnalysisCard({
         <div className="rounded-md border bg-muted/20 p-3 text-sm">
           <p className="font-medium">Reviewed statement evidence</p>
           <p className="mt-1 text-muted-foreground">
-            {evidence.documentCount} accepted statement{evidence.documentCount === 1 ? "" : "s"} · {evidence.reviewedDepositFactCount} human-reviewed deposit total{evidence.reviewedDepositFactCount === 1 ? "" : "s"} · {formatCurrency(evidence.observedTotalDeposits)} observed
+            {evidence.documentCount} accepted statement{evidence.documentCount === 1 ? "" : "s"} · {evidence.reviewedDepositFactCount} human-reviewed deposit total{evidence.reviewedDepositFactCount === 1 ? "" : "s"} · {evidence.consecutiveMonthCoverage} consecutive month{evidence.consecutiveMonthCoverage === 1 ? "" : "s"} · {formatCurrency(evidence.observedTotalDeposits)} observed
           </p>
+          {evidence.periodStart && evidence.periodEnd && <p className="mt-1 text-xs text-muted-foreground">Reviewed period: {evidence.periodStart} to {evidence.periodEnd}</p>}
           {evidence.observedTotalDeposits > 0 && (
             <Button type="button" size="sm" variant="outline" className="touch-target mt-3" onClick={() => setEligibleDeposits(String(evidence.observedTotalDeposits))}>
               Use observed total as a draft
@@ -389,7 +634,9 @@ function BankStatementAnalysisCard({
         </div>
         <Alert>
           <Icons.warning className="h-4 w-4" />
-          <AlertDescription>Remove transfers, refunds, duplicate deposits, and other ineligible activity before saving. The current lender reference still requires officer review.</AlertDescription>
+          <AlertDescription>{evidenceComplete
+            ? "Remove transfers, refunds, duplicate deposits, and other ineligible activity before saving. The current lender reference still requires officer review."
+            : `Review deposit totals and dates for ${requiredMonths} consecutive months before saving this analysis.`}</AlertDescription>
         </Alert>
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2">

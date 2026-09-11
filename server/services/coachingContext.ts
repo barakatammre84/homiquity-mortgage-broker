@@ -1,6 +1,7 @@
 // Verified-user context: types, readiness derivations, profile/tone/context prompt builders.
 // Split from the old server/services/coachingService.ts — which re-exports it.
 import { type CoachIntakeData, type CoachingProfile, type ActionPlanItem, type DocumentRequirement, type BorrowerPackage } from "./coachTools";
+import type { FileTruth } from "./coachFileTruth";
 
 // The coach data types + Zod schemas live in coachTools.ts (they define the
 // tool surface); re-export them so this module's public API is unchanged for
@@ -48,6 +49,8 @@ export interface VerifiedUserContext {
    * uploads once landed on a closed loan (see the selector's own docblock).
    */
   workableApplicationId?: string | null;
+  /** Per-turn authorized snapshot, reused by server tools and never serialized wholesale. */
+  fileTruth?: FileTruth;
   annualIncome?: string | null;
   monthlyDebts?: string | null;
   creditScore?: number | null;
@@ -70,6 +73,23 @@ export interface VerifiedUserContext {
     isSelfEmployed?: boolean;
     startDate?: string | null;
     totalMonthlyIncome?: string | null;
+  }>;
+  /**
+   * Additional income sources itemized inside annualIncome. These are
+   * borrower-reported intake facts, never verified or qualifying income.
+   */
+  incomeSources?: Array<{
+    type: string;
+    annualAmount?: string | null;
+    employerName?: string | null;
+    yearsInRole?: string | null;
+    businessStructure?: string | null;
+    ownershipPercent?: string | null;
+    rentalProperties?: Array<{
+      address: string;
+      monthlyRentalIncome?: string | null;
+      monthlyDebtPayment?: string | null;
+    }>;
   }>;
   uploadedDocuments?: Array<{
     documentType: string;
@@ -97,6 +117,8 @@ export interface VerifiedUserContext {
   hasMultipleIncomes?: boolean;
   hasBusinessIncome?: boolean;
   hasInvestmentProperties?: boolean;
+  /** Only a current approved financial memo may set this true. */
+  financialPackageApproved?: boolean;
   propertyContext?: {
     price: number;
     address: string;
@@ -120,7 +142,7 @@ export function deriveReadinessState(ctx: VerifiedUserContext): ReadinessState {
   const noMissingDocs = !ctx.documentsMissing || ctx.documentsMissing.length === 0;
   const hasFinancials = !!(ctx.annualIncome && ctx.creditScore && ctx.monthlyDebts && ctx.employmentType);
 
-  if (hasFinancials && hasVerifiedDocs && noMissingDocs) return "package_ready";
+  if (ctx.financialPackageApproved === true && hasFinancials && hasVerifiedDocs && noMissingDocs) return "package_ready";
   if (hasVerifiedDocs) return "docs_validated";
   if (hasUploadedDocs) return "docs_uploaded";
   if (hasFinancials) return "intake_complete";
@@ -203,7 +225,7 @@ function buildUserProfileHeader(ctx: VerifiedUserContext): string {
     intake_complete: "Intake Complete — core financial inputs collected, documents needed",
     docs_uploaded: "Documents Uploaded — awaiting validation",
     docs_validated: "Documents Validated — verified against inputs",
-    package_ready: "Package Ready — all inputs complete, documents verified, ready for underwriting review",
+    package_ready: "Package Preparation Approved — a current financial review has approved the file for package preparation",
   };
 
   if (ctx.userName) lines.push(`Name: ${ctx.userName}`);
@@ -275,7 +297,12 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
 
   lines.push("\n\n=== TIER 2: APPLICATION DATA (MEDIUM TRUST) ===");
   lines.push("This data comes from the user's loan application form. It is self-reported but formally submitted. Compare it with available source documents and prefer a human-reviewed workpaper for any qualifying figure.");
-  lines.push(`Application Status: ${ctx.applicationStatus}`);
+  if (ctx.workableApplicationId === null) {
+    lines.push(`Most Recent Historical Application Status: ${ctx.applicationStatus}`);
+    lines.push("There is no application currently in progress. Do not present this historical file as an active application or offer file actions against it.");
+  } else {
+    lines.push(`Application Status: ${ctx.applicationStatus}`);
+  }
 
   if (ctx.userName) lines.push(`Borrower Name: ${ctx.userName}`);
   if (ctx.annualIncome) lines.push(`Annual Income: $${parseFloat(ctx.annualIncome).toLocaleString()}`);
@@ -306,6 +333,26 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
       if (emp.totalMonthlyIncome) parts.push(`$${parseFloat(emp.totalMonthlyIncome).toLocaleString()}/month`);
       lines.push(`  - ${parts.join(" | ")}`);
     }
+  }
+
+  if (ctx.incomeSources && ctx.incomeSources.length > 0) {
+    lines.push("\nAdditional Income Sources Itemized Within the Household Total (borrower-reported; unverified):");
+    for (const source of ctx.incomeSources) {
+      const parts = [`type: ${source.type}`];
+      if (source.annualAmount) parts.push(`reported annual amount: $${parseFloat(source.annualAmount).toLocaleString()}`);
+      if (source.employerName) parts.push(`business/payer: ${source.employerName}`);
+      if (source.yearsInRole) parts.push(`history: ${source.yearsInRole} years`);
+      if (source.businessStructure) parts.push(`structure: ${source.businessStructure}`);
+      if (source.ownershipPercent) parts.push(`ownership: ${source.ownershipPercent}%`);
+      lines.push(`  - ${parts.join(" | ")}`);
+      for (const rental of source.rentalProperties ?? []) {
+        const rentalParts = [`property: ${rental.address}`];
+        if (rental.monthlyRentalIncome) rentalParts.push(`reported gross rent: $${parseFloat(rental.monthlyRentalIncome).toLocaleString()}/month`);
+        if (rental.monthlyDebtPayment) rentalParts.push(`reported property payment: $${parseFloat(rental.monthlyDebtPayment).toLocaleString()}/month`);
+        lines.push(`      - ${rentalParts.join(" | ")}`);
+      }
+    }
+    lines.push("The source amounts above are components of Annual Income, not amounts to add to it. They remain self-reported until a human-reviewed workpaper determines qualifying income.");
   }
 
   if (ctx.uploadedDocuments && ctx.uploadedDocuments.length > 0) {
@@ -342,7 +389,7 @@ export function buildVerifiedContextPrompt(ctx: VerifiedUserContext): string {
   lines.push("- For income: use the current approved qualifying-income workpaper when supplied; no single raw tax-return or pay-stub line is automatically qualifying income.");
   lines.push("- For assets: use reviewer-confirmed current balances and sourcing conclusions when supplied; chat claims remain estimates.");
 
-  if (ctx.completionPercentage !== undefined && ctx.completionPercentage !== null) {
+  if (ctx.workableApplicationId !== null && ctx.completionPercentage !== undefined && ctx.completionPercentage !== null) {
     lines.push("\n\n=== READINESS CONTEXT (from Borrower Graph) ===");
     lines.push(`Current Completion Percentage: ${ctx.completionPercentage}/100`);
     if (ctx.readinessTier) lines.push(`Readiness Tier: ${ctx.readinessTier}`);
@@ -494,8 +541,8 @@ const READINESS_STATUS_NOTES: Record<ReadinessState, string> = {
   intake_started: "We have some of your details. A few more inputs complete the picture underwriting needs.",
   intake_complete: "Your details are in. Documents are what turn them into something a lender can verify.",
   docs_uploaded: "Your documents are in and awaiting review.",
-  docs_validated: "Your documents have been reviewed and your file is in order.",
-  package_ready: "Your file has everything underwriting review needs from you.",
+  docs_validated: "At least one requested document is verified. Financial and underwriting review remain separate steps.",
+  package_ready: "A current financial review is approved for lender-package preparation.",
 };
 
 /**
@@ -504,7 +551,7 @@ const READINESS_STATUS_NOTES: Record<ReadinessState, string> = {
  * one server-side would be the same lie in a more trustworthy voice.
  */
 const READINESS_TIER_CAPTIONS: Record<ReadinessTier, string> = {
-  ready_now: "Ready for underwriting review",
+  ready_now: "Current intake and requested documents complete",
   almost_ready: "Nearly ready — a few inputs outstanding",
   building: "Building your file",
   exploring: "Getting started",

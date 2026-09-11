@@ -50,6 +50,8 @@ export default defineConfig({
       "tests/coreTaxPacketCanary.integration.test.ts",
       "tests/coreTaxPacketRestartProof.integration.test.ts",
       "tests/documentPageMaterialization.integration.test.ts",
+      "tests/planningDocumentHandoff.integration.test.ts",
+      "tests/taxDocumentReviewConsent.integration.test.ts",
     ],
   },
   resolve: {

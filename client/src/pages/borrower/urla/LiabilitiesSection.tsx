@@ -13,7 +13,15 @@ import {
   THIRD_PARTY_PAYMENT_HISTORY_MONTHS,
   assessPaidByOtherParty,
 } from "@shared/liabilityExclusions";
-import { isMortgageClassLiability } from "@shared/liabilityTypes";
+import { isMortgageClassLiability, liabilityKind, STUDENT_LOAN_REPAYMENT_PLANS } from "@shared/liabilityTypes";
+
+const STUDENT_PLAN_LABELS: Record<(typeof STUDENT_LOAN_REPAYMENT_PLANS)[number], string> = {
+  income_driven: "Income-driven repayment",
+  deferred: "Deferred",
+  forbearance: "Forbearance",
+  standard: "Standard repayment",
+  other: "Other or not sure",
+};
 
 /** A three-state yes/no: unanswered is a real state the rule treats as "not yet". */
 function YesNoSelect({
@@ -210,7 +218,14 @@ export function LiabilitiesSection({ liabilities, onChange }: LiabilitiesSection
                   value={liability.liabilityType || ""}
                   onValueChange={(value) => {
                     const updated = [...liabilities];
-                    updated[index] = { ...updated[index], liabilityType: value };
+                    updated[index] = {
+                      ...updated[index],
+                      liabilityType: value,
+                      ...(liabilityKind(value) === "student_loan" ? {} : { studentLoanRepaymentPlan: null }),
+                      ...(["installment", "student_loan", "alimony", "child_support"].includes(liabilityKind(value))
+                        ? {}
+                        : { remainingTermMonths: null }),
+                    };
                     onChange(updated);
                   }}
                 >
@@ -275,6 +290,64 @@ export function LiabilitiesSection({ liabilities, onChange }: LiabilitiesSection
                 <Label htmlFor={`paid-off-${index}`} className="font-normal text-sm">To be paid off</Label>
               </div>
             </div>
+            {[
+              "installment",
+              "student_loan",
+              "alimony",
+              "child_support",
+            ].includes(liabilityKind(liability.liabilityType)) && (
+              <div className="mt-4 grid gap-4 rounded-md border bg-muted/20 p-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor={`remaining-payments-${index}`}>Payments remaining</Label>
+                  <Input
+                    id={`remaining-payments-${index}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={1200}
+                    step={1}
+                    value={liability.remainingTermMonths ?? ""}
+                    onChange={(event) => {
+                      const updated = [...liabilities];
+                      updated[index] = {
+                        ...updated[index],
+                        remainingTermMonths: event.target.value === "" ? null : Number(event.target.value),
+                      };
+                      onChange(updated);
+                    }}
+                    data-testid={`input-remaining-payments-${index}`}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A reviewer checks the statement before using a shorter remaining term in your mortgage calculation. Vehicle leases still count regardless of term.
+                  </p>
+                </div>
+                {liabilityKind(liability.liabilityType) === "student_loan" && (
+                  <div className="space-y-2">
+                    <Label htmlFor={`student-plan-${index}`}>Current repayment plan</Label>
+                    <Select
+                      value={liability.studentLoanRepaymentPlan || ""}
+                      onValueChange={(value) => {
+                        const updated = [...liabilities];
+                        updated[index] = { ...updated[index], studentLoanRepaymentPlan: value };
+                        onChange(updated);
+                      }}
+                    >
+                      <SelectTrigger id={`student-plan-${index}`} data-testid={`select-student-plan-${index}`}>
+                        <SelectValue placeholder="Choose plan..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STUDENT_LOAN_REPAYMENT_PLANS.map(plan => (
+                          <SelectItem key={plan} value={plan}>{STUDENT_PLAN_LABELS[plan]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      If an income-driven plan currently requires $0, upload the latest student-loan statement. Your loan officer can use $0 only after reviewing that evidence.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             <PaidByOtherPartyFields
               index={index}
               liability={liability}

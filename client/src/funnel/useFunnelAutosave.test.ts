@@ -20,18 +20,19 @@ import { useFunnelAutosave } from "./useFunnelAutosave";
 const KEY = "test_autosave";
 const STEP_KEY = "test_autosave_step";
 
-function render(values: Record<string, string>, stepId = "annualIncome") {
+function render(values: Record<string, string>, stepId = "annualIncome", ownerId?: string) {
   return renderHook(
-    (props: { values: Record<string, string>; stepId: string }) =>
+    (props: { values: Record<string, string>; stepId: string; ownerId?: string }) =>
       useFunnelAutosave({
         storageKey: KEY,
         stepStorageKey: STEP_KEY,
         values: props.values,
         stepId: props.stepId,
+        ownerId: props.ownerId,
         enabled: true,
         debounceMs: 800,
       }),
-    { initialProps: { values, stepId } },
+    { initialProps: { values, stepId, ownerId } },
   );
 }
 
@@ -59,7 +60,7 @@ describe("useFunnelAutosave debounce", () => {
     // renders are still coming.
     for (let i = 0; i < 6; i++) {
       vi.advanceTimersByTime(400);
-      rerender({ values: { annualIncome: "120000" }, stepId: "annualIncome" });
+      rerender({ values: { annualIncome: "120000" }, stepId: "annualIncome", ownerId: undefined });
     }
 
     expect(localStorage.getItem(KEY)).toBe(JSON.stringify({ annualIncome: "120000" }));
@@ -71,7 +72,7 @@ describe("useFunnelAutosave debounce", () => {
 
     for (const v of ["12", "120", "1200"]) {
       vi.advanceTimersByTime(300);
-      rerender({ values: { annualIncome: v }, stepId: "annualIncome" });
+      rerender({ values: { annualIncome: v }, stepId: "annualIncome", ownerId: undefined });
       // Nothing written yet: each change re-arms the debounce.
       expect(localStorage.getItem(KEY)).toBeNull();
     }
@@ -82,7 +83,7 @@ describe("useFunnelAutosave debounce", () => {
 
   it("writes the values current at fire time, not a stale closure", () => {
     const { rerender } = render({ annualIncome: "1" });
-    rerender({ values: { annualIncome: "999" }, stepId: "creditScore" });
+    rerender({ values: { annualIncome: "999" }, stepId: "creditScore", ownerId: undefined });
     vi.advanceTimersByTime(900);
 
     expect(localStorage.getItem(KEY)).toBe(JSON.stringify({ annualIncome: "999" }));
@@ -104,5 +105,29 @@ describe("useFunnelAutosave debounce", () => {
     vi.advanceTimersByTime(900);
 
     expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("binds an authenticated snapshot to its owner and reports when it was saved", () => {
+    const { result } = render({ annualIncome: "120000" }, "propertyType", "borrower-1");
+    vi.setSystemTime(new Date("2026-09-12T15:00:00.000Z"));
+    vi.advanceTimersByTime(900);
+
+    expect(result.current.readSaved()).toEqual({
+      values: { annualIncome: "120000" },
+      stepId: "propertyType",
+      ownerId: "borrower-1",
+      savedAt: new Date("2026-09-12T15:00:00.800Z").getTime(),
+    });
+  });
+
+  it("clears the values, step, owner, and timestamp together", () => {
+    const { result } = render({ annualIncome: "120000" }, "propertyType", "borrower-1");
+    vi.advanceTimersByTime(900);
+
+    result.current.clear();
+
+    expect(result.current.readSaved()).toBeNull();
+    expect(localStorage.getItem(`${KEY}:owner`)).toBeNull();
+    expect(localStorage.getItem(`${KEY}:saved-at`)).toBeNull();
   });
 });

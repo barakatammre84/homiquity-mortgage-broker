@@ -32,6 +32,8 @@ import {
   kickDocumentExtractionWorker,
 } from "../services/documentExtractionJobs";
 import { resolveDocumentBorrowerUserId } from "../services/documentBorrower";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
+import { getFinancialReview } from "../services/financialReview";
 
 /**
  * Tax Document Intelligence routes (UAL P2a — Situation Identification Engine).
@@ -103,7 +105,7 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
       if (borrowerUserId !== user.id) {
         return res.status(403).json({ error: "Unauthorized" });
       }
-      if (document.documentType !== "tax_return") {
+      if (!isTaxReturnDocumentType(document.documentType)) {
         return res.status(400).json({ error: "Document is not a tax return" });
       }
 
@@ -476,6 +478,16 @@ export function registerTaxIntelligenceRoutes(app: Express, storage: IStorage) {
       const parsed = bankStatementAnalysisInputSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid analysis", details: parsed.error.flatten() });
+      }
+      const evidence = (await getFinancialReview(application.id, user)).bankStatementEvidence;
+      if (
+        evidence.reviewedDepositFactCount < parsed.data.months
+        || evidence.consecutiveMonthCoverage < parsed.data.months
+      ) {
+        return res.status(409).json({
+          error: `Review deposit totals and statement dates for ${parsed.data.months} consecutive months before recording this analysis. Current evidence covers ${evidence.consecutiveMonthCoverage} consecutive month${evidence.consecutiveMonthCoverage === 1 ? "" : "s"}.`,
+          evidence,
+        });
       }
 
       const [row] = await db

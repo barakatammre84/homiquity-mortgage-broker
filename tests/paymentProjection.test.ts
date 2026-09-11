@@ -186,6 +186,26 @@ describe("computePaymentProjection — compensation independence (WF1-002)", () 
 });
 
 describe("B3-6-03 qualifying PITIA vs the disclosed projected payment", () => {
+  it("adds flood, ground rent, assessments, and subordinate payment only to the qualifying figure", async () => {
+    h.application = application({ loCompensationModel: "lender_paid", loCompensationBps: 125 });
+    h.propertyInfo = {
+      monthlyAssociationDues: "200",
+      monthlyFloodInsurance: "125",
+      monthlyGroundRent: "40",
+      monthlySpecialAssessments: "85",
+      subordinateFinancingExists: true,
+      closedEndSubordinateBalance: "20000",
+      helocDrawnBalance: "10000",
+      helocCreditLimit: "50000",
+      monthlySubordinateFinancingPayment: "225",
+    } as any;
+    const p = await computePaymentProjection("app-1");
+    expect(p.housingExpenseMissingItems).toEqual([]);
+    expect(p.qualifyingPitia).toBe(Math.round((p.estimatedMonthlyTotal + 675) * 100) / 100);
+    expect(p.cltv).toBe(86);
+    expect(p.hcltv).toBe(94);
+  });
+
   // Two figures, two regimes. estimatedMonthlyTotal holds Loan Estimate parity;
   // qualifyingPitia is what the DTI is built on and adds association dues per
   // Selling Guide B3-6-03. Collapsing them would either drop the dues from the

@@ -8,6 +8,10 @@ import {
   VA_RESIDUAL_REDUCTION_FACTOR,
   VA_UTILITY_RATE_PER_SQFT,
 } from "./services/underwritingNuance";
+import {
+  subjectMinimumReserveMonths,
+  type MultipleFinancedPropertiesAssessment,
+} from "@shared/realEstateFinancing";
 
 /**
  * Classifies why an underwriting evaluation could not complete, so the caller
@@ -67,6 +71,8 @@ export interface ResolvedPolicy {
   conventionalFicoFloor?: number;
   conformingLoanLimit?: number;
   conventionalOccupancyMaxLtvPct?: number;
+  conventionalBaseReserveMonths?: number;
+  multipleFinancedPropertiesReserveFactorPct?: number;
   haircutStockInvestment: number;
   haircutRetirement: number;
   pmiRatePct?: number;
@@ -205,9 +211,19 @@ export interface UnderwritingInput {
   originalLoanAmount: number;
   contractSalesPrice: number;
   appraisalValue: number;
+  /** B2-1.2 combined-lien ratios. They equal LTV when there is no subordinate
+   * financing and are explicitly computed from UPB/drawn/full-line amounts
+   * when another lien is present. */
+  subordinateFinancingExists?: boolean | null;
+  combinedLoanToValue?: number | null;
+  homeEquityCombinedLoanToValue?: number | null;
   representativeFico: number;
   proposedPiti: number;
   assets: AssetProfile[];
+  /** B2-2-03 / B3-4.1-01 result built from the complete URLA 2c schedule. */
+  multipleFinancedProperties?: MultipleFinancedPropertiesAssessment;
+  /** Open 30-day charge balance covered by assets outside the DTI. */
+  openThirtyDayChargeBalance?: number;
   homeSquareFootage?: number;
   subjectPropertyState?: string;
   householdFamilySize?: number;
@@ -296,11 +312,16 @@ export interface UnderwritingResult {
   decision: "APPROVED" | "REJECTED" | "MANUAL_REVIEW";
   loanType: "CONVENTIONAL" | "VA";
   calculatedLtv: number;
+  calculatedCltv: number;
+  calculatedHcltv: number;
   lookupLtv: number; // Rounded LTV used for pricing lookups
   calculatedDti: number;
   resolvedPmiMonthlyPremium: number;
   resolvedLlpafUpfrontFee: number;
   calculatedLiquidAssets: number;
+  calculatedPostClosingLiquidAssets: number;
+  calculatedRequiredReserves: number;
+  financedPropertiesCount: number | null;
   actualResidualIncome?: number;
   requiredResidualIncome?: number;
   rejectionReasons: string[];
@@ -406,6 +427,27 @@ export class ConsolidatedUnderwritingEngine {
     // REPORTING/PRICING basis: truncated to 2 decimals (display, PMI band
     // lookups) — unchanged so quoted figures stay consistent with rate cards.
     const calculatedLtv = Math.floor(rawLtvFraction * 100) / 100;
+    const calculatedCltv = input.combinedLoanToValue ?? calculatedLtv;
+    const calculatedHcltv = input.homeEquityCombinedLoanToValue ?? calculatedCltv;
+    if (
+      calculatedCltv + 0.0001 < calculatedLtv
+      || calculatedHcltv + 0.0001 < calculatedCltv
+    ) {
+      throw new UnderwritingError(
+        "INPUT_INVALID",
+        `COMBINED LIEN RATIO ERROR: LTV ${calculatedLtv}, CLTV ${calculatedCltv}, HCLTV ${calculatedHcltv}.`,
+        "The subject property's first mortgage, second mortgage, and HELOC amounts are inconsistent. Please review them with your loan team.",
+      );
+    }
+
+    // Maximum CLTV/HCLTV cells live in the Eligibility Matrix, which is not in
+    // this repository. Keep calculating the exact ratios and complete payment,
+    // but never turn a subordinate-financing file into an automated approval.
+    if (input.subordinateFinancingExists) {
+      reviewReasons.push(
+        `Subject-property subordinate financing produces ${calculatedCltv.toFixed(2)}% CLTV and ${calculatedHcltv.toFixed(2)}% HCLTV. The applicable maximum ratios come from the current agency Eligibility Matrix, so loan-officer and lender review is required.`,
+      );
+    }
 
     // Round up to the nearest whole percentage point for matrix lookups
     const lookupLtv = Math.ceil(calculatedLtv);
@@ -429,6 +471,10 @@ export class ConsolidatedUnderwritingEngine {
         calculatedLiquidAssets += asset.balance * haircutRetirement;
       }
     }
+    const downPayment = Math.max(input.contractSalesPrice - input.originalLoanAmount, 0);
+    const calculatedPostClosingLiquidAssets = Math.max(calculatedLiquidAssets - downPayment, 0);
+    let calculatedRequiredReserves = 0;
+    let conventionalBaseReserveMonths: number | undefined;
 
     // Step 5: Process standard Debt-to-Income (DTI)
     const combinedGrossMonthlyIncome = input.baseMonthlyIncome + input.bonusMonthlyIncome;
@@ -541,23 +587,69 @@ export class ConsolidatedUnderwritingEngine {
       reviewReasons.push(...subjectPropertyReasons);
       if (subjectPropertyReasons.length > 0) conventionalPricingEligible = false;
 
-      // Occupancy/units LTV eligibility (Fannie Eligibility Matrix). The agency
-      // max LTV depends on both occupancy and unit count — an investment 2-4
-      // unit is capped far below an owner-occupied SFR — so enforce the specific
-      // cap here. Absent data defaults to a 1-unit primary residence, matching
-      // the prior single-family behavior. An unseeded combination (e.g. a 2-unit
-      // second home, or 5+ units) is out of band -> human review.
+      // Occupancy/units LTV eligibility. The stored multi-unit primary rows are
+      // MANUAL-underwriting ceilings. Fannie's current Eligibility Matrix permits
+      // a purchase of a 2-4 unit principal residence up to 95% only through
+      // Desktop Underwriter. Because this platform has no live DU result, a file
+      // above the manual ceiling but within the automated ceiling must route to
+      // review for a current DU finding; it is not an adverse eligibility result.
+      // Investment-property rows are absolute program ceilings and still reject.
+      // An unseeded combination (for example, a 2-unit second home or 5+ units)
+      // remains out of band and routes to human review.
       const occupancy = normalizeOccupancy(input.occupancyType);
       const units = input.numberOfUnits && input.numberOfUnits >= 1 ? Math.floor(input.numberOfUnits) : 1;
+
+      // B3-4.1-01 DU minimums. These are the minimum subject reserves before
+      // adding the other-property UPB amount: 2 months for a second home and 6
+      // for a 2–4-unit primary or investment property.
+      conventionalBaseReserveMonths = subjectMinimumReserveMonths(input.occupancyType, units);
+      const multiple = input.multipleFinancedProperties;
+      const additionalReserveRequirement = multiple?.additionalReserveRequirement ?? 0;
+      calculatedRequiredReserves = conventionalBaseReserveMonths * input.proposedPiti + additionalReserveRequirement;
+      if (multiple?.complete) {
+        const openThirtyDayChargeBalance = Math.max(input.openThirtyDayChargeBalance ?? 0, 0);
+        const fundsRequiredBeforeReserves = downPayment + openThirtyDayChargeBalance;
+        if (calculatedLiquidAssets + 0.01 < fundsRequiredBeforeReserves) {
+          reviewReasons.push(
+            `Policy-adjusted eligible assets of $${Math.round(calculatedLiquidAssets).toLocaleString()} do not cover the $${Math.round(downPayment).toLocaleString()} down payment${openThirtyDayChargeBalance > 0 ? ` plus $${Math.round(openThirtyDayChargeBalance).toLocaleString()} in open 30-day charge balances` : ""} before closing costs. Additional verified funds or manual source-of-funds review is required.`,
+          );
+        }
+        if (
+          occupancy.code !== "PRIMARY"
+          && (multiple.financedPropertiesCount ?? 0) > 10
+        ) {
+          reviewReasons.push(
+            `${multiple.financedPropertiesCount} financed properties exceed the Desktop Underwriter maximum of 10 for a ${occupancy.label} transaction (B2-2-03). Manual product review required.`,
+          );
+        }
+        if (calculatedPostClosingLiquidAssets + 0.01 < calculatedRequiredReserves + openThirtyDayChargeBalance) {
+          reviewReasons.push(
+            `Post-closing liquid assets of $${Math.round(calculatedPostClosingLiquidAssets).toLocaleString()} are below the $${Math.round(calculatedRequiredReserves + openThirtyDayChargeBalance).toLocaleString()} combined reserve requirement (${conventionalBaseReserveMonths} months of subject PITIA, $${Math.round(additionalReserveRequirement).toLocaleString()} for other financed properties, and $${Math.round(openThirtyDayChargeBalance).toLocaleString()} in open 30-day charge balances).`,
+          );
+        }
+      }
       const occupancyMaxLtv = await this.resolveOrOutOfBand(
         { matrixCode: "CONVENTIONAL_MAX_LTV", dim1Value: units, dim3Identifier: occupancy.code },
         "occupancy/units LTV eligibility",
       );
       resolvedConventionalOccupancyMaxLtvPct = occupancyMaxLtv;
       if (preciseLtv > occupancyMaxLtv) {
-        reasons.push(
-          `Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds the ${occupancyMaxLtv}% maximum for a ${units}-unit ${occupancy.label} property`,
-        );
+        const requiresDuForHighLtvMultiUnitPrimary =
+          purpose === "purchase" &&
+          occupancy.code === "PRIMARY" &&
+          units >= 2 &&
+          units <= 4 &&
+          preciseLtv <= ltvCap!;
+
+        if (requiresDuForHighLtvMultiUnitPrimary) {
+          reviewReasons.push(
+            `Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds the ${occupancyMaxLtv}% manual-underwriting ceiling for a ${units}-unit primary residence but is within the ${ltvCap}% Desktop Underwriter eligibility ceiling; a current DU finding is required`,
+          );
+        } else {
+          reasons.push(
+            `Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds the ${occupancyMaxLtv}% maximum for a ${units}-unit ${occupancy.label} property`,
+          );
+        }
         conventionalPricingEligible = false;
       }
 
@@ -729,6 +821,11 @@ export class ConsolidatedUnderwritingEngine {
       conventionalFicoFloor: resolvedConventionalFicoFloor,
       conformingLoanLimit: resolvedConformingLoanLimit,
       conventionalOccupancyMaxLtvPct: resolvedConventionalOccupancyMaxLtvPct,
+      conventionalBaseReserveMonths,
+      multipleFinancedPropertiesReserveFactorPct:
+        input.multipleFinancedProperties?.reserveFactor == null
+          ? undefined
+          : input.multipleFinancedProperties.reserveFactor * 100,
       haircutStockInvestment: haircutStock,
       haircutRetirement: haircutRetirement,
       pmiRatePct: resolvedPmiRatePct,
@@ -746,11 +843,16 @@ export class ConsolidatedUnderwritingEngine {
       decision,
       loanType: targetLoanType,
       calculatedLtv,
+      calculatedCltv,
+      calculatedHcltv,
       lookupLtv,
       calculatedDti,
       resolvedPmiMonthlyPremium,
       resolvedLlpafUpfrontFee,
       calculatedLiquidAssets,
+      calculatedPostClosingLiquidAssets,
+      calculatedRequiredReserves,
+      financedPropertiesCount: input.multipleFinancedProperties?.financedPropertiesCount ?? null,
       actualResidualIncome,
       requiredResidualIncome,
       rejectionReasons: reasons,

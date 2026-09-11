@@ -126,17 +126,32 @@ export interface StatusInfo {
   badgeColor: string;
 }
 
-export function getChecklistStatusInfo(isAllCaughtUp: boolean, pendingCount: number): StatusInfo {
-  if (isAllCaughtUp) {
+export function getChecklistStatusInfo(
+  isAllSubmitted: boolean,
+  pendingCount: number,
+  isAllVerified = false,
+): StatusInfo {
+  if (isAllVerified) {
     return {
       icon: CheckCircle2,
       iconColor: "text-success-subtle-foreground",
       bgColor: "bg-success/20",
       borderColor: "border-border/30",
-      title: "You're all caught up!",
-      subtitle: "All currently requested documents have been submitted",
+      title: "Your documents are verified",
+      subtitle: "Your loan team has accepted every currently requested document",
       badgeText: "Complete",
       badgeColor: "bg-success text-success-foreground",
+    };
+  } else if (isAllSubmitted) {
+    return {
+      icon: Clock,
+      iconColor: "text-warning-subtle-foreground",
+      bgColor: "bg-warning/20",
+      borderColor: "border-border/30",
+      title: "Everything requested is submitted",
+      subtitle: "Your loan team is reviewing the documents you sent",
+      badgeText: "Under review",
+      badgeColor: "bg-warning text-warning-foreground",
     };
   } else if (pendingCount <= 3) {
     return {

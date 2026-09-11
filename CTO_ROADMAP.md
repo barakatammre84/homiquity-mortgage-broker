@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `5f3c086b61d5ad61f80f511367e888c13a9a2e5c` on 2026-09-11.
+**Audited production baseline:** `4bc1a880581a921b30ea951dbd788f089b9d705e` on 2026-09-11.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -47,7 +47,7 @@ lender results never satisfy a verified decision or lender-acceptance gate.
 
 ## What is real today
 
-Production served the exact `main` commit above on 2026-09-10. Health and the scheduled core-proof
+Production served the exact `main` commit above on 2026-09-11. Health and the scheduled core-proof
 route returned successfully, and the service reported SendGrid email configured. The repository
 has a strict required test gate, automatic production migrations and post-deploy commit
 verification. On that exact build, a borrower-data-free sweep passed Homi's grounded status turn,
@@ -65,6 +65,17 @@ calculation actually uses. A difference is visible to the reviewer and must be a
 reason; it cannot be accepted silently. Staff can create an append-only bank-statement analysis
 from reviewed deposit evidence while explicitly removing transfers, refunds, duplicates and other
 ineligible deposits.
+
+The current release candidate extends that evidence chain across a complicated household. It
+keeps credit, employment and other income attributed to the correct borrower; carries real-estate
+owned, housing costs and subordinate financing through the decision; and records tax treatment,
+continuance and virtual-currency exclusions for other income. Business liquidity must tie its
+current assets, current liabilities and inventory to reviewed Schedule L facts. Each current and
+prior self-employment year must tie to reviewed Schedule C or K-1 income. A 12- or 24-month
+bank-statement analysis cannot be saved or approved until reviewed, dated statements prove the
+selected consecutive period. Plaid-normalized withdrawals cannot be mistaken for large deposits.
+These changes are locally proven and remain **Built** until this release is deployed and its exact
+production commit passes the same gates.
 
 The underwriting release now keeps the mortgage program explicit from URLA through pricing,
 qualification, decision fingerprints, loan-option comparisons and preapproval letters. The fast
@@ -141,7 +152,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Guide the borrower with Homi | **Live · production canary and bounded document-evidence read proven** | Complete the 30-turn/10-eligible-borrower instrumentation pilot, then register and power the comparison study before enrollment. The pilot floor cannot prove a treatment effect. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
-| Review complicated income | **Built · exact evidence lineage, reconciliation and production engine repeatability proven** | Populate the protected extraction benchmark; then a licensed reviewer must reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
+| Review complicated income | **Built · borrower-specific income, exact Schedule C/K-1/Schedule L evidence ties, statement-period controls and production engine repeatability proven** | Capital gains, asset depletion and a known future income reduction still require cited policy and implementation. Populate the protected extraction benchmark; then a licensed reviewer must reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
 | Explain options and decisions | **Built · product intent, stale evidence and unsupported policy fail closed** | Implement cited FHA/USDA policy only after a selected lender requires it; real credit, verification, AUS and pricing evidence must support the decision and the first lender must accept the result. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built · XSD proven internally** | One approved lender accepts the multi-borrower MISMO, income and final AUS artifacts and completes an acknowledgement/correction exchange. |
@@ -185,7 +196,10 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    scheduled core proof now checks mixed W-2, Schedule C and rental analysis plus repeatable
    underwriting against deployed policy rows. Current workpapers cite the reviewed numeric facts,
    reconcile them to the calculation inputs, and invalidate downstream decisions when evidence
-   changes. Pricing, options, approval and stage advancement independently re-resolve that proof.
+   changes. Schedule L business liquidity, current/prior Schedule C or K-1 income and the complete
+   dated 12/24-month statement period now have explicit evidence gates; other-income tax treatment,
+   continuance and virtual-currency exclusions remain borrower-specific. Pricing, options, approval
+   and stage advancement independently re-resolve that proof.
    Program intent now remains explicit across the same chain: a preliminary conventional candidate
    preserves fast intake, verified/outward decisions require the URLA selection, veteran status
    cannot switch the product, equal-payment offers remain policy-distinct, and unsupported product

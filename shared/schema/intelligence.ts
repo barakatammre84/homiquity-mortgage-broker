@@ -141,13 +141,22 @@ export const realEstateOwned = pgTable("real_estate_owned", {
 
   marketValue: decimal("market_value", { precision: 14, scale: 2 }),
   mortgageBalance: decimal("mortgage_balance", { precision: 14, scale: 2 }),
+  // A HELOC is part of aggregate UPB for the multiple-financed-property
+  // reserve calculation (Fannie B3-4.1-01). Keep it separate from the first
+  // mortgage so a borrower does not have to hide two obligations in one total.
+  helocBalance: decimal("heloc_balance", { precision: 14, scale: 2 }),
   mortgagePayment: decimal("mortgage_payment", { precision: 10, scale: 2 }),
+  helocPayment: decimal("heloc_payment", { precision: 10, scale: 2 }),
   monthlyRentalIncome: decimal("monthly_rental_income", { precision: 10, scale: 2 }),
   monthlyInsurance: decimal("monthly_insurance", { precision: 10, scale: 2 }),
   monthlyTaxes: decimal("monthly_taxes", { precision: 10, scale: 2 }),
   monthlyHoa: decimal("monthly_hoa", { precision: 10, scale: 2 }),
 
   occupancyType: varchar("occupancy_type", { length: 50 }),
+  // B2-2-03 counts a financed property only when a borrower is personally
+  // obligated on its mortgage. This matters for LLC-held rentals, a common
+  // complex-borrower pattern; null means the question has not been answered.
+  personallyObligated: boolean("personally_obligated"),
   status: varchar("status", { length: 50 }).default("retained"),
   willBeSold: boolean("will_be_sold").default(false),
   willBeRented: boolean("will_be_rented").default(false),

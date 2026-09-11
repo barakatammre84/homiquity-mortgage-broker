@@ -6,6 +6,7 @@ import {
   computeSelfEmploymentQualifyingIncome,
   type SelfEmploymentIncomeResult,
 } from "../../selfEmploymentIncome";
+import type { CurrentProfitLossSignal, ProfitLossActivityIssue } from "../../profitLossActivity";
 
 /**
  * Self-employment path (UAL P3) — a thin wrapper over the cited Fannie Form
@@ -27,7 +28,11 @@ export interface SelfEmploymentComputation {
   perJob: SelfEmploymentIncomeResult[];
 }
 
-export function computeSelfEmploymentPath(employment: EmploymentHistory[]): SelfEmploymentComputation {
+export function computeSelfEmploymentPath(
+  employment: EmploymentHistory[],
+  currentActivity: CurrentProfitLossSignal[] = [],
+  currentActivityIssues: ProfitLossActivityIssue[] = [],
+): SelfEmploymentComputation {
   const seJobs = employment.filter((e) => e.isSelfEmployed);
   const perJob: SelfEmploymentIncomeResult[] = [];
   const notes: string[] = [];
@@ -36,6 +41,14 @@ export function computeSelfEmploymentPath(employment: EmploymentHistory[]): Self
   const missingItems: string[] = [];
 
   for (const e of seJobs) {
+    if (e.paidInVirtualCurrency === true) {
+      notes.push(`${e.employerName?.trim() || "Self-employment income"} excluded because the income is earned in virtual currency.`);
+      continue;
+    }
+    if (e.paidInVirtualCurrency !== false) {
+      requiresManualReview = true;
+      notes.push(`Confirm whether ${e.employerName?.trim() || "the listed business"} earns any borrower income in virtual currency.`);
+    }
     if (!isSelfEmploymentWorksheetComplete(e.selfEmploymentIncome)) {
       missingItems.push(
         `Complete the self-employment income worksheet for ${e.employerName?.trim() || "each listed business"}`,
@@ -47,6 +60,16 @@ export function computeSelfEmploymentPath(employment: EmploymentHistory[]): Self
     monthly += se.monthlyQualifyingIncome;
     requiresManualReview = requiresManualReview || se.requiresManualReview;
     notes.push(...se.notes);
+    const activity = currentActivity.find(signal => signal.employmentId === e.id);
+    if (activity) {
+      requiresManualReview = requiresManualReview || activity.requiresManualReview;
+      notes.push(activity.note);
+    }
+    const activityIssues = currentActivityIssues.filter(issue => issue.employmentId === e.id);
+    if (activityIssues.length > 0) {
+      requiresManualReview = true;
+      notes.push(...activityIssues.map(issue => issue.message));
+    }
   }
 
   if (missingItems.length > 0) {

@@ -1,60 +1,18 @@
 /**
- * Other-income type catalog — the ONE vocabulary for URLA Section 1e income.
+ * Other-income type catalog — the shared vocabulary for URLA Section 1e.
  *
- * WHY THIS EXISTS. Until this module, the twenty income types a borrower can
- * declare lived only as display strings in a client-only constant
- * (`client/src/pages/borrower/urla/types.ts`), were written into a free-text
- * `other_income_sources.income_source varchar(100)`, and reached the engine as
- * opaque text. The consequence is in `server/services/income/paths/agencyWage.ts`:
- * every source is summed at 100% of face value because nothing downstream can
- * tell Social Security from Child Support from Capital Gains.
+ * The cross-cutting B3-3.1-01 rules no longer depend on this catalog. URLA
+ * captures tax treatment, the non-taxable amount, defined expiration and
+ * virtual-currency payment for every source. The deterministic agency-income
+ * path excludes virtual-currency income, removes income that will not continue
+ * for three years from the expected note date, and applies the documented 25%
+ * non-taxable adjustment only through a current approved income workpaper.
  *
- * That single fact blocks four separate capabilities at once — non-taxable
- * gross-up, continuance testing, a capital-gains path, and any per-type
- * document request. None of them can be built on a string a human typed into a
- * picker; all of them are one `switch` away once the type is a value.
- *
- * WHAT THIS MODULE DELIBERATELY DOES NOT DO: decide how any type qualifies.
- * `qualifyingAuthority` is `null` for every entry today. That is still the
- * honest state — but as of 2026-08-22 the REASON changed, and the old reason is
- * no longer true.
- *
- * The old reason was "there is no Selling Guide income chapter in-repo". There
- * is now: the founder supplied the 08-05-2026 edition, and the two rules this
- * module names are both in it —
- *   * non-taxable gross-up — B3-3.1-01, Nontaxable Income: add "an amount
- *     equivalent to 25% of the nontaxable income", or the actual tax amount if
- *     a wage earner in a similar bracket would pay more than 25%;
- *   * continuance — B3-3.1-01, Continuance of Income: income with a defined
- *     expiration date, or dependent on depletion of an asset, must be
- *     documented to continue at least THREE YEARS from the note date.
- *
- * They stay uncomputed for two different reasons, and the difference matters:
- *   * GROSS-UP raises qualifying income, which LOOSENS the DTI gate. This
- *     repo's rail lets a reading tighten a gate or remove a borrower charge —
- *     never loosen one. Applying it is a founder decision, not an agent's.
- *   * CONTINUANCE removes income, which tightens — allowed — but
- *     `other_income_sources` carries only `income_source` and `monthly_amount`.
- *     There is no expiration date to test against, so the rule is
- *     unimplementable until that is captured.
- *
- * Both are recorded in knowledge-base/compliance/SELLING_GUIDE_CONFORMANCE.md.
- *
- * Filling one in is still a three-part change, in this order and never fewer:
- *   1. the authority is available AND the citation points at a TRACKED file;
- *   2. a `data/regulatory/regulatory-ledger.json` entry cites it;
- *   3. `qualifyingAuthority` points at the doc and section, and the calculator
- *      that consumes it ships in the same commit.
- * `tests/incomeTypes.test.ts` enforces step 3 mechanically with `fs.existsSync`:
- * a citation naming a file that is not on disk fails the suite.
- *
- * 🚨 STEP 1 HAS A TRAP NOW. The repo went public on 2026-08-22, so the Guide PDF
- * and its full text extraction are GITIGNORED (see .gitignore and
- * scripts/extract-selling-guide.py). Citing
- * `docs/fannie-mae/selling-guide/selling-guide-text.txt` would pass on your
- * machine and FAIL in CI, where the fresh clone does not have it. Cite the
- * tracked `docs/fannie-mae/selling-guide/section-index.tsv` — or the conformance
- * ledger — and name the section in `section`.
+ * `qualifyingAuthority` remains type-specific. A null value means Homiquity has
+ * no in-repo rule for that income family's own history, document and calculation
+ * method; it does not disable the cross-cutting safety rules above. Any future
+ * citation must name a tracked file and ship with the calculator that consumes
+ * it. `tests/incomeTypes.test.ts` enforces that boundary.
  */
 
 export const OTHER_INCOME_TYPE_IDS = [

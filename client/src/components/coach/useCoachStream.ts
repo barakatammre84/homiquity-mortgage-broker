@@ -103,7 +103,11 @@ export function useCoachStream(opts: {
     setTurn((t) => ({
       ...IDLE_TURN,
       captured: t.captured,
-      panel: { suggestions: t.panel.suggestions },
+      panel: {
+        suggestions: t.panel.suggestions,
+        documentEvidence: t.panel.documentEvidence,
+        documentChecklist: t.panel.documentChecklist,
+      },
       degraded: t.degraded,
     }));
   }, [flushText, queryClient]);
@@ -125,7 +129,11 @@ export function useCoachStream(opts: {
         status: "streaming",
         degraded: !!data.degraded,
         captured: data.captured ? [...t.captured, { ...data.captured, at: Date.now() }] : t.captured,
-        panel: data.suggestions ? { ...t.panel, suggestions: data.suggestions } : t.panel,
+        panel: {
+          ...t.panel,
+          ...(data.suggestions ? { suggestions: data.suggestions } : {}),
+          ...(data.documentEvidence ? { documentEvidence: data.documentEvidence } : {}),
+        },
       }));
       await finalize(data.conversationId ?? conversationId);
     },

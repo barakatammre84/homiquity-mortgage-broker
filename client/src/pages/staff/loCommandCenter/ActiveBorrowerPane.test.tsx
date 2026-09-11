@@ -21,6 +21,18 @@ const cockpit = (paths: CockpitData["income"] extends null ? never : NonNullable
     decisionGradeBlockers: [],
     closingDate: null, createdAt: null,
   },
+  reportedIncome: {
+    householdAnnualTotal: 87000,
+    employmentType: "employed",
+    detailedAnnualTotal: 15000,
+    unitemizedAnnualAmount: 72000,
+    breakdownExceedsHouseholdTotal: false,
+    sources: [{
+      type: "self_employed", annualAmount: 15000, name: "Side Studio", yearsInRole: "3",
+      businessStructure: "single_member_llc", ownershipPercent: "100", rentalPropertyCount: 0,
+    }],
+    rental: null,
+  },
   income: {
     primaryMonthlyQualifyingIncome: 7250,
     incomeBasis: "urla_line_items",
@@ -155,6 +167,50 @@ describe("ActiveBorrowerPane — the qualifying-income list reconciles", () => {
     expect(screen.getByTestId("cockpit-next-action-control").textContent).toMatch(/draft doc request/i);
     expect(screen.getByTestId("cockpit-top-signal").textContent).toMatch(/rental income offset/i);
     expect(screen.getByTestId("cockpit-file-plan").textContent).toMatch(/0\/1 verified · 6 open/i);
+  });
+
+  it("separates the reported mixed-income story from an application-summary fallback", async () => {
+    const data = cockpit([
+      {
+        pathId: "agency_wage", role: "component", status: "applicable", kind: "dti_income",
+        monthlyQualifyingIncome: 15000, appliedToDti: true,
+        appliedMonthlyIncome: 15000, requiresManualReview: false,
+      },
+    ]);
+    data.application.currentDecisionGrade = false;
+    data.income!.incomeBasis = "application_summary";
+    data.reportedIncome = {
+      householdAnnualTotal: 180000,
+      employmentType: "employed",
+      detailedAnnualTotal: 101600,
+      unitemizedAnnualAmount: 78400,
+      breakdownExceedsHouseholdTotal: false,
+      sources: [
+        {
+          type: "self_employed", annualAmount: 50000, name: "North Star Consulting", yearsInRole: "4",
+          businessStructure: "single_member_llc", ownershipPercent: "100", rentalPropertyCount: 0,
+        },
+        {
+          type: "rental", annualAmount: 51600, name: null, yearsInRole: null,
+          businessStructure: null, ownershipPercent: null, rentalPropertyCount: 2,
+        },
+      ],
+      rental: {
+        propertyCount: 2, grossMonthlyRent: 4300, planningMonthlyRent: 3225,
+        monthlyPropertyPayments: 2500, preliminaryMonthlyOffset: 725,
+      },
+    };
+
+    renderPane(data);
+    await waitFor(() => expect(screen.getByTestId("cockpit-reported-income")).toBeTruthy());
+    const pane = screen.getByTestId("cockpit-active-borrower");
+    expect(pane.textContent).toMatch(/Household total.*\$180,000\/yr/i);
+    expect(pane.textContent).toMatch(/employed.*not itemized.*\$78,400\/yr/i);
+    expect(pane.textContent).toMatch(/North Star Consulting.*\$50,000\/yr/i);
+    expect(screen.getByTestId("cockpit-reported-rental").textContent).toMatch(/\$4,300\/mo gross.*\$3,225\/mo.*\$2,500\/mo.*\+\$725\/mo/i);
+    expect(pane.textContent).toContain("Household Total Fallback");
+    expect(pane.textContent).not.toContain("Agency Wage");
+    expect(screen.getByTestId("cockpit-income-unverified").textContent).toMatch(/does not establish W-2 or qualifying income/i);
   });
 
   it("prioritizes an unread borrower message ahead of document follow-up", () => {

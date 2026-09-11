@@ -74,21 +74,86 @@ describe("income path ids have exactly one declaration", () => {
   });
 });
 
-describe("the agency-wage path surfaces what it is carrying at face value", () => {
-  const other = (incomeSource: string, monthlyAmount: string) =>
-    ({ id: "x", applicationId: "a", incomeSource, monthlyAmount, createdAt: null }) as never;
+describe("the agency-wage path qualifies other income conservatively", () => {
+  const other = (incomeSource: string, monthlyAmount: string, extra: Record<string, unknown> = {}) =>
+    ({ id: "x", applicationId: "a", incomeSource, monthlyAmount, createdAt: null, paidInVirtualCurrency: false, ...extra }) as never;
 
-  it("names the uncited types instead of silently applying 100%", () => {
+  it("keeps unanswered tax and continuance treatment visible for review", () => {
     const r = computeAgencyWageIncome({
       employment: [],
       otherIncome: [other("Social Security", "2000"), other("Child Support", "500")],
     });
     // The FIGURE is unchanged and deliberately so — face value, no factor.
     expect(r.path.monthlyQualifyingIncome).toBe(2500);
-    const note = r.path.notes.find((n) => n.includes("declared face value"));
-    expect(note, "an uncited-treatment note must be emitted").toBeDefined();
+    const note = r.path.notes.find((n) => n.includes("needs confirmation"));
+    expect(note, "an unresolved-treatment note must be emitted").toBeDefined();
     expect(note).toContain("Child Support");
     expect(note).toContain("Social Security");
+    expect(r.path.requiresManualReview).toBe(true);
+  });
+
+  it("applies the 25% gross-up only in the approved-workpaper calculation", () => {
+    const source = other("Social Security", "2000", {
+      taxTreatment: "fully_non_taxable",
+      hasDefinedExpiration: false,
+    });
+    const preliminary = computeAgencyWageIncome({ employment: [], otherIncome: [source] });
+    const approved = computeAgencyWageIncome({
+      employment: [],
+      otherIncome: [source],
+      applyVerifiedOtherIncomeAdjustments: true,
+    });
+    expect(preliminary.path.monthlyQualifyingIncome).toBe(2000);
+    expect(approved.path.monthlyQualifyingIncome).toBe(2500);
+    expect(approved.path.notes.join(" ")).toContain("25% of the verified nontaxable portion");
+  });
+
+  it("excludes income that ends before three years after the note date", () => {
+    const r = computeAgencyWageIncome({
+      employment: [],
+      otherIncome: [other("Child Support", "1200", {
+        taxTreatment: "fully_non_taxable",
+        hasDefinedExpiration: true,
+        expirationDate: "2028-12-31",
+      })],
+      expectedNoteDate: "2026-01-01",
+      applyVerifiedOtherIncomeAdjustments: true,
+    });
+    expect(r.path.monthlyQualifyingIncome).toBe(0);
+    expect(r.path.notes.join(" ")).toContain("excluded");
+  });
+
+  it("keeps qualifying income that continues at least three years", () => {
+    const r = computeAgencyWageIncome({
+      employment: [],
+      otherIncome: [other("Child Support", "1200", {
+        taxTreatment: "fully_non_taxable",
+        hasDefinedExpiration: true,
+        expirationDate: "2029-01-01",
+      })],
+      expectedNoteDate: "2026-01-01",
+      applyVerifiedOtherIncomeAdjustments: true,
+    });
+    expect(r.path.monthlyQualifyingIncome).toBe(1500);
+    expect(r.path.requiresManualReview).toBe(false);
+  });
+
+  it("excludes employment and other income paid in virtual currency", () => {
+    const r = computeAgencyWageIncome({
+      employment: [{
+        isSelfEmployed: false,
+        employerName: "Crypto Payroll Co",
+        baseIncome: "5000",
+        paidInVirtualCurrency: true,
+      } as never],
+      otherIncome: [other("Other", "800", {
+        taxTreatment: "taxable",
+        hasDefinedExpiration: false,
+        paidInVirtualCurrency: true,
+      })],
+    });
+    expect(r.path.monthlyQualifyingIncome).toBe(0);
+    expect(r.path.notes.join(" ")).toMatch(/excluded.*virtual currency/i);
   });
 
   it("reports an unrecognised stored value rather than guessing its type", () => {
@@ -108,6 +173,6 @@ describe("the agency-wage path surfaces what it is carrying at face value", () =
       otherIncome: [],
       fallbackAnnualIncome: 96000,
     });
-    expect(r.path.notes.some((n) => n.includes("face value") || n.includes("unrecognised"))).toBe(false);
+    expect(r.path.notes.some((n) => n.includes("confirmation") || n.includes("unrecognised"))).toBe(false);
   });
 });

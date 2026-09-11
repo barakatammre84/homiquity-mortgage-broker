@@ -17,7 +17,15 @@ const CATEGORY_OF: Record<string, string> = Object.fromEntries(
   DOCUMENT_CATEGORIES.flatMap((cat) => cat.documents.map((d) => [d.type, cat.name])),
 );
 
-export function UploadedDocumentsTable({ documents }: { documents: Document[] }) {
+export function UploadedDocumentsTable({
+  documents,
+  title = "All Uploaded Documents",
+  scopeLabel = "in your file",
+}: {
+  documents: Document[];
+  title?: string;
+  scopeLabel?: string;
+}) {
   const titles = Object.fromEntries(
     documents.map((d) => [d.documentType, docTypeName(d.documentType)]),
   );
@@ -65,10 +73,10 @@ export function UploadedDocumentsTable({ documents }: { documents: Document[] })
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FileText className="h-5 w-5" />
-          All Uploaded Documents
+          {title}
         </CardTitle>
         <CardDescription>
-          {documents.length} document{documents.length !== 1 ? "s" : ""} in your file
+          {documents.length} document{documents.length !== 1 ? "s" : ""} {scopeLabel}
         </CardDescription>
       </CardHeader>
       <CardContent>

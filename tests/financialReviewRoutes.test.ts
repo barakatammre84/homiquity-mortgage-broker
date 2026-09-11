@@ -6,8 +6,11 @@ import { BASE_URL } from "./setup";
 const applicationId = randomUUID();
 const outsideApplicationId = randomUUID();
 let borrowerId = randomUUID();
-const documentTypes = ["pay_stub", "schedule_k1", "business_bank_statement", "lease_agreement", "bank_statement_checking", "credit_report", "business_bank_statement"];
+const documentTypes = ["pay_stub", "schedule_k1", "business_tax_return_1120s", "lease_agreement", "bank_statement_checking", "credit_report", "business_bank_statement"];
 const documentIds = documentTypes.map(() => randomUUID());
+const liquidityFormId = randomUUID();
+const currentK1FormId = randomUUID();
+const priorK1FormId = randomUUID();
 const businessEntityId = randomUUID();
 const otherBusinessEntityId = randomUUID();
 const workpaperIds: string[] = [];
@@ -51,8 +54,12 @@ beforeAll(async () => {
 
   const rental = [{ type: "rental", annualAmount: "0", rentalProperties: [{ address: "10 Rental Way", monthlyRentalIncome: "3000", monthlyDebtPayment: "1800" }] }];
   await pool.query(
-    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources) VALUES ($1,$3,'processing','purchase','conventional','650000','130000','160000','self_reported',$4::jsonb),($2,$3,'draft','purchase','conventional','400000','80000','90000','self_reported','[]'::jsonb)",
+    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources,owns_other_real_estate) VALUES ($1,$3,'processing','purchase','conventional','650000','130000','160000','self_reported',$4::jsonb,true),($2,$3,'draft','purchase','conventional','400000','80000','90000','self_reported','[]'::jsonb,false)",
     [applicationId, outsideApplicationId, borrowerId, JSON.stringify(rental)],
+  );
+  await pool.query(
+    "INSERT INTO real_estate_owned (application_id,user_id,property_address,property_type,market_value,mortgage_balance,heloc_balance,mortgage_payment,heloc_payment,monthly_rental_income,monthly_insurance,monthly_taxes,monthly_hoa,occupancy_type,status,will_be_sold,will_be_rented,personally_obligated,verification_source) VALUES ($1,$2,'10 Rental Way','single_family','420000','200000','0','1400','0','3000','100','250','50','investment','retained',false,true,true,'borrower_stated')",
+    [applicationId, borrowerId],
   );
   await pool.query("INSERT INTO deal_team_members (application_id,user_id,team_role,is_active) VALUES ($1,'test-lo','loan_officer',true)", [applicationId]);
 
@@ -62,15 +69,15 @@ beforeAll(async () => {
     ownershipPercent: 60,
     confirmedByBorrowerAt: "2026-09-04T12:00:00.000Z",
     k1: {
-      currentYear: { ordinaryBusinessIncome: 90000, netRentalRealEstateIncome: 0, otherNetRentalIncome: 0, guaranteedPayments: 0, distributionsReceived: 40000 },
-      priorYear: { ordinaryBusinessIncome: 80000, netRentalRealEstateIncome: 0, otherNetRentalIncome: 0, guaranteedPayments: 0, distributionsReceived: 35000 },
+      currentYear: { taxYear: 2025, ordinaryBusinessIncome: 90000, netRentalRealEstateIncome: 0, otherNetRentalIncome: 0, guaranteedPayments: 0, distributionsReceived: 40000 },
+      priorYear: { taxYear: 2024, ordinaryBusinessIncome: 80000, netRentalRealEstateIncome: 0, otherNetRentalIncome: 0, guaranteedPayments: 0, distributionsReceived: 35000 },
       hasTwoYearGuaranteedPayments: false,
       liquidity: { currentAssets: 120000, currentLiabilities: 50000, inventory: 10000 },
       w2FromBusiness: 48000,
     },
   };
   await pool.query(
-    "INSERT INTO employment_history (id,application_id,borrower_sequence_number,employment_type,employer_name,is_self_employed,self_employment_income) VALUES ($1,$3,1,'self_employed','Fictional S Corp',true,$4::jsonb),($2,$3,2,'full_time','Fictional Hospital',false,NULL)",
+    "INSERT INTO employment_history (id,application_id,borrower_sequence_number,employment_type,employer_name,is_self_employed,self_employment_income,paid_in_virtual_currency) VALUES ($1,$3,1,'self_employed','Fictional S Corp',true,$4::jsonb,false),($2,$3,2,'full_time','Fictional Hospital',false,NULL,false)",
     [randomUUID(), randomUUID(), applicationId, JSON.stringify(worksheet)],
   );
   await pool.query(
@@ -78,6 +85,10 @@ beforeAll(async () => {
     [businessEntityId, otherBusinessEntityId, borrowerId, applicationId],
   );
   await pool.query("UPDATE employment_history SET base_income='6000',total_monthly_income='6000' WHERE application_id=$1 AND borrower_sequence_number=2", [applicationId]);
+  await pool.query(
+    "INSERT INTO other_income_sources (application_id,borrower_sequence_number,income_source,monthly_amount,tax_treatment,has_defined_expiration,paid_in_virtual_currency) VALUES ($1,2,'Retirement (e.g., Pension, IRA)','1000','taxable',false,false)",
+    [applicationId],
+  );
   await pool.query("INSERT INTO urla_assets (application_id,borrower_sequence_number,account_type,financial_institution,account_number_last4,cash_or_market_value) VALUES ($1,1,'checking','Fictional Bank','1234','90000'),($1,2,'401k','Fictional Retirement','5678','120000')", [applicationId]);
   await pool.query("INSERT INTO urla_liabilities (application_id,borrower_sequence_number,liability_type,creditor_name,account_number_last4,unpaid_balance,monthly_payment) VALUES ($1,1,'credit_card','Fictional Card','9999','5000','250'),($1,2,'student_loan','Fictional Servicer','8888','20000','0')", [applicationId]);
 
@@ -89,6 +100,36 @@ beforeAll(async () => {
     const subjectId = index === 2 ? businessEntityId : index === 6 ? otherBusinessEntityId : applicationId;
     await pool.query("INSERT INTO document_lineage (application_id,document_id,lineage_id,version_number,content_sha256,subject_type,subject_id,recorded_by_user_id) VALUES ($1,$2,$2,1,$3,$4,$5,'test-lo')", [applicationId, id, `${index + 1}`.padStart(64, "a"), businessDocument ? "business" : "application", subjectId]);
     await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,$2,'1000','currency','0.99','fixture',true,'test-lo',now())", [id, `${type}_amount`]);
+  }
+  await pool.query(
+    "INSERT INTO logical_documents (id,loan_id,borrower_id,document_type,aggregated_confidence,status,tax_year,source_document_id,business_entity_id,page_start,page_end,is_complete,verified_by_user_id,verified_at) VALUES ($1,$2,$3,'business_tax_return_1120s','0.99','accepted',2025,$4,$5,1,2,true,'test-lo',now())",
+    [liquidityFormId, applicationId, borrowerId, documentIds[2], businessEntityId],
+  );
+  for (const [fieldName, value] of [
+    ["scheduleLCashEndOfYear", 100000],
+    ["scheduleLReceivablesEndOfYear", 10000],
+    ["scheduleLInventoriesEndOfYear", 10000],
+    ["scheduleLAccountsPayableEndOfYear", 30000],
+    ["scheduleLShortTermDebtEndOfYear", 10000],
+    ["scheduleLOtherCurrentLiabilitiesEndOfYear", 10000],
+  ] as const) {
+    await pool.query(
+      "INSERT INTO extracted_fields (document_id,logical_document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,$2,2,$3,$4,'currency','0.99','fixture',true,'test-lo',now())",
+      [documentIds[2], liquidityFormId, fieldName, String(value)],
+    );
+  }
+  for (const [formId, taxYear, ordinaryIncome] of [
+    [currentK1FormId, 2025, 90000],
+    [priorK1FormId, 2024, 80000],
+  ] as const) {
+    await pool.query(
+      "INSERT INTO logical_documents (id,loan_id,borrower_id,document_type,aggregated_confidence,status,tax_year,source_document_id,business_entity_id,page_start,page_end,is_complete,verified_by_user_id,verified_at) VALUES ($1,$2,$3,'schedule_k1','0.99','accepted',$4,$5,$6,1,1,true,'test-lo',now())",
+      [formId, applicationId, borrowerId, taxYear, documentIds[1], businessEntityId],
+    );
+    await pool.query(
+      "INSERT INTO extracted_fields (document_id,logical_document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,$2,1,'ordinaryBusinessIncomeOrLoss',$3,'currency','0.99','fixture',true,'test-lo',now())",
+      [documentIds[1], formId, String(ordinaryIncome)],
+    );
   }
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'monthly_income_ytd_avg','6000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'employer_name','Fictional Hospital','string','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
@@ -131,8 +172,12 @@ describe.sequential("financial workpapers and cited memo", () => {
     const assetPaper = current.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation");
     const liabilities = current.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
     expect(income.output.borrowerBreakdown.map((row: { borrowerSequenceNumber: number }) => row.borrowerSequenceNumber)).toEqual([1, 2]);
+    expect(income.output.borrowerBreakdown).toContainEqual({ borrowerSequenceNumber: 2, monthlyIncome: 7000 });
     expect(selfEmployed.output.result.monthlyQualifyingIncome).toBeCloseTo(11083.33, 2);
+    expect(selfEmployed.input.evidenceComparisons.filter((row: { label: string }) => row.label.endsWith("Ordinary business income or loss"))).toHaveLength(2);
     expect(liquidity.output).toMatchObject({ method: "quick_ratio", quickRatio: 2.2, supportsOrdinaryIncome: true });
+    expect(liquidity.input.evidenceComparisons).toHaveLength(3);
+    expect(liquidity.input.evidenceComparisons.every((row: { status: string }) => row.status === "match")).toBe(true);
     expect(rentalPaper.output.result.appliedMonthlyIncome).toBe(450);
     expect(liabilities.output.result.totalMonthlyPayment).toBe(450);
     expect(current.workpapers.flatMap((row: { sources: Array<{ contentFingerprint: string | null }> }) => row.sources).every((source: { contentFingerprint: string | null }) => source.contentFingerprint?.length === 64)).toBe(true);
@@ -221,11 +266,196 @@ describe.sequential("financial workpapers and cited memo", () => {
     })).status).toBe(201);
   });
 
+  it("rebuilds the liability workpaper around a current bureau ledger and requires discrepancy acknowledgement", async () => {
+    const consentId = randomUUID();
+    const creditPullId = randomUUID();
+    const bureauLiabilities = [
+      { creditor: "Fictional Card", type: "credit_card", balance: 5000, monthlyPayment: 250 },
+      { creditor: "Fictional Servicer", type: "student_loan", balance: 20000, monthlyPayment: 0, deferred: true },
+      { creditor: "Fictional Auto", type: "auto", balance: 12000, monthlyPayment: 300 },
+    ];
+    const borrowerScores = [
+      { borrowerSequenceNumber: 1, experianScore: 720, equifaxScore: 730, transunionScore: 740, representativeScore: 730 },
+      { borrowerSequenceNumber: 2, experianScore: 760, equifaxScore: 750, transunionScore: 770, representativeScore: 760 },
+    ];
+    await pool.query(
+      "INSERT INTO credit_consents (id,application_id,user_id,consent_type,disclosure_version,disclosure_text,consent_given,consent_timestamp,borrower_full_name,is_active) VALUES ($1,$2,$3,'soft_pull','fixture-v1','Fictional integration disclosure',true,now(),'Fictional Owner',true)",
+      [consentId, applicationId, borrowerId],
+    );
+    await pool.query(
+      "INSERT INTO credit_pulls (id,application_id,consent_id,requested_by,pull_type,bureaus,status,external_request_id,experian_score,equifax_score,transunion_score,representative_score,borrower_scores,total_tradelines,open_tradelines,total_debt,monthly_payments,liabilities,vendor_request_id,is_simulated,completed_at,expires_at) VALUES ($1,$2,$3,$4,'tri_merge',ARRAY['experian','equifax','transunion'],'completed','fixture-external',720,730,740,730,$6::jsonb,3,3,'37000','550',$5::jsonb,'fixture-vendor-request',false,now(),now() + interval '120 days')",
+      [creditPullId, applicationId, consentId, borrowerId, JSON.stringify(bureauLiabilities), JSON.stringify(borrowerScores)],
+    );
+
+    const changed = await workspace();
+    const staleLiability = changed.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
+    expect(staleLiability.isCurrent).toBe(false);
+    expect(changed.memo.isCurrent).toBe(false);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const refreshed = await workspace();
+    const liability = refreshed.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
+    expect(liability.output).toMatchObject({
+      decisionMonthlyPayment: 750,
+      bureau: {
+        pullId: creditPullId,
+        representativeScore: 730,
+        borrowerScores,
+        reportedMonthlyPayments: 550,
+        adjustedMonthlyDebt: 750,
+        tradelineCount: 3,
+      },
+    });
+    const comparison = liability.input.evidenceComparisons.find((row: { kind: string }) => row.kind === "liability");
+    expect(comparison).toMatchObject({ status: "variance", evidenceValue: 750, calculationValue: 450, variance: 300 });
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${liability.id}/review`, {
+      action: "approve",
+      reason: "Reviewed the current bureau liability ledger.",
+      expectedFingerprint: liability.inputFingerprint,
+    })).status).toBe(409);
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${liability.id}/review`, {
+      action: "approve",
+      reason: "Reviewed the current bureau liability ledger and application difference.",
+      expectedFingerprint: liability.inputFingerprint,
+      acknowledgedComparisonIds: [comparison.id],
+    })).status).toBe(201);
+  });
+
+  it("applies a documented $0 student-loan payment only after linking the accepted statement and current bureau line", async () => {
+    const currentCredit = await pool.query(
+      "SELECT id FROM credit_pulls WHERE application_id=$1 AND status='completed' ORDER BY completed_at DESC LIMIT 1",
+      [applicationId],
+    );
+    const creditPullId = currentCredit.rows[0].id as string;
+    const student = await pool.query(
+      "UPDATE urla_liabilities SET student_loan_repayment_plan='income_driven' WHERE application_id=$1 AND liability_type='student_loan' RETURNING id",
+      [applicationId],
+    );
+    const liabilityId = student.rows[0].id as string;
+
+    // The repayment-plan change invalidates the immutable prior workpaper.
+    // Prepare its current version before the reviewer sees treatment options.
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const available = await workspace();
+    const before = available.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
+    expect(before.output.treatmentCandidates).toContainEqual(expect.objectContaining({
+      liabilityId,
+      recommendedTreatment: "documented_zero_student_loan",
+      currentTreatment: null,
+    }));
+
+    const applied = await call(
+      "lo",
+      `/api/loan-applications/${applicationId}/financial-review/liabilities/${liabilityId}/treatment`,
+      {
+        treatment: "documented_zero_student_loan",
+        sourceDocumentId: documentIds[5],
+        creditPullId,
+        tradelineIndex: 1,
+      },
+    );
+    expect(applied.status).toBe(200);
+    expect((await workspace()).workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation").isCurrent).toBe(false);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const reviewed = await workspace();
+    const liability = reviewed.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
+    expect(liability.output.result.totalMonthlyPayment).toBe(250);
+    expect(liability.output.decisionMonthlyPayment).toBe(550);
+    expect(liability.output.treatmentCandidates).toContainEqual(expect.objectContaining({
+      liabilityId,
+      currentTreatment: "documented_zero_student_loan",
+      evidenceCurrent: true,
+      bureauLinkCurrent: true,
+    }));
+
+    const borrowerEdit = await fetch(`${BASE_URL}/api/urla/liabilities/${liabilityId}`, {
+      method: "PATCH",
+      headers: { Cookie: cookies.lo, Origin: BASE_URL, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        studentLoanRepaymentPlan: "deferred",
+        // A standard URLA writer cannot preserve or manufacture the staff-only
+        // exception when a reviewed basis fact changes.
+        underwritingTreatment: "documented_zero_student_loan",
+        treatmentSourceDocumentId: documentIds[5],
+      }),
+    });
+    expect(borrowerEdit.status).toBe(200);
+    const stored = await pool.query(
+      "SELECT underwriting_treatment,treatment_source_document_id,treatment_credit_pull_id,treatment_tradeline_index FROM urla_liabilities WHERE id=$1",
+      [liabilityId],
+    );
+    expect(stored.rows[0]).toEqual({
+      underwriting_treatment: null,
+      treatment_source_document_id: null,
+      treatment_credit_pull_id: null,
+      treatment_tradeline_index: null,
+    });
+  });
+
   it("marks the household workpaper and memo stale when a co-borrower figure changes", async () => {
     await pool.query("UPDATE employment_history SET base_income='6500',total_monthly_income='6500',updated_at=now() WHERE application_id=$1 AND borrower_sequence_number=2", [applicationId]);
     const changed = await workspace();
     expect(changed.workpapers.find((row: { kind: string }) => row.kind === "income_summary").isCurrent).toBe(false);
     expect(changed.memo.isCurrent).toBe(false);
-    expect(changed.currentApprovedCount).toBe(5);
+    expect(changed.currentApprovedCount).toBe(4);
+  });
+
+  it("blocks the asset workpaper on large deposits measured against reviewed qualifying income", async () => {
+    await pool.query(
+      "INSERT INTO verification_reports (application_id,user_id,provider,report_type,provider_request_id,status,total_balance,raw_payload,completed_at,expires_at) VALUES ($1,$2,'fixture-bank','voa','fixture-voa-large-deposit','completed','210000',$3::jsonb,now(),now() + interval '120 days')",
+      [applicationId, borrowerId, JSON.stringify({ transactions: [
+        { amount: -20_000, date: "2026-09-01", description: "Fictional wire" },
+        { amount: -2_000, date: "2026-09-02", description: "Fictional payroll" },
+      ] })],
+    );
+
+    const changed = await workspace();
+    const staleAsset = changed.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation");
+    expect(staleAsset.isCurrent).toBe(false);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const blocked = await workspace();
+    const asset = blocked.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation");
+    expect(asset.blockers.map((row: { message: string }) => row.message).join(" ")).toMatch(/large deposits/i);
+    expect(asset.input.subject.largeDepositSourcing).toMatchObject({
+      depositCount: 1,
+      totalFlaggedAmount: 20_000,
+      conditionStatus: "missing",
+    });
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${asset.id}/review`, {
+      action: "approve",
+      reason: "Reviewed available account evidence.",
+      expectedFingerprint: asset.inputFingerprint,
+    })).status).toBe(409);
+
+    const sourceRule = asset.input.subject.largeDepositSourcing.sourceRule;
+    await pool.query(
+      "INSERT INTO loan_conditions (application_id,category,title,description,priority,status,is_auto_generated,source_rule,cleared_by_user_id,cleared_at,clearance_notes) VALUES ($1,'assets','Large Deposit Sourcing','Fixture sourcing review','prior_to_approval','cleared',true,$2,'test-lo',now(),'Reviewed source and transfer trail.')",
+      [applicationId, sourceRule],
+    );
+    const resolved = await workspace();
+    expect(resolved.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation").isCurrent).toBe(false);
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const refreshed = await workspace();
+    const refreshedAsset = refreshed.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation");
+    expect(refreshedAsset.blockers).toHaveLength(0);
+    expect(refreshedAsset.input.subject.largeDepositSourcing.conditionStatus).toBe("cleared");
+  });
+
+  it("invalidates rental, asset, and household calculations when owned-property financing changes", async () => {
+    await pool.query(
+      "UPDATE real_estate_owned SET heloc_balance='10000',heloc_payment='100',updated_at=now() WHERE application_id=$1",
+      [applicationId],
+    );
+    const changed = await workspace();
+    expect(changed.workpapers.find((row: { kind: string }) => row.kind === "rental_cash_flow").isCurrent).toBe(false);
+    expect(changed.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation").isCurrent).toBe(false);
+    expect(changed.workpapers.find((row: { kind: string }) => row.kind === "income_summary").isCurrent).toBe(false);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const refreshed = await workspace();
+    expect(refreshed.workpapers.find((row: { kind: string }) => row.kind === "rental_cash_flow").output.result.appliedMonthlyIncome).toBe(350);
+    expect(refreshed.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation").input.subject.realEstateOwned[0].helocBalance).toBe("10000.00");
   });
 });

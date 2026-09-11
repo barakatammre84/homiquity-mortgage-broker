@@ -14,6 +14,7 @@ import {
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractProfitLossData,
   extractW2Data,
 } from "../extractionService";
 import { applyExtractionToDocument } from "./extractionPersistence";
@@ -61,12 +62,23 @@ import {
   prepareCoreTaxPacketRestartAttempt,
   recordCoreTaxPacketRestartProviderReady,
 } from "./coreTaxPacketRestartProof";
+import {
+  extractionDocumentType,
+  isTaxReturnDocumentType,
+} from "@shared/documentTypes";
 
 export const STANDARD_AUTO_EXTRACT_TYPES = [
   "pay_stub",
+  "paystub",
   "w2",
   "bank_statement",
+  "bank_statement_checking",
+  "bank_statement_savings",
+  "bank_statement_business",
+  "business_bank_statement",
   "lease_agreement",
+  "profit_loss",
+  "profit_loss_statement",
 ] as const;
 
 export type DocumentExtractionMode = "standard" | "autopilot" | "tax_package";
@@ -78,7 +90,6 @@ export type DocumentExtractionJobStatus =
   | "failed"
   | "cancelled";
 
-const STANDARD_TYPE_SET = new Set<string>(STANDARD_AUTO_EXTRACT_TYPES);
 const LEASE_MS = 5 * 60 * 1000;
 const POLL_MS = 5 * 1000;
 const RECONCILE_MS = 5 * 60 * 1000;
@@ -164,7 +175,8 @@ interface DocumentExtractionClaimFence {
 }
 
 export function standardDocumentNeedsExtraction(documentType: string): boolean {
-  return STANDARD_TYPE_SET.has(documentType);
+  const extractorType = extractionDocumentType(documentType);
+  return extractorType !== null && extractorType !== "tax_return";
 }
 
 export function classifyTaxPackageFailure(error?: string): ExtractionFailure {
@@ -253,6 +265,45 @@ export async function getTaxPackageExtractionJob(
   return job ?? null;
 }
 
+/**
+ * Queue current tax returns that arrived before the borrower authorized tax
+ * analysis. Call only after an affirmative tax_document_use consent has been
+ * recorded. Existing jobs are left untouched: completed work is not repeated,
+ * and failed work remains an explicit retry decision instead of a consent-side
+ * surprise.
+ */
+export async function enqueueUnprocessedTaxDocumentsAfterConsent(
+  currentDocuments: Document[],
+  requestedByUserId: string,
+  applicationId: string | null,
+): Promise<number> {
+  let queued = 0;
+  // A mortgage authorization belongs to the selected file. The applicationless
+  // renter flow analyzes only its newest return. Bound the mortgage backfill as
+  // well so a long-lived account cannot flood the serial tax lane with old
+  // duplicate uploads when authorization is renewed.
+  const maximumDocuments = applicationId ? 4 : 1;
+  const candidates = currentDocuments
+    .filter(document =>
+      document.applicationId === applicationId
+      && document.userId === requestedByUserId
+      && isTaxReturnDocumentType(document.documentType),
+    )
+    .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))
+    .slice(0, maximumDocuments);
+  for (const document of candidates) {
+    if (
+      await getTaxPackageExtractionJob(document.id)
+      || await getDocumentProcessingBlockReason(document.id)
+    ) {
+      continue;
+    }
+    await enqueueTaxPackageExtraction(document.id, requestedByUserId);
+    queued += 1;
+  }
+  return queued;
+}
+
 export function retryDelayMs(attemptCount: number): number {
   return Math.min(15 * 60 * 1000, 30 * 1000 * 2 ** Math.max(0, attemptCount - 1));
 }
@@ -281,6 +332,7 @@ async function claimNextJob(
   now = new Date(),
   proofJob: "exclude" | "only" | "tax_canary" | "tax_restart" = "exclude",
   lane: DocumentExtractionWorkerLane = "ordinary",
+  scope?: { requestedByUserId?: string; documentId?: string },
 ): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
     const [candidate] = await transaction
@@ -301,6 +353,12 @@ async function claimNextJob(
         lane === "tax_package"
           ? eq(documentExtractionJobs.mode, "tax_package")
           : ne(documentExtractionJobs.mode, "tax_package"),
+        scope?.requestedByUserId
+          ? eq(documentExtractionJobs.requestedByUserId, scope.requestedByUserId)
+          : undefined,
+        scope?.documentId
+          ? eq(documentExtractionJobs.documentId, scope.documentId)
+          : undefined,
         lt(documentExtractionJobs.attemptCount, documentExtractionJobs.maxAttempts),
         or(
           and(
@@ -344,8 +402,9 @@ async function claimNextJob(
 export async function claimNextDocumentExtractionJobForLane(
   lane: DocumentExtractionWorkerLane,
   now = new Date(),
+  scope?: { requestedByUserId?: string; documentId?: string },
 ): Promise<DocumentExtractionJob | null> {
-  return claimNextJob(now, "exclude", lane);
+  return claimNextJob(now, "exclude", lane, scope);
 }
 
 async function expireExhaustedLeases(now = new Date()): Promise<void> {
@@ -502,7 +561,7 @@ async function failJob(job: DocumentExtractionJob, failure: ExtractionFailure): 
 }
 
 async function extractStandard(document: Document): Promise<ExtractedDocumentData> {
-  switch (document.documentType) {
+  switch (extractionDocumentType(document.documentType)) {
     case "pay_stub":
       return extractPayStubData(document.storagePath, document.mimeType ?? undefined);
     case "w2":
@@ -511,6 +570,8 @@ async function extractStandard(document: Document): Promise<ExtractedDocumentDat
       return extractBankStatementData(document.storagePath, document.mimeType ?? undefined);
     case "lease_agreement":
       return extractLeaseData(document.storagePath, document.mimeType ?? undefined);
+    case "profit_loss":
+      return extractProfitLossData(document.storagePath, document.mimeType ?? undefined);
     default:
       throw Object.assign(new Error("Unsupported standard extraction type"), {
         extractionFailure: { code: "unsupported_document_type", retryable: false } satisfies ExtractionFailure,
@@ -599,7 +660,7 @@ async function executeTaxPackageJob(
   borrowerUserId: string,
   claimFence: DocumentExtractionClaimFence,
 ): Promise<"completed" | "cancelled" | "cancelled_consent"> {
-  if (document.documentType !== "tax_return") {
+  if (!isTaxReturnDocumentType(document.documentType)) {
     throw Object.assign(new Error("Tax package job requires a tax return"), {
       extractionFailure: {
         code: "unsupported_document_type",
@@ -746,6 +807,11 @@ async function executeJob(
   if (job.mode === "tax_package") {
     return executeTaxPackageJob(document, job, borrowerUserId, claimFence);
   }
+
+  // Tax documents may reach an external model only through the authorization-
+  // fenced tax-package lane. This also neutralizes legacy or manually seeded
+  // ordinary/Autopilot jobs that predate the upload-router guarantee.
+  if (isTaxReturnDocumentType(document.documentType)) return "cancelled_consent";
 
   if (job.mode === "autopilot") {
     const { runAutopilotForDocument } = await import("./autopilot/orchestrator");

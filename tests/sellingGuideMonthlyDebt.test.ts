@@ -81,6 +81,32 @@ describe("B3-6-05 Revolving Charge/Lines of Credit", () => {
   });
 });
 
+describe("B3-6-05 Open 30-day charge accounts", () => {
+  it("excludes the monthly payment from DTI but carries the full balance to the asset gate", () => {
+    const r = assessLiabilities([
+      liability({
+        liabilityType: "Open 30-day charge account",
+        unpaidBalance: "4800",
+        monthlyPayment: "4800",
+      }),
+    ]);
+    expect(r.totalMonthlyPayment).toBe(0);
+    expect(r.excludedDebts).toBe(4800);
+    expect(r.openThirtyDayBalance).toBe(4800);
+    expect(r.breakdown[0]).toMatchObject({ type: "open_30_day", included: false, payment: 0 });
+    expect(r.breakdown[0].reason).toContain("covered by verified funds");
+  });
+
+  it("keeps leases in DTI rather than mistaking them for open charge accounts", () => {
+    const r = assessLiabilities([
+      liability({ liabilityType: "Lease", unpaidBalance: "9200", monthlyPayment: "460" }),
+    ]);
+    expect(r.totalMonthlyPayment).toBe(460);
+    expect(r.openThirtyDayBalance).toBe(0);
+    expect(r.breakdown[0]).toMatchObject({ type: "lease", included: true });
+  });
+});
+
 describe("B3-6-05 Student Loans", () => {
   // "For deferred loans or loans in forbearance, the lender may calculate a
   // payment equal to 1% of the outstanding student loan balance".
@@ -96,6 +122,53 @@ describe("B3-6-05 Student Loans", () => {
       liability({ liabilityType: "student_loan", unpaidBalance: "40000", monthlyPayment: "0" }),
     ]);
     expect(r.totalMonthlyPayment).not.toBe(2000);
+  });
+
+  it("uses a documented $0 income-driven payment only after the reviewed-treatment gate", () => {
+    const row = liability({
+      liabilityType: "Student Loan",
+      unpaidBalance: "40000",
+      monthlyPayment: "0",
+      studentLoanRepaymentPlan: "income_driven",
+      underwritingTreatment: "documented_zero_student_loan",
+      treatmentSourceDocumentId: "doc-1",
+      treatmentCreditPullId: "pull-1",
+      treatmentTradelineIndex: 0,
+    });
+    expect(assessLiabilities([row]).totalMonthlyPayment).toBe(400);
+    const reviewed = assessLiabilities([row], { allowReviewedTreatments: true });
+    expect(reviewed.totalMonthlyPayment).toBe(0);
+    expect(reviewed.breakdown[0].reason).toContain("Documented $0 income-driven");
+  });
+});
+
+describe("B3-6-05 Installment debt remaining term", () => {
+  it("keeps a short-term installment in DTI until a reviewer applies the supported treatment", () => {
+    const row = liability({
+      liabilityType: "Installment (Auto Loan)",
+      unpaidBalance: "1800",
+      monthlyPayment: "450",
+      remainingTermMonths: 4,
+      underwritingTreatment: "exclude_short_term_installment",
+      treatmentSourceDocumentId: "doc-1",
+      treatmentCreditPullId: "pull-1",
+      treatmentTradelineIndex: 0,
+    });
+    expect(assessLiabilities([row]).totalMonthlyPayment).toBe(450);
+    const reviewed = assessLiabilities([row], { allowReviewedTreatments: true });
+    expect(reviewed.totalMonthlyPayment).toBe(0);
+    expect(reviewed.excludedDebts).toBe(450);
+    expect(reviewed.breakdown[0]).toMatchObject({ included: false, remainingMonths: 4 });
+  });
+
+  it("never excludes a lease merely because ten or fewer payments remain", () => {
+    const row = liability({
+      liabilityType: "Lease",
+      monthlyPayment: "450",
+      remainingTermMonths: 4,
+      underwritingTreatment: "exclude_short_term_installment",
+    });
+    expect(assessLiabilities([row], { allowReviewedTreatments: true }).totalMonthlyPayment).toBe(450);
   });
 });
 

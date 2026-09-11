@@ -214,7 +214,7 @@ export class UrlaStorage extends TasksStorage {
       .select()
       .from(otherIncomeSources)
       .where(eq(otherIncomeSources.applicationId, applicationId))
-      .orderBy(desc(otherIncomeSources.createdAt));
+      .orderBy(asc(otherIncomeSources.borrowerSequenceNumber), desc(otherIncomeSources.createdAt));
   }
 
   async getOtherIncomeSourceById(id: string): Promise<OtherIncomeSource | undefined> {
@@ -324,6 +324,7 @@ export class UrlaStorage extends TasksStorage {
     const tables = [
       ["personalInfo", urlaPersonalInfo],
       ["employmentHistory", employmentHistory],
+      ["otherIncomeSources", otherIncomeSources],
       ["assets", urlaAssets],
       ["liabilities", urlaLiabilities],
       ["declarations", borrowerDeclarations],
@@ -613,7 +614,7 @@ export class UrlaStorage extends TasksStorage {
         .orderBy(desc(employmentHistory.createdAt)),
       db.select().from(otherIncomeSources)
         .where(inArray(otherIncomeSources.applicationId, applicationIds))
-        .orderBy(desc(otherIncomeSources.createdAt)),
+        .orderBy(asc(otherIncomeSources.borrowerSequenceNumber), desc(otherIncomeSources.createdAt)),
       db.select().from(urlaAssets)
         .where(inArray(urlaAssets.applicationId, applicationIds))
         .orderBy(desc(urlaAssets.createdAt)),
@@ -935,6 +936,7 @@ export class UrlaStorage extends TasksStorage {
       personalInfo,
       allPersonalInfo,
       employment: urlaData.employmentHistory,
+      otherIncome: urlaData.otherIncomeSources,
       assets: urlaData.assets.map(withAccountNumber),
       liabilities: urlaData.liabilities.map(withAccountNumber),
       propertyInfo: urlaData.propertyInfo || null,

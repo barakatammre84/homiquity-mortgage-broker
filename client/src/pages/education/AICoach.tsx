@@ -13,7 +13,7 @@ import { Composer } from "@/components/coach/Composer";
 import { ConversationSidebar } from "@/components/coach/ConversationSidebar";
 import { Logo } from "@/components/brand/Logo";
 import { InsightsBanner, WelcomeState } from "@/components/coach/WelcomeState";
-import { ActionPlanPanel, ConnectedFilePanel, DocumentChecklistInline } from "@/components/coach/panels";
+import { ActionPlanPanel, ConnectedFilePanel, DocumentChecklistInline, DocumentEvidencePanel } from "@/components/coach/panels";
 import type {
   ActionPlanItem,
   CoachConversation,
@@ -21,7 +21,10 @@ import type {
   CoachMessage,
   CoachProfile,
   CoachUsage,
+  CoachDocumentEvidenceView,
   LoanStatusView,
+  PlanningDocumentStatsView,
+  FileDocumentStatsView,
 } from "@/components/coach/types";
 import type { ChecklistItemView } from "@/lib/documentChecklist";
 
@@ -66,14 +69,14 @@ function getSourceContext(): { banner: string; autoMessage: string } | null {
     const formattedPrice = parseFloat(propertyPrice).toLocaleString();
     return {
       banner: "Property Analysis",
-      autoMessage: `I'm looking at a property at ${decodeURIComponent(propertyAddress)} listed at $${formattedPrice}. Can you help me understand if this home fits my budget and what my monthly payments would look like?`,
+      autoMessage: `I'm looking at a property at ${decodeURIComponent(propertyAddress)} listed at $${formattedPrice}. What information is still needed before my loan team can evaluate this property?`,
     };
   }
   if (propertyPrice) {
     const formattedPrice = parseFloat(propertyPrice).toLocaleString();
     return {
       banner: "Property Analysis",
-      autoMessage: `I'm considering a home priced at $${formattedPrice}. Can you help me understand if I can afford it and what loan options might work?`,
+      autoMessage: `I'm considering a home priced at $${formattedPrice}. What information is still needed before my loan team can evaluate it?`,
     };
   }
   return null;
@@ -86,7 +89,10 @@ export default function AICoach() {
   const trackCoachSession = useTrackCoachSession();
   const { toast } = useToast();
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
+    const requested = new URLSearchParams(window.location.search).get("conversation");
+    return requested?.trim() || null;
+  });
   const [sourceHandled, setSourceHandled] = useState(false);
   const [mobileConvOpen, setMobileConvOpen] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -119,11 +125,14 @@ export default function AICoach() {
    * they typed again — stale figures presented as current, on a file that may
    * have moved days ago.
    */
-  const { data: fileContext, isLoading: fileContextLoading } = useQuery<{
+  const { data: fileContext, isLoading: fileContextLoading, isError: fileContextError, refetch: refetchFileContext } = useQuery<{
     hasApplication: boolean;
+    applicationId: string | null;
     loanStatus: LoanStatusView;
     documentChecklist: ChecklistItemView[];
     checklistStats: { total: number; verified: number; uploaded: number; needed: number; rejected: number } | null;
+    planningDocumentStats: PlanningDocumentStatsView | null;
+    fileDocumentStats: FileDocumentStatsView | null;
     tasks: unknown[];
     readiness: CoachProfile;
   }>({
@@ -216,9 +225,10 @@ export default function AICoach() {
   // invented ones: a docType matching no loan_condition, rendered next to an
   // Upload button that could never clear it. Reading them again would
   // reintroduce the bug for every borrower with history.
-  const loanStatus = (turn.panel.loanStatus ?? fileContext?.loanStatus ?? null) as LoanStatusView | null;
+  const currentFileContext = fileContextError ? undefined : fileContext;
+  const loanStatus = (turn.panel.loanStatus ?? currentFileContext?.loanStatus ?? null) as LoanStatusView | null;
   const documentChecklist = (turn.panel.documentChecklist
-    ?? fileContext?.documentChecklist
+    ?? currentFileContext?.documentChecklist
     ?? null) as ChecklistItemView[] | null;
   // The action plan is the one panel the assistant still authors, so it keeps
   // its conversation-scoped fallback — it belongs to the chat, not the file.
@@ -230,6 +240,7 @@ export default function AICoach() {
     for (const e of turn.captured) if (e.applicationId) id = e.applicationId;
     return id;
   }, [turn.captured]);
+  const activeApplicationId = capturedAppId ?? currentFileContext?.applicationId ?? null;
   const hasChecklist = !!documentChecklist && documentChecklist.length > 0;
 
   const insights = insightsData?.insights ?? [];
@@ -248,7 +259,11 @@ export default function AICoach() {
     <ConnectedFilePanel
       status={loanStatus}
       docs={documentChecklist ?? []}
+      planningDocuments={currentFileContext?.planningDocumentStats ?? null}
+      fileDocuments={currentFileContext?.fileDocumentStats ?? null}
       loading={fileContextLoading}
+      error={fileContextError}
+      onRetry={() => { void refetchFileContext(); }}
     />
   );
 
@@ -274,8 +289,13 @@ export default function AICoach() {
     </>
   );
 
-  const activeArtifact = hasChecklist ? (
-    <DocumentChecklistInline docs={documentChecklist!} applicationId={capturedAppId} />
+  const documentEvidence = turn.panel.documentEvidence as CoachDocumentEvidenceView | undefined;
+  const activeArtifact = documentEvidence ? (
+    <div className="mx-auto mb-2 w-full max-w-3xl px-3">
+      <DocumentEvidencePanel evidence={documentEvidence} />
+    </div>
+  ) : hasChecklist ? (
+    <DocumentChecklistInline docs={documentChecklist!} applicationId={activeApplicationId} />
   ) : actionPlan && actionPlan.length > 0 ? (
     <div className="mx-auto mb-2 w-full max-w-3xl px-3">
       <ActionPlanPanel plan={actionPlan} onToggle={(itemId) => toggleActionItem.mutate(itemId)} />

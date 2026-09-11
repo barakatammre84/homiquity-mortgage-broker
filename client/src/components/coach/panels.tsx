@@ -1,14 +1,114 @@
 import { Link } from "wouter";
-import { AlertCircle, ArrowRight, CheckCircle2, Circle, Clock, FileText, Landmark, Sparkles, Target } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Circle, Clock, ExternalLink, FileSearch, FileText, Landmark, Sparkles, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { PlaidConnectButton } from "@/components/PlaidConnectButton";
 import { DocumentUploadButton } from "@/components/DocumentUploadButton";
+import { formatCurrency } from "@/lib/formatters";
 
 import type { ChecklistItemView } from "@/lib/documentChecklist";
-import type { LoanStatusView } from "./types";
+import type { CoachDocumentEvidenceView, FileDocumentStatsView, LoanStatusView, PlanningDocumentStatsView } from "./types";
+
+const EVIDENCE_STATUS_LABELS: Record<string, string> = {
+  not_extracted: "No financial fields read",
+  machine_read: "Machine read",
+  partly_human_verified: "Partly human verified",
+  human_verified: "Human verified",
+};
+
+const DOCUMENT_REVIEW_LABELS: Record<string, string> = {
+  uploaded: "Received",
+  in_review: "Document in review",
+  accepted: "Document accepted",
+};
+
+/** Deterministic OCR and review facts from the current file. */
+export function DocumentEvidencePanel({ evidence }: { evidence: CoachDocumentEvidenceView }) {
+  const approved = evidence.financialReview.status === "approved_for_lender_package";
+  return (
+    <Card data-testid="card-document-evidence">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          <FileSearch className="h-4 w-4 text-primary" />
+          What Homiquity read
+          <PanelSource source="file" />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className={`rounded-lg border p-3 ${approved ? "border-success/30 bg-success/5" : "border-border bg-muted/30"}`}>
+          <p className="text-sm font-semibold text-foreground">
+            {approved ? "Current financial review approved for package preparation" : "Financial review is not approved yet"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Income: {evidence.financialReview.income === "approved" ? "approved" : "not approved"} · Assets: {evidence.financialReview.assets === "approved" ? "approved" : "not approved"} · Liabilities: {evidence.financialReview.liabilities === "approved" ? "approved" : evidence.financialReview.liabilities === "not_required" ? "none to review" : "not approved"}
+          </p>
+        </div>
+
+        {evidence.documents.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No safe extracted financial facts are available for the current file.</p>
+        ) : (
+          <div className="space-y-3">
+            {evidence.documents.map((document) => (
+              <div key={document.documentId} className="rounded-lg border border-border p-3" data-testid={`evidence-document-${document.documentId}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{document.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {DOCUMENT_REVIEW_LABELS[document.documentReviewStatus]} · {EVIDENCE_STATUS_LABELS[document.evidenceStatus]}
+                    </p>
+                  </div>
+                  {document.facts.some((fact) => fact.needsHumanReview) && (
+                    <Badge variant="outline" className="border-warning/40 text-warning-subtle-foreground">Staff review needed</Badge>
+                  )}
+                </div>
+
+                {document.facts.length > 0 ? (
+                  <dl className="mt-3 divide-y divide-border border-y border-border">
+                    {document.facts.map((fact, index) => (
+                      <div key={`${fact.label}-${index}`} className="grid gap-1 py-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                        <div>
+                          <dt className="text-xs text-muted-foreground">{fact.label}</dt>
+                          <dd className="text-sm font-semibold tabular-nums text-foreground">
+                            {fact.format === "currency" ? formatCurrency(fact.value) : fact.value.toLocaleString()}
+                          </dd>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                          <Badge variant={fact.reviewStatus === "human_verified" ? "secondary" : "outline"}>
+                            {fact.reviewStatus === "human_verified" ? "Human verified" : `Machine read · ${fact.confidence}`}
+                          </Badge>
+                          {fact.pageNumber ? (
+                            <Button asChild variant="ghost" size="sm" className="touch-target h-8 px-2 text-xs">
+                              <a href={`/api/documents/${document.documentId}/pages/${fact.pageNumber}/image`} target="_blank" rel="noreferrer" data-testid={`link-evidence-source-${document.documentId}-${index}`}>
+                                Page {fact.pageNumber}<ExternalLink className="ml-1 h-3 w-3" />
+                              </a>
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Page not linked</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">No allowlisted financial fields were extracted.</p>
+                )}
+                {document.omittedFactCount > 0 && <p className="mt-2 text-xs text-muted-foreground">{document.omittedFactCount} additional fact{document.omittedFactCount === 1 ? "" : "s"} omitted from this bounded view.</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        {evidence.summary.omittedDocumentCount > 0 && (
+          <p className="text-xs text-muted-foreground">{evidence.summary.omittedDocumentCount} older document{evidence.summary.omittedDocumentCount === 1 ? "" : "s"} omitted. Use the full Documents page for receipt status.</p>
+        )}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Machine-read values are provisional. Human verification confirms a field was checked; it does not by itself approve a loan or establish qualifying income.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
 /** Bank/asset items verify as "assets"; income/employment docs as "income". */
 function plaidVerificationType(doc: ChecklistItemView): "assets" | "income" {
@@ -426,9 +526,13 @@ export function StatusPanel({ status }: { status: LoanStatusView }) {
 export function FileSnapshotPanel({
   status,
   docs,
+  planningDocuments = null,
+  fileDocuments = null,
 }: {
   status: LoanStatusView;
   docs: ChecklistItemView[];
+  planningDocuments?: PlanningDocumentStatsView | null;
+  fileDocuments?: FileDocumentStatsView | null;
 }) {
   const verified = docs.filter((doc) => doc.status === "verified").length;
   const received = docs.filter((doc) => doc.status === "uploaded" || doc.status === "verifying").length;
@@ -478,6 +582,48 @@ export function FileSnapshotPanel({
           </div>
         )}
 
+        {status.hasApplication && docs.length === 0 && fileDocuments && fileDocuments.total > 0 && (
+          <div data-testid="file-snapshot-uploaded-documents">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Documents on file</p>
+            <p className="mt-1 text-sm font-medium text-foreground">
+              {fileDocuments.total} saved to this application
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {fileDocuments.underReview > 0
+                ? `${fileDocuments.underReview} being reviewed`
+                : fileDocuments.verified > 0
+                  ? `${fileDocuments.verified} verified`
+                  : fileDocuments.rejected > 0
+                    ? `${fileDocuments.rejected} need attention`
+                    : "No open document requests"}
+            </p>
+            <Button asChild variant="outline" size="sm" className="touch-target mt-3 w-full" data-testid="button-view-file-documents">
+              <Link href="/documents">View application documents</Link>
+            </Button>
+          </div>
+        )}
+
+        {!status.hasApplication && planningDocuments && planningDocuments.total > 0 && (
+          <div data-testid="file-snapshot-planning-documents">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Planning documents</p>
+            <p className="mt-1 text-sm font-medium text-foreground">
+              {planningDocuments.total} saved to your account
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {planningDocuments.underReview > 0
+                ? `${planningDocuments.underReview} being reviewed`
+                : planningDocuments.verified > 0
+                  ? `${planningDocuments.verified} verified`
+                  : planningDocuments.rejected > 0
+                    ? `${planningDocuments.rejected} need attention`
+                    : "Ready when you begin your application"}
+            </p>
+            <Button asChild variant="outline" size="sm" className="touch-target mt-3 w-full" data-testid="button-view-planning-documents">
+              <Link href="/documents">View planning documents</Link>
+            </Button>
+          </div>
+        )}
+
         <div className="border-t border-border pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Next action</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{nextAction.title}</p>
@@ -503,16 +649,29 @@ export function FileSnapshotPanel({
 export function ConnectedFilePanel({
   status,
   docs,
+  planningDocuments = null,
+  fileDocuments = null,
   loading,
+  error = false,
+  onRetry,
 }: {
   status: LoanStatusView | null;
   docs: ChecklistItemView[];
+  planningDocuments?: PlanningDocumentStatsView | null;
+  fileDocuments?: FileDocumentStatsView | null;
   loading: boolean;
+  error?: boolean;
+  onRetry?: () => void;
 }) {
   if (status) {
     return (
       <div data-testid="coach-side-panel">
-        <FileSnapshotPanel status={status} docs={docs} />
+        <FileSnapshotPanel
+          status={status}
+          docs={docs}
+          planningDocuments={planningDocuments}
+          fileDocuments={fileDocuments}
+        />
       </div>
     );
   }
@@ -521,6 +680,18 @@ export function ConnectedFilePanel({
     return (
       <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground" data-testid="coach-side-panel-loading">
         Loading your connected file…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4" data-testid="coach-side-panel-error">
+        <p className="font-semibold text-foreground">Couldn't load your connected file</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Homi will not guess about your status or documents while the file is unavailable.
+        </p>
+        {onRetry && <Button type="button" variant="outline" size="sm" className="touch-target mt-3" onClick={onRetry}>Try again</Button>}
       </div>
     );
   }

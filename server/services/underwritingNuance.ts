@@ -140,10 +140,27 @@ function isRevolving(type: string): boolean {
   return t === "revolving" || t === "credit_card" || t === "retail";
 }
 
+/** The guideline-adjusted payment for one bureau tradeline. Keeping this
+ * primitive public lets an evidence-linked reviewer remove exactly one
+ * supported line from the bureau total without reimplementing the 1%/$10/5%
+ * rules or subtracting a guessed amount. */
+export function qualifyingTradelinePayment(tradeline: Tradeline): number {
+  if (tradeline.type === "student_loan" && tradeline.monthlyPayment === 0 && tradeline.balance > 0) {
+    return tradeline.balance * DEFERRED_STUDENT_LOAN_FACTOR;
+  }
+  if (isRevolving(tradeline.type) && tradeline.monthlyPayment === 0 && tradeline.balance > 0) {
+    return Math.max(
+      REVOLVING_MINIMUM_PAYMENT_FLOOR,
+      tradeline.balance * REVOLVING_PAYMENT_FACTOR,
+    );
+  }
+  return Math.max(tradeline.monthlyPayment || 0, 0);
+}
+
 export function adjustLiabilities(tradelines: Tradeline[] | null | undefined): LiabilityAdjustment {
   const lines = tradelines ?? [];
   const deferredStudentLoans = lines.filter(
-    (t) => t.type === "student_loan" && (t.deferred === true || t.monthlyPayment === 0),
+    (t) => t.type === "student_loan" && t.monthlyPayment === 0,
   );
   const newTradelines = lines.filter(
     (t) => t.openedDaysAgo !== undefined && t.openedDaysAgo <= NEW_TRADELINE_WINDOW_DAYS,
@@ -167,7 +184,7 @@ export function adjustLiabilities(tradelines: Tradeline[] | null | undefined): L
   );
 
   return {
-    adjustedMonthlyDebt: reportedMonthlyPayments + deferredStudentLoanImputed + revolvingImputed,
+    adjustedMonthlyDebt: lines.reduce((sum, line) => sum + qualifyingTradelinePayment(line), 0),
     reportedMonthlyPayments,
     deferredStudentLoanImputed,
     revolvingImputed,
@@ -377,12 +394,11 @@ export interface SignificantDeposit {
  * Deposits exceeding 50% of monthly qualifying income must be sourced —
  * they may hide undisclosed loans or unverifiable "mattress cash".
  *
- * Detection is deliberately SIGN-AGNOSTIC on the transaction amount: providers
- * disagree on convention (Plaid-style reports inflows as negative; others use
- * positive), and keying off one convention silently disabled this rule for the
- * other. A large OUTFLOW can therefore be flagged too — an acceptable false
- * positive for a warning-severity documentation request, and far cheaper than
- * missing an unsourced six-figure wire because a vendor flipped the sign.
+ * The verification adapter normalizes depository transactions to Plaid's
+ * convention before they enter underwriting: negative is an inflow/deposit and
+ * positive is an outflow. Only inflows can create a sourcing condition. Any
+ * future provider with the opposite convention must normalize at its adapter;
+ * treating an outflow as a deposit creates a false borrower document request.
  */
 export function detectSignificantDeposits(
   transactions: DepositoryTransaction[] | null | undefined,
@@ -391,9 +407,9 @@ export function detectSignificantDeposits(
   if (!transactions || grossMonthlyIncome <= 0) return [];
   const threshold = grossMonthlyIncome * SIGNIFICANT_DEPOSIT_INCOME_FACTOR;
   return transactions
-    .filter((t) => Math.abs(t.amount) > threshold)
+    .filter((t) => t.amount < -threshold)
     .map((t) => ({
-      amount: Math.abs(t.amount),
+      amount: -t.amount,
       date: t.date,
       description: t.description,
       threshold: Number(threshold.toFixed(2)),

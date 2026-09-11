@@ -10,6 +10,9 @@ describe("financial verification evidence gate", () => {
       creditPullId: "pull-1",
       creditPullIsSimulated: false,
       creditPullIsCurrent: true,
+      creditPullHasProviderReference: true,
+      creditPullScoreIsUsable: true,
+      creditPullLiabilitiesAreUsable: true,
     };
     expect(financialVerificationEvidenceError("income", missing)).toMatch(/Approve the current financial workpapers/i);
     expect(financialVerificationEvidenceError("assets", missing)).toMatch(/Approve the current financial workpapers/i);
@@ -32,6 +35,9 @@ describe("financial verification evidence gate", () => {
       creditPullId: null,
       creditPullIsSimulated: false,
       creditPullIsCurrent: false,
+      creditPullHasProviderReference: false,
+      creditPullScoreIsUsable: false,
+      creditPullLiabilitiesAreUsable: false,
     };
     expect(financialVerificationEvidenceError("credit", noPull)).toMatch(/real bureau credit report/i);
 
@@ -39,9 +45,15 @@ describe("financial verification evidence gate", () => {
     expect(financialVerificationEvidenceError("credit", simulated)).toMatch(/simulated, expired, or archived/i);
 
     const real = { ...simulated, creditPullId: "pull-real", creditPullIsSimulated: false, creditPullIsCurrent: true };
-    expect(financialVerificationEvidenceError("credit", real)).toBeNull();
+    const supported = {
+      ...real,
+      creditPullHasProviderReference: true,
+      creditPullScoreIsUsable: true,
+      creditPullLiabilitiesAreUsable: true,
+    };
+    expect(financialVerificationEvidenceError("credit", supported)).toBeNull();
 
-    const expired = { ...real, creditPullIsCurrent: false };
+    const expired = { ...supported, creditPullIsCurrent: false };
     expect(financialVerificationEvidenceError("credit", expired)).toMatch(/expired/i);
   });
 
@@ -53,6 +65,9 @@ describe("financial verification evidence gate", () => {
       creditPullId: "pull-real",
       creditPullIsSimulated: false,
       creditPullIsCurrent: true,
+      creditPullHasProviderReference: true,
+      creditPullScoreIsUsable: true,
+      creditPullLiabilitiesAreUsable: true,
     };
     expect(financialVerificationEvidenceError("income", incomeOnly)).toBeNull();
     expect(financialVerificationEvidenceError("assets", incomeOnly)).toMatch(/asset reconciliation/i);

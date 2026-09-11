@@ -40,7 +40,7 @@ export const EXTRACTION_MODEL_SINGLE_DOC = "claude-sonnet-5";
 export const EXTRACTION_MODEL_TAX_PACKAGE = "claude-opus-4-8";
 /** @deprecated Use the task-specific constants above; retained for back-compat. */
 export const EXTRACTION_MODEL_ID = EXTRACTION_MODEL_TAX_PACKAGE;
-export const EXTRACTION_PROMPT_VERSION = "2026-09-v8";
+export const EXTRACTION_PROMPT_VERSION = "2026-09-v9";
 /** Lineage marker for deterministic simulated extractions (I10: unmistakable). */
 export const SIMULATED_MODEL_ID = "simulated";
 
@@ -225,12 +225,28 @@ export interface ExtractedLeaseData extends ExtractionLineage {
   warnings?: string[];
 }
 
+/** Core figures from a borrower-provided year-to-date profit and loss statement. */
+export interface ExtractedProfitLossData extends ExtractionLineage {
+  businessName?: string;
+  periodStartDate?: string;
+  periodEndDate?: string;
+  revenue?: number;
+  costOfGoodsSold?: number;
+  grossProfit?: number;
+  totalExpenses?: number;
+  netProfitLoss?: number;
+  confidence: "high" | "medium" | "low";
+  extractedFields: string[];
+  warnings?: string[];
+}
+
 export type ExtractedDocumentData = 
   | ExtractedTaxReturnData 
   | ExtractedPayStubData 
   | ExtractedW2Data
   | ExtractedBankStatementData
-  | ExtractedLeaseData;
+  | ExtractedLeaseData
+  | ExtractedProfitLossData;
 
 // Accepts an in-memory Buffer (transient uploads that never persist, e.g. the
 // public lease extractor), a normalized /objects/ path (object storage — the

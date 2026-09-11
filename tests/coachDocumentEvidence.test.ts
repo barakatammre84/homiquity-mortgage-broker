@@ -31,10 +31,10 @@ const base = () => ({
   applicationId: "app-1",
   documents: [document()],
   facts: [fact()],
-  taxInsights: [],
   approvedMemoId: null,
   approvedIncomeWorkpaperId: null,
   approvedAssetWorkpaperId: null,
+  approvedLiabilityWorkpaperId: null,
 });
 
 describe("Homi borrower-safe document evidence", () => {
@@ -68,33 +68,64 @@ describe("Homi borrower-safe document evidence", () => {
     });
   });
 
-  it("shows Schedule C and Schedule E values as provisional tax evidence", () => {
+  it("shows only page-grounded Schedule C and Schedule E values", () => {
     const snapshot = buildCoachDocumentEvidence({
       ...base(),
       documents: [document({ documentType: "tax_return" })],
-      facts: [],
-      taxInsights: [{
-        documentId: "doc-1",
-        taxYear: 2025,
-        wagesW2: "68000.00",
-        grossIncome: "115000.00",
-        adjustedGrossIncome: "110000.00",
-        scheduleCNetProfit: "35000.00",
-        scheduleENetRental: "12000.00",
-        scheduleEGrossRents: "30000.00",
-        rentalPropertyCount: 2,
-        confidence: "high",
-      } as never],
+      facts: [
+        fact({ fieldName: "netProfitOrLoss", valueNumeric: 35_000, confidence: 0.9, pageNumber: 3 }),
+        fact({ fieldName: "netRentalRealEstateIncomeOrLoss", valueNumeric: 12_000, confidence: 0.8, pageNumber: 7 }),
+        fact({ fieldName: "propertyCount", valueType: "number", valueNumeric: 2, confidence: 0.9, pageNumber: 6 }),
+      ],
     });
 
-    expect(snapshot.documents[0].label).toBe("Tax return (2025)");
+    expect(snapshot.documents[0].label).toBe("Tax return");
     expect(snapshot.documents[0].facts.map((item) => item.label)).toEqual(expect.arrayContaining([
-      "Schedule C net profit",
-      "Schedule E net rental amount",
-      "Schedule E gross rents",
+      "Schedule C net profit or loss",
+      "Schedule E net rental income or loss",
       "Rental properties found on Schedule E",
     ]));
     expect(snapshot.documents[0].facts.every((item) => item.reviewStatus === "machine_read")).toBe(true);
+    expect(snapshot.documents[0].facts.every((item) => item.pageNumber !== null)).toBe(true);
+  });
+
+  it("shows safe P&L totals with their review state", () => {
+    const snapshot = buildCoachDocumentEvidence({
+      ...base(),
+      documents: [document({ documentType: "profit_loss", status: "verified" })],
+      facts: [
+        fact({ fieldName: "pnl_revenue", valueNumeric: 80_000, confidence: 0.93 }),
+        fact({ fieldName: "pnl_total_expenses", valueNumeric: 35_000, confidence: 0.91 }),
+        fact({ fieldName: "pnl_net_profit_loss", valueNumeric: 45_000, confidence: 0, humanVerified: true, humanCorrectedValue: "45000" }),
+      ],
+    });
+
+    expect(snapshot.documents[0].label).toBe("Profit and loss statement");
+    expect(snapshot.documents[0].facts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "P&L revenue", reviewStatus: "machine_read" }),
+      expect.objectContaining({ label: "P&L total expenses", reviewStatus: "machine_read" }),
+      expect.objectContaining({ label: "P&L net profit or loss", value: 45_000, reviewStatus: "human_verified" }),
+    ]));
+  });
+
+  it("labels and evaluates P&L facts from an accepted mixed-packet segment", () => {
+    const snapshot = buildCoachDocumentEvidence({
+      ...base(),
+      documents: [document({ documentType: "other", status: "verified" })],
+      facts: [fact({
+        logicalDocumentType: "profit_loss_statement",
+        fieldName: "pnl_net_profit_loss",
+        valueNumeric: 45_000,
+        confidence: 0.91,
+      })],
+    });
+
+    expect(snapshot.documents[0].label).toBe("Document packet: Profit and loss statement");
+    expect(snapshot.documents[0].facts[0]).toMatchObject({
+      label: "P&L net profit or loss",
+      value: 45_000,
+      reviewStatus: "machine_read",
+    });
   });
 
   it("excludes rejected, cross-application, and non-allowlisted facts", () => {
@@ -120,15 +151,16 @@ describe("Homi borrower-safe document evidence", () => {
 
   it("reports lender-package approval only from current approved artifacts", () => {
     const notApproved = buildCoachDocumentEvidence(base());
-    expect(notApproved.financialReview).toEqual({ status: "not_approved", income: "not_approved", assets: "not_approved" });
+    expect(notApproved.financialReview).toEqual({ status: "not_approved", income: "not_approved", assets: "not_approved", liabilities: "not_approved" });
 
     const approved = buildCoachDocumentEvidence({
       ...base(),
       approvedMemoId: "memo-1",
       approvedIncomeWorkpaperId: "income-1",
       approvedAssetWorkpaperId: "assets-1",
+      approvedLiabilityWorkpaperId: "liabilities-1",
     });
-    expect(approved.financialReview).toEqual({ status: "approved_for_lender_package", income: "approved", assets: "approved" });
+    expect(approved.financialReview).toEqual({ status: "approved_for_lender_package", income: "approved", assets: "approved", liabilities: "approved" });
   });
 
   it("caps the model-facing evidence payload", () => {

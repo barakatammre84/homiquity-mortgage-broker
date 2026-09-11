@@ -20,6 +20,8 @@
  */
 export const URLA_LIABILITY_TYPES = [
   "Revolving (Credit Card)",
+  "Open 30-day charge account",
+  "Lease",
   "Installment (Auto Loan)",
   "Student Loan",
   "Mortgage",
@@ -33,6 +35,7 @@ export type UrlaLiabilityTypeLabel = (typeof URLA_LIABILITY_TYPES)[number];
 
 export type LiabilityKind =
   | "revolving"
+  | "open_30_day"
   | "installment"
   | "student_loan"
   | "mortgage"
@@ -42,6 +45,14 @@ export type LiabilityKind =
   | "child_support"
   | "other";
 
+export const STUDENT_LOAN_REPAYMENT_PLANS = [
+  "income_driven",
+  "deferred",
+  "forbearance",
+  "standard",
+  "other",
+] as const;
+
 export function liabilityKind(raw: string | null | undefined): LiabilityKind {
   const t = (raw ?? "").toLowerCase().trim();
   if (!t) return "other";
@@ -50,6 +61,7 @@ export function liabilityKind(raw: string | null | undefined): LiabilityKind {
   if (/heloc|home\s*equity/.test(t)) return "heloc";
   if (/mortgage/.test(t)) return "mortgage";
   if (/student/.test(t)) return "student_loan";
+  if (/open\s*_?30\s*[-–—]?\s*day|30\s*[-–—]?\s*day\s*charge/.test(t)) return "open_30_day";
   if (/revolv|credit\s*_?card|charge\s*_?card|line\s*_?of\s*_?credit/.test(t)) return "revolving";
   if (/install|auto|car\s*loan|personal\s*_?loan/.test(t)) return "installment";
   if (/lease/.test(t)) return "lease";

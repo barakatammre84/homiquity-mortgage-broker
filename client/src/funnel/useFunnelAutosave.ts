@@ -15,6 +15,9 @@ import { useCallback, useEffect, useRef } from "react";
 export interface FunnelSaved<TValues> {
   values: TValues;
   stepId: string;
+  /** Binds an authenticated browser snapshot to its owner before restore. */
+  ownerId?: string | null;
+  savedAt?: number;
 }
 
 export function useFunnelAutosave<TValues>({
@@ -22,6 +25,7 @@ export function useFunnelAutosave<TValues>({
   stepStorageKey,
   values,
   stepId,
+  ownerId,
   enabled,
   debounceMs = 800,
   shouldPersist,
@@ -30,6 +34,7 @@ export function useFunnelAutosave<TValues>({
   stepStorageKey: string;
   values: TValues;
   stepId: string;
+  ownerId?: string | null;
   /** Persist only while true (e.g. past the intro, not yet submitted). */
   enabled: boolean;
   debounceMs?: number;
@@ -56,6 +61,9 @@ export function useFunnelAutosave<TValues>({
         if (shouldPersist && !shouldPersist(valuesRef.current)) return;
         localStorage.setItem(storageKey, snapshotJson);
         localStorage.setItem(stepStorageKey, stepId);
+        localStorage.setItem(`${storageKey}:saved-at`, String(Date.now()));
+        if (ownerId) localStorage.setItem(`${storageKey}:owner`, ownerId);
+        else localStorage.removeItem(`${storageKey}:owner`);
       } catch {
         // Private browsing / quota — autosave is best-effort by design.
       }
@@ -68,14 +76,21 @@ export function useFunnelAutosave<TValues>({
     // predicate would otherwise re-arm the debounce on every render, which is
     // the exact bug this snapshot dependency exists to fix.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshotJson, stepId, enabled, debounceMs, storageKey, stepStorageKey]);
+  }, [snapshotJson, stepId, ownerId, enabled, debounceMs, storageKey, stepStorageKey]);
 
   const readSaved = useCallback((): FunnelSaved<TValues> | null => {
     try {
       const raw = localStorage.getItem(storageKey);
       const savedStep = localStorage.getItem(stepStorageKey);
       if (!raw || !savedStep) return null;
-      return { values: JSON.parse(raw) as TValues, stepId: savedStep };
+      const rawSavedAt = localStorage.getItem(`${storageKey}:saved-at`);
+      const savedAt = rawSavedAt ? Number(rawSavedAt) : undefined;
+      return {
+        values: JSON.parse(raw) as TValues,
+        stepId: savedStep,
+        ownerId: localStorage.getItem(`${storageKey}:owner`),
+        savedAt: savedAt && Number.isFinite(savedAt) ? savedAt : undefined,
+      };
     } catch {
       return null;
     }
@@ -85,6 +100,8 @@ export function useFunnelAutosave<TValues>({
     try {
       localStorage.removeItem(storageKey);
       localStorage.removeItem(stepStorageKey);
+      localStorage.removeItem(`${storageKey}:owner`);
+      localStorage.removeItem(`${storageKey}:saved-at`);
     } catch {}
   }, [storageKey, stepStorageKey]);
 

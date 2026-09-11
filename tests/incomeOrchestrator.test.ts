@@ -26,13 +26,24 @@ function emp(over: Partial<EmploymentHistory>): EmploymentHistory {
   return {
     id: "e", applicationId: "a", borrowerSequenceNumber: 1, employerName: null,
     employmentType: "salaried", isSelfEmployed: false, startDate: null, endDate: null,
+    paidInVirtualCurrency: false,
     baseIncome: null, overtimeIncome: null, bonusIncome: null, commissionIncome: null,
     otherIncome: null, totalMonthlyIncome: null, selfEmploymentIncome: null,
     ...over,
   } as unknown as EmploymentHistory;
 }
 function other(monthlyAmount: number | string, incomeSource = "rental"): OtherIncomeSource {
-  return { id: "o", applicationId: "a", incomeSource, monthlyAmount } as unknown as OtherIncomeSource;
+  return {
+    id: "o",
+    applicationId: "a",
+    incomeSource,
+    monthlyAmount,
+    taxTreatment: "taxable",
+    nonTaxableMonthlyAmount: null,
+    hasDefinedExpiration: false,
+    expirationDate: null,
+    paidInVirtualCurrency: false,
+  } as unknown as OtherIncomeSource;
 }
 
 const scheduleCWorksheet = (net: number, prior: number): SelfEmploymentWorksheet =>
@@ -95,6 +106,22 @@ describe("agency wage path", () => {
     expect(r.baseMonthlyIncome).toBe(8000);
     expect(r.usedLineItems).toBe(false);
   });
+
+  it("carries other-income treatment facts and the approval gate in its fingerprint", () => {
+    const source = other("1500", "Social Security");
+    const base: IncomePathsCoreInput = { employment: [], otherIncome: [source], rentalProperties: [] };
+    const treated = {
+      ...source,
+      taxTreatment: "fully_non_taxable",
+      hasDefinedExpiration: false,
+    } as OtherIncomeSource;
+    expect(incomeInputsFingerprint({ ...base, otherIncome: [treated] })).not.toBe(incomeInputsFingerprint(base));
+    expect(incomeInputsFingerprint({
+      ...base,
+      otherIncome: [treated],
+      applyVerifiedOtherIncomeAdjustments: true,
+    })).not.toBe(incomeInputsFingerprint({ ...base, otherIncome: [treated] }));
+  });
 });
 
 describe("self-employment path", () => {
@@ -113,6 +140,19 @@ describe("self-employment path", () => {
     expect(r.path.requiresManualReview).toBe(false);
     expect(r.path.missingItems).toEqual([expect.stringMatching(/complete.*worksheet/i)]);
     expect(r.path.notes.some((n) => /no completed income worksheet/i.test(n))).toBe(true);
+  });
+
+  it("excludes a self-employed business paid in virtual currency", () => {
+    const r = computeSelfEmploymentPath([
+      emp({
+        isSelfEmployed: true,
+        employerName: "Token Consulting",
+        paidInVirtualCurrency: true,
+        selfEmploymentIncome: scheduleCWorksheet(60000, 54000),
+      }),
+    ]);
+    expect(r.path.monthlyQualifyingIncome).toBe(0);
+    expect(r.path.notes.join(" ")).toMatch(/excluded.*virtual currency/i);
   });
 
   it("does not count one business while another listed business has no completed worksheet", () => {

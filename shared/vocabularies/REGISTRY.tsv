@@ -28,7 +28,7 @@ BorrowerClassificationType	shared/mismo.ts	union	3	b95a02232950		2	uldd-spec
 BorrowerTaskSlaStatus	shared/borrowerTaskView.ts	union	3	435472b1eebf		0	internal	
 BROKER_COMMISSION_STATUSES	shared/schema/admin.ts	array	4	f10187acd496	BrokerCommissionStatus	1	internal	
 BUSINESS_CHANNELS	shared/businessChannel.ts	array	2	0ccee6f7641e	BusinessChannel	1	internal	
-BUSINESS_ENTITY_TYPES	shared/schema/documents.ts	array	5	a1c6c6548499	BusinessEntityType	1	internal	
+BUSINESS_ENTITY_TYPES	shared/schema/documents.ts	array	5	a1c6c6548499	BusinessEntityType	2	internal	
 CASH_FLOW_ADJUSTMENT_TYPES	shared/schema/underwritingCore.ts	array	10	a1b934199e54	CashFlowAdjustmentType	0	internal	
 CHANGE_TYPES	shared/schema/underwritingConditions.ts	array	6	91a41bc43280	ChangeType	0	internal	
 CHECKLIST_ITEM_STATUSES	shared/documentStatus.ts	array	5	98077ecedfc9	ChecklistItemStatus	2	internal	
@@ -74,7 +74,7 @@ GATED_SITEMAP_PATHS	shared/seo/routeMeta.ts	array	6	08397f1a3d99		1	internal
 HomebuyerPlanningStage	shared/homebuyerJourney.ts	union	3	a221f95e0340		2	internal	
 HOUSING_STATUS_TYPES	shared/schema/intelligence.ts	array	4	93ca79ca9101		0	internal	
 INCOME_PATH_IDS	shared/incomePaths.ts	array	5	2cf686b1fc72	IncomePathId	4	internal	
-INCOME_TYPES	shared/schema/underwritingTasks.ts	array	13	2743ad5a0e91	IncomeType	2	internal	
+INCOME_TYPES	shared/schema/underwritingTasks.ts	array	13	2743ad5a0e91	IncomeType	4	internal	
 IncomePathKind	shared/incomePaths.ts	union	2	12b65f52d50d		0	internal	
 IncomePathRole	shared/incomePaths.ts	union	2	217d537e6161		0	internal	
 IncomePathStatus	shared/incomePaths.ts	union	3	8e3655838898		0	internal	
@@ -91,7 +91,8 @@ LENDER_SUBMISSION_STATUSES	shared/wholesaleLenders.ts	array	10	76089f284afb	Lend
 LenderApprovalStatus	shared/wholesaleLenders.ts	union	4	367686c1bd50		3	internal	
 LETTER_GENERATION_EVENTS	shared/schema/lendingLetters.ts	array	10	fe39edb7dfd6	LetterGenerationEvent	0	internal	
 LIABILITY_TYPES	shared/schema/underwritingFinancials.ts	array	11	869f377e0cc2	LiabilityType	6	internal	
-LiabilityKind	shared/liabilityTypes.ts	union	9	ba0683878bff		2	internal	
+LIABILITY_UNDERWRITING_TREATMENTS	shared/financialReview.ts	array	2	e3332911cd0b	LiabilityUnderwritingTreatment	2	internal	
+LiabilityKind	shared/liabilityTypes.ts	union	10	912a3dcc3f6f		2	internal	
 LiabilityType	shared/mismo.ts	union	10	e048574e72b5		2	ULAD	LiabilityType
 LICENSE_VERIFICATION_STATUSES	shared/schema/partners.ts	array	3	737f2c4f6712	LicenseVerificationStatus	2	internal	
 LICENSED_STATES	shared/companyIdentity.ts	array	1	84fb2bf50d4f		7	internal	
@@ -174,6 +175,7 @@ SITUATION_FLAG_IDS	shared/situationProfile.ts	array	10	4dfa7c4330a7	SituationFla
 SLA_CLASSES	shared/schema/underwritingTasks.ts	array	6	0188a35a5853	SlaClass	2	internal	
 STAFF_ROLES	shared/roles.ts	array	8	f0b806aacc9e		9	internal	
 STREAMLINE_ELIGIBLE_FAMILIES	shared/loanProducts.ts	array	3	f942aa76e8b2		0	internal	
+STUDENT_LOAN_REPAYMENT_PLANS	shared/liabilityTypes.ts	array	5	3186c9cc760c		1	internal	
 STUDENT_LOAN_TREATMENTS	shared/schema/underwritingCore.ts	array	5	1d4ae8375161		0	internal	
 TASK_OWNER_ROLES	shared/schema/underwritingTasks.ts	array	8	81080fa4875f	TaskOwnerRole	1	internal	
 TASK_PRIORITIES	shared/schema/underwritingTasks.ts	array	4	55671b38ac76	TaskPriority	7	internal	
@@ -189,6 +191,6 @@ TRANSACTION_PURPOSES	shared/loanProducts.ts	array	4	40e5ca24ce12	TransactionPurp
 TRANSITION_TRIGGERS	shared/schema/intelligence.ts	array	20	948b2fa41984	TransitionTrigger	3	internal	
 UNDERWRITING_ACTION_TYPES	shared/schema/underwritingFinancials.ts	array	7	68d978a08fd0		0	internal	
 UNDERWRITING_TRIGGER_TYPES	shared/schema/underwritingFinancials.ts	array	8	23cda46d7ebc		1	internal	
-URLA_LIABILITY_TYPES	shared/liabilityTypes.ts	array	8	4b00733e0da1	UrlaLiabilityTypeLabel	3	internal	
+URLA_LIABILITY_TYPES	shared/liabilityTypes.ts	array	10	e8d5a2d3b8a5	UrlaLiabilityTypeLabel	3	internal	
 UrlaRowSection	shared/lib/urlaRowContent.ts	union	4	9300fecad005		1	internal	
 YesNoUnknownType	shared/mismo.ts	union	3	4d9e819e9547		0	uldd-spec	

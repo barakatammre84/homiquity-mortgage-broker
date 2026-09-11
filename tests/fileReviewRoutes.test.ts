@@ -6,7 +6,7 @@ import { BASE_URL } from "./setup";
 const appId = randomUUID(), otherAppId = randomUUID(), documentId = randomUUID(), factId = randomUUID();
 let borrowerId = randomUUID();
 const coBorrowerId = randomUUID();
-const businessId = randomUUID(), propertyId = randomUUID();
+const businessId = randomUUID(), outsiderBusinessId = randomUUID(), propertyId = randomUUID();
 let replacementDocumentId: string | null = null;
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const cookies: Record<string, string> = {};
@@ -52,11 +52,17 @@ beforeAll(async () => {
   cookies.borrower = registration.headers.get("set-cookie")!.split(";")[0];
   await pool.query("INSERT INTO users (id,email,first_name,last_name,role) VALUES ($1,$2,'Casey','Co-borrower','buyer')", [coBorrowerId, `file-review-${coBorrowerId}@example.test`]);
   await pool.query("INSERT INTO borrower_profiles (user_id,has_co_borrower,co_borrower_user_id) VALUES ($1,true,$2)", [borrowerId, coBorrowerId]);
-  await pool.query("INSERT INTO loan_applications (id,user_id,status) VALUES ($1,$3,'draft'),($2,$3,'draft')", [appId, otherAppId, borrowerId]);
+  await pool.query("INSERT INTO loan_applications (id,user_id,status,income_sources) VALUES ($1,$3,'draft',$4::jsonb),($2,$3,'draft','[]'::jsonb)", [appId, otherAppId, borrowerId, JSON.stringify([{
+    type: "self_employed",
+    annualAmount: "42000",
+    employerName: "Reported Design LLC",
+    businessStructure: "single_member_llc",
+    ownershipPercent: "100",
+  }])]);
   await pool.query("INSERT INTO deal_team_members (application_id,user_id,team_role,is_active) VALUES ($1,'test-lo','lo',true),($1,'test-closer','closer',true),($1,'test-broker','broker',true),($1,'test-lender','lender',true)", [appId]);
   await pool.query("INSERT INTO documents (id,application_id,user_id,document_type,file_name,storage_path,status) VALUES ($1,$2,$3,'business_bank_statement','Fictional statement.pdf','/objects/fictional-file-review','uploaded')", [documentId, appId, borrowerId]);
   await pool.query("INSERT INTO extracted_fields (id,document_id,field_name,value_numeric,value_type,confidence,extraction_method) VALUES ($1,$2,'closing_balance','3000','currency','0.9','fixture')", [factId, documentId]);
-  await pool.query("INSERT INTO borrower_business_entities (id,user_id,application_id,identity_key,entity_type,name) VALUES ($1,$2,$3,$4,'s_corporation','Fictional Consulting Inc.')", [businessId, borrowerId, appId, `name:fictional-${businessId}`]);
+  await pool.query("INSERT INTO borrower_business_entities (id,user_id,application_id,identity_key,entity_type,name) VALUES ($1,$2,$3,$4,'s_corporation','Fictional Consulting Inc.'),($5,'test-lo',$3,$6,'sole_proprietorship','Outside Business')", [businessId, borrowerId, otherAppId, `name:fictional-${businessId}`, outsiderBusinessId, `name:outside-${outsiderBusinessId}`]);
   await pool.query("INSERT INTO application_properties (id,application_id,address,purchase_price) VALUES ($1,$2,'100 Fictional Way','500000')", [propertyId, appId]);
 });
 afterAll(async () => {
@@ -70,9 +76,10 @@ afterAll(async () => {
   await pool.query("DELETE FROM task_audit_log WHERE task_id IN (SELECT id FROM tasks WHERE application_id IN ($1,$2))", [appId, otherAppId]);
   await pool.query("DELETE FROM tasks WHERE application_id IN ($1,$2)", [appId, otherAppId]);
   await pool.query("DELETE FROM analytics_events WHERE application_id IN ($1,$2)", [appId, otherAppId]);
+  await pool.query("DELETE FROM document_extraction_jobs WHERE document_id=ANY($1::varchar[])", [[documentId, replacementDocumentId].filter(Boolean)]);
   if (replacementDocumentId) await pool.query("DELETE FROM documents WHERE id=$1", [replacementDocumentId]);
   await pool.query("DELETE FROM documents WHERE id=$1", [documentId]);
-  await pool.query("DELETE FROM borrower_business_entities WHERE id=$1", [businessId]);
+  await pool.query("DELETE FROM borrower_business_entities WHERE user_id=$1 OR id=ANY($2::varchar[])", [borrowerId, [businessId, outsiderBusinessId]]);
   await pool.query("DELETE FROM application_properties WHERE id=$1", [propertyId]);
   await pool.query("DELETE FROM deal_team_members WHERE application_id IN ($1,$2)", [appId, otherAppId]);
   await pool.query("DELETE FROM loan_applications WHERE id IN ($1,$2)", [appId, otherAppId]);
@@ -91,6 +98,8 @@ describe.sequential("Core review inside the existing authenticated loan file", (
     expect(view.documents[0].name).toBe("Fictional statement.pdf");
     expect(view.documents[0].lineage.needsAssignment).toBe(true);
     expect(view.subjectOptions.map((row: { id: string }) => row.id)).toEqual(expect.arrayContaining([appId, borrowerId, coBorrowerId, businessId, propertyId]));
+    expect(view.subjectOptions.map((row: { label: string }) => row.label)).toContain("Reported Design LLC");
+    expect(view.subjectOptions.map((row: { id: string }) => row.id)).not.toContain(outsiderBusinessId);
     expect(JSON.stringify(view)).not.toContain("/objects/fictional");
     const closer = await (await request("closer")).json(); expect(closer.canSave).toBe(false);
     expect((await save(view.revision, "closer")).status).toBe(403);
@@ -100,6 +109,7 @@ describe.sequential("Core review inside the existing authenticated loan file", (
     expect((await patchLineage("buyer", appId, documentId, body)).status).toBe(403);
     expect((await patchLineage("loa", appId, documentId, body)).status).toBe(404);
     expect((await patchLineage("lo", appId, documentId, { ...body, subjectType: "application", subjectId: otherAppId })).status).toBe(400);
+    expect((await patchLineage("lo", appId, documentId, { ...body, subjectId: outsiderBusinessId })).status).toBe(400);
     expect((await patchLineage("lo", appId, documentId, { ...body, subjectType: "borrower", subjectId: coBorrowerId })).status).toBe(200);
     expect((await current()).documents[0].lineage.subjectLabel).toBe("Casey Co-borrower");
     expect((await patchLineage("lo", appId, documentId, { ...body, subjectType: "property", subjectId: propertyId })).status).toBe(200);

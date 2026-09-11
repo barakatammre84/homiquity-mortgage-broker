@@ -20,7 +20,14 @@ const newProperty = (): RealEstateOwnedForm => ({
   propertyType: "single_family",
   occupancyType: "investment",
   status: "retained",
+  mortgageBalance: "",
+  helocBalance: "",
 });
+
+function hasFinancing(property: RealEstateOwnedForm) {
+  const parse = (value: unknown) => Number(String(value ?? "").replace(/[,$\s]/g, "")) || 0;
+  return parse(property.mortgageBalance) > 0 || parse(property.helocBalance) > 0 || parse(property.mortgagePayment) > 0;
+}
 
 export function RealEstateOwnedSection({
   ownsOtherRealEstate,
@@ -46,7 +53,7 @@ export function RealEstateOwnedSection({
       <CardContent className="space-y-5">
         <div className="space-y-2">
           <Label>Do you own any other real estate?</Label>
-          <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
+          <div className="grid gap-3 sm:max-w-sm sm:grid-cols-2">
             <Button
               type="button"
               variant={ownsOtherRealEstate === true ? "default" : "outline"}
@@ -148,9 +155,45 @@ export function RealEstateOwnedSection({
                     <MoneyInput value={property.mortgageBalance || ""} onChange={(event) => update(index, { mortgageBalance: event.target.value })} data-testid={`input-reo-balance-${index}`} />
                   </div>
                   <div className="space-y-2">
+                    <Label>HELOC balance</Label>
+                    <MoneyInput value={property.helocBalance || ""} onChange={(event) => update(index, { helocBalance: event.target.value })} data-testid={`input-reo-heloc-balance-${index}`} />
+                    <p className="text-xs text-muted-foreground">Enter $0 if there is no home equity line.</p>
+                  </div>
+                  <div className="space-y-2">
                     <Label>Monthly mortgage payment</Label>
                     <MoneyInput value={property.mortgagePayment || ""} onChange={(event) => update(index, { mortgagePayment: event.target.value })} data-testid={`input-reo-payment-${index}`} />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Monthly HELOC payment</Label>
+                    <MoneyInput value={property.helocPayment || ""} onChange={(event) => update(index, { helocPayment: event.target.value })} data-testid={`input-reo-heloc-payment-${index}`} />
+                    <p className="text-xs text-muted-foreground">Enter $0 if there is no payment.</p>
+                  </div>
+                  {hasFinancing(property) && (
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>Is anyone on this application personally responsible for this mortgage or HELOC?</Label>
+                      <div className="grid gap-3 sm:max-w-sm sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant={property.personallyObligated === true ? "default" : "outline"}
+                          onClick={() => update(index, { personallyObligated: true })}
+                          data-testid={`button-reo-obligated-yes-${index}`}
+                        >
+                          Yes
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={property.personallyObligated === false ? "default" : "outline"}
+                          onClick={() => update(index, { personallyObligated: false })}
+                          data-testid={`button-reo-obligated-no-${index}`}
+                        >
+                          No, it is entity-only
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        This lets us treat LLC-held properties correctly instead of overstating the number of mortgages you personally carry.
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Monthly rent</Label>
                     <MoneyInput value={property.monthlyRentalIncome || ""} onChange={(event) => update(index, { monthlyRentalIncome: event.target.value, willBeRented: Number(event.target.value.replace(/,/g, "")) > 0 })} data-testid={`input-reo-rent-${index}`} />

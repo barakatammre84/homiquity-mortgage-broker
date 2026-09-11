@@ -20,6 +20,17 @@ export function isIntakeStillFinalizing(status: string): boolean {
   return status === "submitted" || status === "analyzing";
 }
 
+/** A borrower can acknowledge anti-steering only after at least one option has
+ * actually been presented. Rendering the disclosure on a zero-option review
+ * plan asks them to attest to an event that did not happen. */
+export function shouldShowAntiSteeringConsent(
+  generatedOptionCount: number,
+  marketStatus?: string,
+  marketOfferCount = 0,
+): boolean {
+  return generatedOptionCount > 0 || (marketStatus === "PRICED" && marketOfferCount > 0);
+}
+
 /**
  * Submission alone does not mean a lender has received or reviewed the file.
  * Until the inputs are verified, every scenario is described as an estimate
@@ -39,12 +50,22 @@ export function getLoanOptionsPresentation({
     };
   }
 
-  if (!hasOptions) {
+  if (!hasOptions && isIntakeStillFinalizing(status)) {
     return {
       kind: "estimate",
       badge: "Application saved",
       title: "We're building your estimated options",
       description: "We're checking the answers you provided and preparing your personalized next steps.",
+    };
+  }
+
+  if (!hasOptions) {
+    return {
+      kind: "estimate",
+      badge: "Next: verify your file",
+      title: "Your personalized review plan is ready",
+      description:
+        "Your answers need document verification before we can show reliable loan scenarios. Complete the steps below and your loan team will review the verified figures.",
     };
   }
 

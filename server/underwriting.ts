@@ -74,6 +74,8 @@ export interface AssetVerificationResult {
 export interface LiabilityAssessmentResult {
   totalMonthlyPayment: number;
   excludedDebts: number;
+  /** Balance that must be covered by assets in addition to closing funds/reserves. */
+  openThirtyDayBalance: number;
   breakdown: {
     type: string;
     payment: number;
@@ -274,6 +276,11 @@ export async function verifyAssets(
       result.liquidAssets += verifiedValue;
     } else if (isRetirementType(assetType)) {
       result.retirementAssets += verifiedValue;
+      // Vested retirement funds are liquid/near-liquid reserves after the
+      // policy haircut. Keep retirementAssets as the informational subset,
+      // while liquidAssets remains the total usable figure shared with the
+      // deterministic underwriting engine.
+      result.liquidAssets += verifiedValue;
     } else {
       result.liquidAssets += verifiedValue;
     }
@@ -333,10 +340,14 @@ function toAmount(value: string | number | null | undefined): number {
 }
 
 
-export function assessLiabilities(liabilities: UrlaLiability[]): LiabilityAssessmentResult {
+export function assessLiabilities(
+  liabilities: UrlaLiability[],
+  options: { allowReviewedTreatments?: boolean } = {},
+): LiabilityAssessmentResult {
   const result: LiabilityAssessmentResult = {
     totalMonthlyPayment: 0,
     excludedDebts: 0,
+    openThirtyDayBalance: 0,
     breakdown: [],
   };
 
@@ -344,6 +355,21 @@ export function assessLiabilities(liabilities: UrlaLiability[]): LiabilityAssess
     const reportedPayment = toAmount(liability.monthlyPayment);
     const balance = toAmount(liability.unpaidBalance);
     const type = liabilityKind(liability.liabilityType);
+
+    // B3-6-05 / B3-6-07: an open 30-day charge account is not part of DTI,
+    // but the full balance must be covered by verified funds in addition to
+    // cash to close and reserves. Keep the balance explicit for the asset gate.
+    if (type === "open_30_day") {
+      result.openThirtyDayBalance += balance;
+      result.excludedDebts += reportedPayment;
+      result.breakdown.push({
+        type,
+        payment: 0,
+        included: false,
+        reason: `Excluded from DTI; $${balance.toFixed(2)} balance must be covered by verified funds (B3-6-05 / B3-6-07)`,
+      });
+      continue;
+    }
 
     // B3-6-07, Debts Paid Off At or Prior to Closing: a revolving balance paid
     // off at/prior to closing needs no payment in the DTI, and an installment
@@ -383,16 +409,49 @@ export function assessLiabilities(liabilities: UrlaLiability[]): LiabilityAssess
       continue;
     }
 
+    if (
+      options.allowReviewedTreatments
+      && type === "installment"
+      && liability.underwritingTreatment === "exclude_short_term_installment"
+      && liability.remainingTermMonths !== null
+      && liability.remainingTermMonths !== undefined
+      && liability.remainingTermMonths >= 1
+      && liability.remainingTermMonths <= 10
+    ) {
+      result.excludedDebts += reportedPayment;
+      result.breakdown.push({
+        type,
+        payment: 0,
+        remainingMonths: liability.remainingTermMonths,
+        included: false,
+        reason: `Excluded after evidence-linked review of ${liability.remainingTermMonths} remaining payments and ability-to-pay impact (B3-6-05)`,
+      });
+      continue;
+    }
+
+    if (
+      options.allowReviewedTreatments
+      && type === "student_loan"
+      && reportedPayment === 0
+      && liability.studentLoanRepaymentPlan === "income_driven"
+      && liability.underwritingTreatment === "documented_zero_student_loan"
+    ) {
+      result.breakdown.push({
+        type,
+        payment: 0,
+        included: false,
+        reason: "Documented $0 income-driven repayment plan used for qualifying (B3-6-05)",
+      });
+      continue;
+    }
+
     // B3-6-05, Monthly Debt Obligations — Student Loans: where the credit
     // report carries no payment (or $0), a deferred/forbearance loan qualifies
     // at 1% of the outstanding balance.
     //
-    // Deliberately conservative: B3-6-05 also permits qualifying at $0 when an
-    // income-driven plan is DOCUMENTED at $0, and permits a fully amortizing
-    // payment from documented terms. Neither is representable on
-    // urla_liabilities today (no plan-type or term column), so we impute the 1%
-    // figure rather than assume the borrower-favorable path. See
-    // knowledge-base/compliance/SELLING_GUIDE_CONFORMANCE.md (gap G-2).
+    // The evidence-linked reviewed path above can use a documented $0
+    // income-driven payment. Every unreviewed or unsupported $0 stays on the
+    // conservative 1% branch.
     if (type === "student_loan" && reportedPayment === 0 && balance > 0) {
       const imputed = balance * DEFERRED_STUDENT_LOAN_FACTOR;
       result.totalMonthlyPayment += imputed;
@@ -430,15 +489,16 @@ export function assessLiabilities(liabilities: UrlaLiability[]): LiabilityAssess
       continue;
     }
 
-    // B3-6-05 — Lease Payments are included regardless of months remaining, and
-    // Installment Debt is included where more than ten monthly payments remain.
-    // urla_liabilities carries no remaining-term column, so every installment
-    // debt is included: the conservative reading, and the only one the stored
-    // data supports. See SELLING_GUIDE_CONFORMANCE.md (gap G-1).
+    // B3-6-05 — Lease Payments remain included regardless of term. Installment
+    // debts with ten or fewer payments also remain included unless a reviewer
+    // explicitly applies the evidence-linked exception above.
     result.totalMonthlyPayment += reportedPayment;
     result.breakdown.push({
       type,
       payment: reportedPayment,
+      ...(liability.remainingTermMonths === null || liability.remainingTermMonths === undefined
+        ? {}
+        : { remainingMonths: liability.remainingTermMonths }),
       included: true,
       reason: "Included in recurring monthly debt obligations (B3-6-05)",
     });

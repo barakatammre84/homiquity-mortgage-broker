@@ -5,9 +5,14 @@ const complete: CurrentDecisionEvidence = {
   financialMemoId: "memo",
   incomeWorkpaperId: "income",
   assetWorkpaperId: "assets",
+  liabilityWorkpaperId: "liabilities",
   creditPullId: "credit",
   creditPullIsSimulated: false,
   creditPullIsCurrent: true,
+  creditPullHasProviderReference: true,
+  creditPullScoreIsUsable: true,
+  creditPullLiabilitiesAreUsable: true,
+  creditPullHasOpenLiabilities: false,
 };
 
 const verified = {
@@ -40,6 +45,27 @@ describe("current decision-grade evidence", () => {
     const result = assessCurrentDecisionGrade(verified as never, { ...complete, creditPullIsCurrent: false });
     expect(result.isDecisionGrade).toBe(false);
     expect(result.reasons).toContain("A current real bureau credit report is required.");
+  });
+
+  it("rejects real/current credit when its decision data is incomplete", () => {
+    const result = assessCurrentDecisionGrade(verified as never, {
+      ...complete,
+      creditPullLiabilitiesAreUsable: false,
+    });
+    expect(result.isDecisionGrade).toBe(false);
+    expect(result.verification.credit).toBe(false);
+    expect(result.reasons.join(" ")).toMatch(/open-liability ledger/i);
+  });
+
+  it("requires the current financial review to approve bureau liabilities", () => {
+    const result = assessCurrentDecisionGrade(verified as never, {
+      ...complete,
+      creditPullHasOpenLiabilities: true,
+      liabilityWorkpaperId: null,
+    });
+    expect(result.isDecisionGrade).toBe(false);
+    expect(result.verification.credit).toBe(false);
+    expect(result.reasons.join(" ")).toMatch(/bureau liabilities.*financial workpaper/i);
   });
 
   it("reports each current dimension independently without promoting the whole file", () => {

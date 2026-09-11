@@ -212,4 +212,71 @@ describe("generateDocumentTasks — borrower ownership", () => {
       }),
     );
   });
+
+  it("expires an untouched generated request that no longer matches the profile", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "stale-gift-task",
+        taskType: "document_request",
+        documentCategory: "gift_letter",
+        status: "OPEN",
+        triggerSource: "POLICY",
+        ownerRole: "BORROWER",
+        assignedToUserId: "borrower-1",
+        createdByUserId: "borrower-1",
+        isCustomRequest: false,
+      },
+    ] as never);
+
+    await generateDocumentTasks(
+      "app-1",
+      "borrower-1",
+      [requirement("bank_statement")],
+      "borrower-1",
+    );
+
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      "stale-gift-task",
+      expect.objectContaining({ status: "EXPIRED", autoResolved: true }),
+    );
+  });
+
+  it("preserves staff-authored and already-submitted requests during re-evaluation", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "staff-gift-task",
+        taskType: "document_request",
+        documentCategory: "gift_letter",
+        status: "OPEN",
+        triggerSource: "MANUAL",
+        ownerRole: "BORROWER",
+        assignedToUserId: "borrower-1",
+        createdByUserId: "loan-officer-1",
+        isCustomRequest: true,
+      },
+      {
+        id: "submitted-gift-task",
+        taskType: "document_request",
+        documentCategory: "gift_letter",
+        status: "IN_PROGRESS",
+        triggerSource: "POLICY",
+        ownerRole: "BORROWER",
+        assignedToUserId: "borrower-1",
+        createdByUserId: "borrower-1",
+        isCustomRequest: false,
+      },
+    ] as never);
+
+    await generateDocumentTasks(
+      "app-1",
+      "borrower-1",
+      [requirement("bank_statement")],
+      "borrower-1",
+    );
+
+    expect(updateTaskMock).not.toHaveBeenCalledWith(
+      expect.stringMatching(/gift-task$/),
+      expect.objectContaining({ status: "EXPIRED" }),
+    );
+  });
 });

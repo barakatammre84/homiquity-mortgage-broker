@@ -99,8 +99,9 @@ function computeOriginalLoanAmount(application: LoanApplication, delivery: LoanD
 export interface DeliveryDatasetContext {
   /** Count of mortgaged REO properties (excluding the subject), when known. */
   mortgagedReoCount?: number;
-  /** URLA occupancy type (urla_property_info.occupancy_type), when loaded. */
+  /** URLA occupancy and subordinate-financing facts, when loaded. */
   occupancyType?: string | null;
+  subordinateFinancingExists?: boolean | null;
 }
 function mapPropertyUsage(occupancy: string | null | undefined): string | undefined {
   const mapping: Record<string, string> = {
@@ -169,7 +170,7 @@ export function buildDeliveryDataset(
     isCondominium: propertyType.includes("condo") || undefined,
     isCooperative: propertyType.includes("co-op") || propertyType.includes("coop") || undefined,
     hasMortgageInsurance: delivery?.hasMortgageInsurance ?? undefined,
-    subordinateFinancingExists: delivery?.subordinateFinancingExists ?? undefined,
+    subordinateFinancingExists: context.subordinateFinancingExists ?? delivery?.subordinateFinancingExists ?? undefined,
     propertyUsageType: delivery?.propertyUsageType ?? mapPropertyUsage(context.occupancyType),
     // Mortgaged-property count = subject (1) + REO properties carrying a
     // mortgage. Only computed when REO data was loaded; a staff-entered
@@ -222,9 +223,7 @@ export async function evaluateDeliveryReadiness(applicationId: string): Promise<
   const combined = Array.from(new Set([...derived.map(d => d.code), ...manual])).sort();
   const sfcValidation = validateSfcSet(combined);
 
-  // 3. Loan Delivery / UCD / EarlyCheck edits. REO rows feed the
-  // mortgaged-property count (edit 6439); URLA property info feeds the
-  // occupancy-based usage type (edits 6159/6439).
+  // 3. Loan Delivery / UCD / EarlyCheck edits use REO and URLA property facts.
   const [reo, propertyInfo] = await Promise.all([
     storage.getRealEstateOwnedByApplication(applicationId),
     storage.getUrlaPropertyInfo(applicationId),
@@ -233,6 +232,7 @@ export async function evaluateDeliveryReadiness(applicationId: string): Promise<
   const dataset = buildDeliveryDataset(application, delivery, combined, {
     mortgagedReoCount,
     occupancyType: propertyInfo?.occupancyType ?? null,
+    subordinateFinancingExists: propertyInfo?.subordinateFinancingExists ?? null,
   });
   const edits = evaluateLoanDeliveryEdits(dataset);
 

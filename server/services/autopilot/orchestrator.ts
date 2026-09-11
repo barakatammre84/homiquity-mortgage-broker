@@ -4,7 +4,7 @@ import {
   extractW2Data,
   extractBankStatementData,
   extractLeaseData,
-  extractTaxReturnData,
+  extractProfitLossData,
   EXTRACTION_MODEL_ID,
   EXTRACTION_PROMPT_VERSION,
   type ExtractedDocumentData,
@@ -22,13 +22,13 @@ import { materializeFlagsToFollowUps } from "./followUps";
 import { publishReviewing, publishCurrentStatus } from "./events";
 import type { PreUwFlag } from "../preUnderwriting";
 import type { LoanApplication } from "@shared/schema";
-import { toNum } from "@shared/lib/number";
 import {
   getDocumentProcessingBlockReason,
   type DatabaseTransaction,
 } from "../documentLineage";
 import { applyExtractionToDocument } from "../extractionPersistence";
 import { classifyExtractionResult } from "../documentExtractionOutcome";
+import { extractionDocumentType } from "@shared/documentTypes";
 
 /**
  * Autopilot document orchestrator — the always-on agent's reaction to a borrower
@@ -81,14 +81,13 @@ const prettyDocType = (t: string): string =>
  * highlights. Returns null for types with no extractor (e.g. government_id) —
  * the run still narrates the upload and materializes follow-ups.
  */
-async function extractByType(
+export async function extractAutopilotDocument(
   documentType: string,
   storagePath: string,
   mimeType: string | null | undefined,
-  app: LoanApplication,
 ): Promise<ExtractionOutcome | null> {
   const highlights: string[] = [];
-  switch (documentType) {
+  switch (extractionDocumentType(documentType)) {
     case "pay_stub": {
       const e = await extractPayStubData(storagePath, mimeType ?? undefined);
       if (e.employerName) highlights.push(`Employer: ${e.employerName}`);
@@ -105,24 +104,6 @@ async function extractByType(
       }
       return { extracted: e, highlights };
     }
-    case "tax_return": {
-      const e = await extractTaxReturnData(storagePath, undefined, mimeType ?? undefined);
-      if (e.taxpayerName) highlights.push(`Taxpayer: ${e.taxpayerName}`);
-      const observedAnnual = e.w2Wages ?? e.grossIncome ?? e.adjustedGrossIncome;
-      if (observedAnnual != null) {
-        const stated = toNum(app.annualIncome);
-        if (!isNaN(stated) && stated > 0) {
-          const delta = observedAnnual - stated;
-          highlights.push(
-            `Stated ${usd(stated)} vs documented ${usd(observedAnnual)} (${delta >= 0 ? "+" : "-"}${usd(Math.abs(delta))}).`,
-          );
-        } else {
-          highlights.push(`Documented annual income: ${usd(observedAnnual)}`);
-        }
-      }
-      if (e.scheduleC?.netProfitLoss != null) highlights.push(`Schedule C net profit: ${usd(e.scheduleC.netProfitLoss)}`);
-      return { extracted: e, highlights };
-    }
     case "bank_statement": {
       const e = await extractBankStatementData(storagePath, mimeType ?? undefined);
       if (e.closingBalance != null) highlights.push(`Closing balance: ${usd(e.closingBalance)}`);
@@ -131,6 +112,15 @@ async function extractByType(
     }
     case "lease_agreement": {
       const e = await extractLeaseData(storagePath, mimeType ?? undefined);
+      if (e.propertyAddress) highlights.push(`Property: ${e.propertyAddress}`);
+      if (e.monthlyRent != null) highlights.push(`Monthly rent: ${usd(e.monthlyRent)}`);
+      return { extracted: e, highlights };
+    }
+    case "profit_loss": {
+      const e = await extractProfitLossData(storagePath, mimeType ?? undefined);
+      if (e.businessName) highlights.push(`Business: ${e.businessName}`);
+      if (e.periodEndDate) highlights.push(`Period ending: ${e.periodEndDate}`);
+      if (e.netProfitLoss != null) highlights.push(`YTD net profit or loss: ${usd(e.netProfitLoss)}`);
       return { extracted: e, highlights };
     }
     default:
@@ -269,7 +259,7 @@ export async function runAutopilotForDocument(
     // 1. PERCEIVE (+ 2. RECONCILE narration) ---------------------------------
     let outcome: ExtractionOutcome | null = null;
     try {
-      outcome = await extractByType(documentType, storagePath, mimeType, application);
+      outcome = await extractAutopilotDocument(documentType, storagePath, mimeType);
     } catch (err) {
       console.error(`[Autopilot] Extraction failed for ${documentId}:`, err);
       await publishCurrentStatus(applicationId);

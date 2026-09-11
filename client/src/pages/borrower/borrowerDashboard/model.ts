@@ -189,7 +189,9 @@ export function getPersonalizedGreeting(user: { firstName?: string | null } | nu
       return { title: greeting, subtitle: "You have an unfinished application. Pick up where you left off." };
     case "submitted":
     case "analyzing":
-      return { title: greeting, subtitle: "Your application is being reviewed. We'll have an answer shortly." };
+      return { title: greeting, subtitle: "We're checking your answers and preparing your next steps." };
+    case "under_review":
+      return { title: greeting, subtitle: "Your review plan is ready. Complete the requested steps to move forward." };
     case "pre_approved":
       return decisionGrade
         ? { title: greeting, subtitle: "You're pre-approved. Time to find your home." }

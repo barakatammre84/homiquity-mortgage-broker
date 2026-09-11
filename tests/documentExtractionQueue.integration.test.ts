@@ -10,6 +10,8 @@ const persistedDocumentId = randomUUID();
 const rollbackDocumentId = randomUUID();
 const jobId = randomUUID();
 const taxLaneJobId = randomUUID();
+const consentBackfillDocumentId = randomUUID();
+const reviewedTaxDocumentId = randomUUID();
 let fixturesCreated = false;
 
 beforeAll(async () => {
@@ -42,6 +44,20 @@ beforeAll(async () => {
        '/objects/rollback-paystub','uploaded')`,
     [rollbackDocumentId, userId],
   );
+  await pool.query(
+    `INSERT INTO documents
+       (id,user_id,document_type,file_name,file_size,mime_type,storage_path,status,created_at)
+     VALUES
+       ($1,$3,'tax_return_1040','waiting-on-consent.pdf',2048,'application/pdf',
+         '/objects/waiting-on-consent','uploaded',now()),
+       ($2,$3,'tax_return','already-reviewed-tax.pdf',2048,'application/pdf',
+         '/objects/already-reviewed-tax','verified',now() - interval '1 day')`,
+    [consentBackfillDocumentId, reviewedTaxDocumentId, userId],
+  );
+  await pool.query(`UPDATE documents SET document_type='1099_misc' WHERE id=$1`, [consentBackfillDocumentId]);
+  // A newer ordinary document must not consume the one-document tax backfill
+  // allowance before type filtering.
+  await pool.query(`UPDATE documents SET created_at=now() + interval '1 minute' WHERE id=$1`, [documentId]);
   fixturesCreated = true;
 });
 
@@ -62,13 +78,43 @@ afterAll(async () => {
   await pool.query(`DELETE FROM tax_extraction_runs WHERE user_id=$1`, [userId]);
   await pool.query(`DELETE FROM borrower_business_entities WHERE user_id=$1`, [userId]);
   await pool.query(`DELETE FROM borrower_consents WHERE user_id=$1`, [userId]);
-  await pool.query(`DELETE FROM document_extraction_jobs WHERE document_id=$1`, [documentId]);
-  await pool.query(`DELETE FROM documents WHERE id = ANY($1::varchar[])`, [[documentId, persistedDocumentId, rollbackDocumentId]]);
+  await pool.query(
+    `DELETE FROM document_extraction_jobs WHERE document_id = ANY($1::varchar[])`,
+    [[documentId, consentBackfillDocumentId, reviewedTaxDocumentId]],
+  );
+  await pool.query(`DELETE FROM documents WHERE id = ANY($1::varchar[])`, [[
+    documentId,
+    persistedDocumentId,
+    rollbackDocumentId,
+    consentBackfillDocumentId,
+    reviewedTaxDocumentId,
+  ]]);
   await pool.query(`DELETE FROM users WHERE id=$1`, [userId]);
   await pool.end();
 });
 
 describe.sequential("document extraction restart recovery", () => {
+  it("queues a current tax return after consent without repeating or processing reviewed evidence", async () => {
+    const { storage } = await import("../server/storage");
+    const {
+      enqueueUnprocessedTaxDocumentsAfterConsent,
+    } = await import("../server/services/documentExtractionJobs");
+    const currentDocuments = await storage.getDocumentsByUser(userId);
+
+    expect(await enqueueUnprocessedTaxDocumentsAfterConsent(currentDocuments, userId, null)).toBe(1);
+    expect(await enqueueUnprocessedTaxDocumentsAfterConsent(currentDocuments, userId, null)).toBe(0);
+
+    const jobs = await pool.query(
+      `SELECT document_id,mode FROM document_extraction_jobs
+        WHERE document_id = ANY($1::varchar[]) ORDER BY document_id`,
+      [[consentBackfillDocumentId, reviewedTaxDocumentId]],
+    );
+    expect(jobs.rows).toEqual([{
+      document_id: consentBackfillDocumentId,
+      mode: "tax_package",
+    }]);
+  });
+
   it("commits document state, confidence, facts, and readiness as one coherent extraction", async () => {
     const { storage } = await import("../server/storage");
     const { applyExtractionToDocument } = await import("../server/services/extractionPersistence");
@@ -223,9 +269,14 @@ describe.sequential("document extraction restart recovery", () => {
   });
 
   it("claims tax and ordinary jobs through independent database lanes", async () => {
+    // Keep the fixtures just ahead of the real worker's clock, then advance the
+    // claimant's explicit clock. The integration server runs its normal queue
+    // worker beside this test; a year-2000 available_at let that worker steal
+    // either row between INSERT and the direct lane claim.
+    const claimAt = new Date(Date.now() + 6 * 60_000);
     await pool.query(
       `UPDATE document_extraction_jobs
-          SET status='pending',attempt_count=0,available_at='2000-01-01T00:00:00Z',
+          SET status='pending',attempt_count=0,available_at=now() + interval '5 minutes',
               claimed_at=null,lease_expires_at=null,claimed_by=null,completed_at=null,
               last_error_code=null,last_error_at=null
         WHERE id=$1`,
@@ -234,17 +285,18 @@ describe.sequential("document extraction restart recovery", () => {
     await pool.query(
       `INSERT INTO document_extraction_jobs
          (id,document_id,requested_by_user_id,mode,status,attempt_count,max_attempts,available_at)
-       VALUES ($1,$2,$3,'tax_package','pending',0,3,'2000-01-01T00:00:00Z')`,
+       VALUES ($1,$2,$3,'tax_package','pending',0,3,now() + interval '5 minutes')`,
       [taxLaneJobId, documentId, userId],
     );
 
     const { claimNextDocumentExtractionJobForLane } = await import(
       "../server/services/documentExtractionJobs"
     );
-    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package");
+    const claimScope = { requestedByUserId: userId, documentId };
+    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package", claimAt, claimScope);
     expect(taxClaim).toMatchObject({ id: taxLaneJobId, mode: "tax_package", status: "processing" });
 
-    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary");
+    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary", claimAt, claimScope);
     expect(ordinaryClaim).toMatchObject({ id: jobId, mode: "standard", status: "processing" });
 
     await pool.query(
@@ -265,6 +317,7 @@ describe.sequential("document extraction restart recovery", () => {
     const runId = randomUUID();
     const logicalDocumentId = randomUUID();
     const entityId = randomUUID();
+    const reportedEntityId = randomUUID();
     await pool.query(
       `INSERT INTO tax_extraction_runs
          (id,document_id,user_id,status,completed_at)
@@ -274,8 +327,17 @@ describe.sequential("document extraction restart recovery", () => {
     await pool.query(
       `INSERT INTO borrower_business_entities
          (id,user_id,identity_key,entity_type,name)
-       VALUES ($1,$2,'name:queue test consulting','sole_proprietorship','Queue Test Consulting')`,
-      [entityId, userId],
+       VALUES
+         ($1,$2,'name:queue test consulting','sole_proprietorship','Queue Test Consulting'),
+         ($3,$2,'name:borrower reported shop','single_member_llc','Borrower Reported Shop')`,
+      [entityId, userId, reportedEntityId],
+    );
+    await pool.query(
+      `UPDATE borrower_business_entities
+          SET reported_by_borrower=true,ein_last4='4321',first_tax_year=2024,
+              last_tax_year=2025,source_form_count=2
+        WHERE id=$1`,
+      [reportedEntityId],
     );
     await pool.query(
       `INSERT INTO logical_documents
@@ -378,12 +440,25 @@ describe.sequential("document extraction restart recovery", () => {
       [userId],
     );
     expect(projections.rows[0]).toEqual({
-      entities: 0,
+      entities: 1,
       situations: 0,
       tax_reviews: 0,
       bank_reviews: 1,
       business_reviews: 1,
       rental_reviews: 1,
+    });
+    const preservedReportedBusiness = await pool.query(
+      `SELECT id,reported_by_borrower,ein_last4,first_tax_year,last_tax_year,source_form_count
+         FROM borrower_business_entities WHERE id=$1`,
+      [reportedEntityId],
+    );
+    expect(preservedReportedBusiness.rows[0]).toEqual({
+      id: reportedEntityId,
+      reported_by_borrower: true,
+      ein_last4: null,
+      first_tax_year: null,
+      last_tax_year: null,
+      source_form_count: 0,
     });
 
     const afterRevocation = await withActiveTaxDocumentConsent(userId, async () => "written");

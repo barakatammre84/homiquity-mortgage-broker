@@ -25,6 +25,8 @@ import {
   BANK_STATEMENT_PERIODS,
   type BankStatementAnalysisInput,
 } from "./paths/bankStatement";
+import { loadProfitLossActivity, type CurrentProfitLossSignal, type ProfitLossActivityIssue } from "../profitLossActivity";
+import { reoQualificationPicture } from "@shared/realEstateFinancing";
 
 /**
  * Multi-path income orchestrator (UAL P3) — the SINGLE income producer.
@@ -49,8 +51,14 @@ export interface IncomePathsCoreInput {
   otherIncome: OtherIncomeSource[];
   rentalProperties: RentalPropertyEntry[];
   fallbackAnnualIncome?: number | string | null;
+  expectedNoteDate?: Date | string | null;
+  applyVerifiedOtherIncomeAdjustments?: boolean;
   /** Latest captured bank-statement deposit analysis (P5 capture surface). */
   bankStatementAnalysis?: BankStatementAnalysisInput;
+  /** Accepted, human-reviewed current business activity. A decline forces
+   * review but never increases the tax-return qualifying figure. */
+  profitLossActivity?: CurrentProfitLossSignal[];
+  profitLossActivityIssues?: ProfitLossActivityIssue[];
   /**
    * Decision-grade provenance gate (shared/dataProvenance isDecisionGrade):
    * POSITIVE rental offsets and subject-property rent apply to qualifying
@@ -84,8 +92,14 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
     employment: input.employment,
     otherIncome: input.otherIncome,
     fallbackAnnualIncome: input.fallbackAnnualIncome,
+    expectedNoteDate: input.expectedNoteDate,
+    applyVerifiedOtherIncomeAdjustments: input.applyVerifiedOtherIncomeAdjustments,
   });
-  const selfEmployment = computeSelfEmploymentPath(input.employment);
+  const selfEmployment = computeSelfEmploymentPath(
+    input.employment,
+    input.profitLossActivity,
+    input.profitLossActivityIssues,
+  );
 
   // S-07: the departing residence enters the per-property offset set as one
   // more rental (projected rent − retained PITIA), never the DSCR portfolio.
@@ -177,7 +191,7 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
   }
 
   const requiresManualReview =
-    selfEmployment.path.requiresManualReview || rentalPath.requiresManualReview;
+    agency.path.requiresManualReview || selfEmployment.path.requiresManualReview || rentalPath.requiresManualReview;
 
   return {
     paths,
@@ -213,14 +227,27 @@ export function incomeInputsFingerprint(input: IncomePathsCoreInput): string {
         c: numOrNull(e.commissionIncome),
         o: numOrNull(e.otherIncome),
         t: numOrNull(e.totalMonthlyIncome),
+        crypto: e.paidInVirtualCurrency,
         // Self-employment worksheet drives the 1084 figure — hash its content.
         w: e.selfEmploymentIncome ?? null,
       }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
     otherIncome: input.otherIncome
-      .map((o) => numOrNull(o.monthlyAmount))
-      .filter((n): n is number => n !== null)
-      .sort((a, b) => a - b),
+      .map((o) => ({
+        borrowerSequenceNumber: o.borrowerSequenceNumber ?? 1,
+        source: o.incomeSource,
+        amount: numOrNull(o.monthlyAmount),
+        taxTreatment: o.taxTreatment,
+        nonTaxableAmount: numOrNull(o.nonTaxableMonthlyAmount),
+        hasDefinedExpiration: o.hasDefinedExpiration,
+        expirationDate: o.expirationDate,
+        crypto: o.paidInVirtualCurrency,
+      }))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    expectedNoteDate: input.expectedNoteDate instanceof Date
+      ? input.expectedNoteDate.toISOString().slice(0, 10)
+      : input.expectedNoteDate ?? null,
+    applyVerifiedOtherIncomeAdjustments: input.applyVerifiedOtherIncomeAdjustments === true,
     rental: input.rentalProperties
       .map((p) => ({ r: numOrNull(p.monthlyRentalIncome), d: numOrNull(p.monthlyDebtPayment) }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
@@ -233,6 +260,23 @@ export function incomeInputsFingerprint(input: IncomePathsCoreInput): string {
           c: !!input.bankStatementAnalysis.hasThirdPartyExpenseStatement,
         }
       : null,
+    profitLossActivity: (input.profitLossActivity ?? [])
+      .map(signal => ({
+        employmentId: signal.employmentId,
+        documentId: signal.documentId,
+        periodStart: signal.periodStart,
+        periodEnd: signal.periodEnd,
+        periodMonths: signal.periodMonths,
+        businessNetProfitLoss: signal.businessNetProfitLoss,
+        ownershipPercent: signal.ownershipPercent,
+        borrowerMonthlyNet: signal.borrowerMonthlyNet,
+        taxBasedMonthlyIncome: signal.taxBasedMonthlyIncome,
+        direction: signal.direction,
+      }))
+      .sort((a, b) => a.employmentId.localeCompare(b.employmentId)),
+    profitLossActivityIssues: (input.profitLossActivityIssues ?? [])
+      .map(issue => ({ employmentId: issue.employmentId, documentId: issue.documentId, message: issue.message }))
+      .sort((a, b) => a.employmentId.localeCompare(b.employmentId) || a.documentId.localeCompare(b.documentId)),
     // Rental DTI application context (B3-3.8-01 wiring): the provenance gate,
     // the mortgage-liability coexistence guard, and the subject-property facts
     // all change the applied result, so they are part of the inputs identity.
@@ -349,17 +393,22 @@ export async function evaluateIncomePaths(
   app: LoanApplication,
   options: { applyRentalToDti: boolean } = { applyRentalToDti: false },
 ): Promise<EvaluatedIncomePaths> {
-  const [employment, otherIncome, bankStatementAnalysis, liabilities, propertyInfo] =
+  const [employment, otherIncome, bankStatementAnalysis, liabilities, propertyInfo, realEstateOwned] =
     await Promise.all([
       storage.getEmploymentHistory(app.id),
       storage.getOtherIncomeSources(app.id),
       loadLatestBankStatementAnalysis(app.id),
       storage.getUrlaLiabilities(app.id),
       storage.getUrlaPropertyInfo(app.id),
+      storage.getRealEstateOwnedByApplication(app.id),
     ]);
-  const rentalProperties = ((app.incomeSources as IncomeSourceEntry[] | null) ?? [])
+  const intakeRentalProperties = ((app.incomeSources as IncomeSourceEntry[] | null) ?? [])
     .filter((s) => s.type === "rental")
     .flatMap((s) => s.rentalProperties ?? []);
+  const rentalProperties = app.ownsOtherRealEstate == null
+    ? intakeRentalProperties
+    : reoQualificationPicture(realEstateOwned).rentalProperties;
+  const profitLossActivity = await loadProfitLossActivity(app.id, employment);
 
   const input: IncomePathsCoreInput = {
     employment,
@@ -367,10 +416,12 @@ export async function evaluateIncomePaths(
     rentalProperties,
     fallbackAnnualIncome: app.annualIncome,
     bankStatementAnalysis,
+    profitLossActivity: profitLossActivity.signals,
+    profitLossActivityIssues: profitLossActivity.issues,
     // Callers must explicitly opt into positive rental income after resolving
     // current decision evidence. A sticky application label is not enough.
     applyRentalToDti: options.applyRentalToDti,
-    hasMortgageLiabilityRows: hasMortgageTypeLiability(liabilities),
+    hasMortgageLiabilityRows: app.ownsOtherRealEstate == null && hasMortgageTypeLiability(liabilities),
     subjectProperty: propertyInfo
       ? {
           numberOfUnits: propertyInfo.numberOfUnits,
@@ -379,7 +430,7 @@ export async function evaluateIncomePaths(
           estimatedPitia: estimateSubjectPitia(app.purchasePrice, app.downPayment),
         }
       : null,
-    departingResidence: departingResidenceInput(app),
+    departingResidence: app.ownsOtherRealEstate == null ? departingResidenceInput(app) : null,
   };
   const result = computeIncomePaths(input);
   return {

@@ -685,7 +685,15 @@ export function registerComplianceRoutes(
       // Only a real completed bureau pull is decision-grade evidence. The
       // deterministic simulator is useful for workflow testing, but promoting
       // it to verified would let invented scores ground a letter or approval.
-      if (!completedPull.isSimulated) {
+      const { assessCreditPullDecisionData } = await import("../services/decisionCredit");
+      const { isCurrentRealCreditPull } = await import("../services/currentDecisionGrade");
+      const { loadExpectedBorrowerSequences } = await import("../services/borrowerSequences");
+      const expectedBorrowerSequenceNumbers = await loadExpectedBorrowerSequences(routeParam(req, "id"));
+      if (
+        !completedPull.isSimulated
+        && isCurrentRealCreditPull(completedPull)
+        && assessCreditPullDecisionData(completedPull, expectedBorrowerSequenceNumbers).isReady
+      ) {
         import("../services/verification")
           .then((m) => m.markDimensionVerified(routeParam(req, "id"), "credit", user.id))
           .catch(() => {});

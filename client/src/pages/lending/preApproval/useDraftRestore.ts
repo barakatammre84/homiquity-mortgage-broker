@@ -88,6 +88,22 @@ export function draftToFormValues(
   };
 }
 
+/**
+ * Resume the exact browser step only when the local snapshot is bound to the
+ * same authenticated borrower. Older unbound snapshots and snapshots from a
+ * different signed-in user fall back to the first question; their data never
+ * enters the form.
+ */
+export function restoredServerDraftStep(
+  draft: Pick<LoanApplication, "userId">,
+  saved: FunnelSaved<PreApprovalFormData> | null,
+): FunnelStepId {
+  if (!saved || saved.ownerId !== draft.userId || saved.stepId === "intro") {
+    return "loanPurpose";
+  }
+  return toStepId(saved.stepId);
+}
+
 export function useDraftRestore({
   form,
   isAuthenticated,
@@ -144,11 +160,16 @@ export function useDraftRestore({
       // there is no second store to reseed (there used to be, via a
       // page-owned applyIncomeSources threaded in as an argument).
       form.reset(values);
-      goTo("loanPurpose");
+      const saved = readSaved();
+      const resumeStep = restoredServerDraftStep(serverDraft, saved);
+      if (resumeStep === "loanPurpose") goTo(resumeStep);
+      else hydrate(resumeStep, values);
       setShowRestoreBanner(false);
       toast({
         title: "Draft restored from your account",
-        description: "We loaded your saved progress.",
+        description: resumeStep === "loanPurpose"
+          ? "We loaded your saved answers."
+          : "We loaded your saved answers and returned to your last step.",
       });
       return;
     }

@@ -196,7 +196,7 @@ describe("detectSignificantDeposits (Fannie B3-4.2-02)", () => {
       [
         { amount: -12_000, date: "2026-06-15", description: "TRANSFER CREDIT" },
         { amount: -2_500, date: "2026-06-20", description: "PAYROLL" },
-        { amount: 800, date: "2026-06-21", description: "RENT" }, // below threshold — ignored (detection is sign-agnostic)
+        { amount: 800, date: "2026-06-21", description: "RENT" }, // outflow — never a deposit
       ],
       6_000,
     );
@@ -208,6 +208,13 @@ describe("detectSignificantDeposits (Fannie B3-4.2-02)", () => {
   it("returns nothing without income or transactions", () => {
     expect(detectSignificantDeposits(null, 6_000)).toHaveLength(0);
     expect(detectSignificantDeposits([{ amount: -9_000, date: "2026-06-15" }], 0)).toHaveLength(0);
+  });
+
+  it("does not turn a large outflow into a deposit-sourcing request", () => {
+    expect(detectSignificantDeposits(
+      [{ amount: 12_000, date: "2026-06-15", description: "WIRE PAYMENT" }],
+      6_000,
+    )).toEqual([]);
   });
 });
 

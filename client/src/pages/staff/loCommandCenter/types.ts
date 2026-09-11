@@ -70,6 +70,29 @@ export interface CockpitData {
     closingDate: string | null;
     createdAt: string | null;
   };
+  reportedIncome: {
+    householdAnnualTotal: number | null;
+    employmentType: string | null;
+    detailedAnnualTotal: number;
+    unitemizedAnnualAmount: number | null;
+    breakdownExceedsHouseholdTotal: boolean;
+    sources: Array<{
+      type: string;
+      annualAmount: number | null;
+      name: string | null;
+      yearsInRole: string | null;
+      businessStructure: string | null;
+      ownershipPercent: string | null;
+      rentalPropertyCount: number;
+    }>;
+    rental: {
+      propertyCount: number;
+      grossMonthlyRent: number;
+      planningMonthlyRent: number;
+      monthlyPropertyPayments: number;
+      preliminaryMonthlyOffset: number;
+    } | null;
+  };
   income: {
     primaryMonthlyQualifyingIncome: number;
     incomeBasis: string;

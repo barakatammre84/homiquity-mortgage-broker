@@ -32,6 +32,7 @@ export interface DemographicsState {
 export interface BorrowerSlice {
   personalInfo: PersonalInfoForm;
   employmentRecords: Partial<EmploymentHistory>[];
+  otherIncomeSources: Partial<OtherIncomeSource>[];
   assets: AssetForm[];
   liabilities: LiabilityForm[];
   declarations: Partial<BorrowerDeclarations>;
@@ -41,6 +42,7 @@ export interface BorrowerSlice {
 export interface SectionsPayload {
   personalInfo: PersonalInfoForm;
   employmentHistory: Partial<EmploymentHistory>[];
+  otherIncomeSources: Partial<OtherIncomeSource>[];
   assets: AssetForm[];
   liabilities: LiabilityForm[];
   declarations: Partial<BorrowerDeclarations>;
@@ -48,7 +50,6 @@ export interface SectionsPayload {
 }
 
 export interface UrlaSavePayload extends SectionsPayload {
-  otherIncomeSources: Partial<OtherIncomeSource>[];
   propertyInfo: Partial<UrlaPropertyInfo>;
   /** Section 4a — loan type + amortization type (loan_applications columns). */
   loanDetails: UrlaLoanDetails;
@@ -110,6 +111,7 @@ export const emptyDemographics = (): DemographicsState => ({
 export const emptySlice = (): BorrowerSlice => ({
   personalInfo: {},
   employmentRecords: [{}],
+  otherIncomeSources: [],
   assets: [{}],
   liabilities: [{}],
   declarations: {},
@@ -308,6 +310,7 @@ export function prefillOtherIncomeSources(
     })
     .map((source) => ({
       applicationId: app.id,
+      borrowerSequenceNumber: 1,
       incomeSource:
         source.type === "social_security"
           ? otherIncomeTypeLabel("social_security")

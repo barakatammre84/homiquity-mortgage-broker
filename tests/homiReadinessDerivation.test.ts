@@ -73,4 +73,20 @@ describe("deriveReadinessProfile", () => {
     expect(deriveReadinessProfile(base({ completionPercentage: 30 })).readinessTier).toBe("building");
     expect(deriveReadinessProfile(base({ completionPercentage: 5 })).readinessTier).toBe("exploring");
   });
+
+  it("does not call verified documents package-ready without an approved financial review", () => {
+    const profile = deriveReadinessProfile(base({
+      annualIncome: "120000",
+      creditScore: "740",
+      monthlyDebts: "900",
+      employmentType: "employed",
+      documentsUploaded: 3,
+      documentsVerified: 3,
+      documentsMissing: [],
+      financialPackageApproved: false,
+      completionPercentage: 100,
+    }));
+    expect(profile.statusNote).toMatch(/financial and underwriting review remain separate/i);
+    expect(profile.statusNote).not.toMatch(/package preparation|package ready/i);
+  });
 });

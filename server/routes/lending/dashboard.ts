@@ -241,9 +241,9 @@ export function registerDashboardRoutes(
   });
 
   // Document Checklist API — the personalized requirements the pipeline
-  // engine wrote as loan_conditions (self-employed → P&L etc.), with the
-  // legacy 5-item standard list as the no-conditions fallback. All derivation
-  // rules live in the pure builder (server/services/documentChecklist.ts).
+  // engine wrote as loan_conditions (self-employed → P&L etc.) plus explicit
+  // borrower document tasks. All derivation rules live in the pure builder
+  // (server/services/documentChecklist.ts).
   app.get("/api/applications/:applicationId/document-checklist", isAuthenticated, async (req, res) => {
     try {
       const { applicationId } = routeParams(req);
