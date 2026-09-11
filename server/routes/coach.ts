@@ -2,9 +2,8 @@ import type { Express, Request, Response } from "express";
 import { isAuthenticated } from "../auth";
 import { storage } from "../storage";
 import { runCoachTurn, CoachTurnError, isCoachConfigured, type CoachTurnResult, type CoachEmit, type VerifiedUserContext, type CoachIntakeData, deriveUserType, deriveReadinessState, deriveCompletionPercentage, deriveCompletedSteps, coachIntakeSchema, coachActionPlanSchema, coachDocumentChecklistSchema, coachProfileSchema } from "../services/coachingService";
-import { buildBorrowerGraph } from "../services/borrowerGraph";
 import { getCoachIntakeSnapshots } from "../services/coachIntake";
-import { loadFileTruth, EMPTY_LOAN_STATUS } from "../services/coachFileTruth";
+import { loadFileTruth, EMPTY_LOAN_STATUS, selectCoachApplications } from "../services/coachFileTruth";
 import { deriveReadinessProfile } from "../services/coachingContext";
 import { beginSse, writeSse } from "../sse";
 import {
@@ -15,8 +14,7 @@ import {
 import { scanForEscalationTriggers } from "@shared/compliance/complaintEscalation";
 import { escalateFlaggedMessage } from "../services/complaintEscalation";
 import { logAudit } from "../auditLog";
-import { pickActiveLoanApplication, pickWorkableLoanApplication } from "@shared/schema";
-import type { CoachConversation, User } from "@shared/schema";
+import type { CoachConversation, Document, User } from "@shared/schema";
 import { z } from "zod";
 import { emitEvent } from "../services/analyticsEventPipeline";
 import {
@@ -31,6 +29,32 @@ import {
  */
 const EXTRACTION_CONFIDENCE_LEVELS: readonly string[] = ["high", "medium", "low"];
 import { routeParam } from "../http/routeParams";
+
+function toCoachDocument(document: Document): NonNullable<VerifiedUserContext["uploadedDocuments"]>[number] {
+  let extractionConfidence: "high" | "medium" | "low" | null = null;
+
+  // Only the extraction pipeline's allowlisted confidence value may enter
+  // Homi's context. Legacy free text in this column remains excluded.
+  if (document.notes) {
+    try {
+      const lineage = JSON.parse(document.notes as string);
+      if (EXTRACTION_CONFIDENCE_LEVELS.includes(lineage.confidence)) {
+        extractionConfidence = lineage.confidence;
+      }
+    } catch {
+      // Non-JSON legacy notes are not model context.
+    }
+  }
+
+  return {
+    documentType: document.documentType,
+    status: document.status || "uploaded",
+    uploadDate: document.createdAt
+      ? new Date(document.createdAt).toISOString().split("T")[0]
+      : null,
+    extractionConfidence,
+  };
+}
 
 const messageSchema = z.object({
   message: z.string().min(1).max(5000),
@@ -116,6 +140,7 @@ async function recordHomiFailure(input: {
 
 async function refreshReadinessAfterCapture(input: {
   userId: string;
+  user: User;
   verifiedContext: VerifiedUserContext;
   result: CoachTurnResult;
   emit: CoachEmit;
@@ -124,25 +149,11 @@ async function refreshReadinessAfterCapture(input: {
   if ((input.result.state.captureOutcome?.appliedFields.length ?? 0) === 0) return before;
 
   try {
-    const graph = await buildBorrowerGraph(
-      input.userId,
-      input.result.state.syncedApplicationId ?? undefined,
-    );
-    if (!graph) return null;
-    const refreshedContext: VerifiedUserContext = {
-      ...input.verifiedContext,
-      completionPercentage: graph.readiness.completionPercentage,
-      readinessTier: graph.readiness.tier,
-      completedInputs: graph.readiness.completedInputs,
-      outstandingInputs: graph.readiness.outstandingInputs,
-      documentsMissing: graph.documentsMissing,
-      documentsUploaded: graph.documentsUploaded,
-      documentsVerified: graph.documentsVerified,
-    };
+    const refreshedContext = await buildVerifiedContext(input.userId, input.user);
     const profile = deriveReadinessProfile(refreshedContext);
     input.result.state.profile = profile;
     input.emit({ type: "panel", profile, source: "file" });
-    return graph.readiness.completionPercentage;
+    return refreshedContext.completionPercentage ?? null;
   } catch (error) {
     console.error("[HomiOutcome] Failed to refresh the post-turn server snapshot:", error);
     return null;
@@ -152,28 +163,34 @@ async function refreshReadinessAfterCapture(input: {
 async function buildVerifiedContext(userId: string, user: User, propertyContext?: { price: number; address: string } | null): Promise<VerifiedUserContext> {
   try {
     const applications = await storage.getLoanApplicationsByUser(userId);
-    // Coach context: the in-flight file first; else the funded one (post-close
-    // coaching still needs the closed loan's facts); else the most recent file
-    // of any status so the coach is never blind to history.
-    const activeApp = pickActiveLoanApplication(applications)
-      ?? applications.find(a => a.status === "funded")
-      ?? applications[0];
+    // Use one file for both narrative context and server actions. An in-flight
+    // application wins over a newer draft; a draft is used when there is no
+    // submitted file. This prevents Homi from discussing one file while its
+    // upload, checklist, evidence, and handoff tools act on another.
+    const {
+      workableApplication: workableApp,
+      contextApplication: contextApp,
+    } = selectCoachApplications(applications);
 
-    // TWO resolutions on purpose, and they are not interchangeable.
-    //
-    // `activeApp` above is deliberately wide — it falls back to the most recent
-    // file of ANY status so the narrative context is never blind to history.
-    // That is right for prose ("your last application was withdrawn") and wrong
-    // for a tool that tells a borrower which documents to upload: the `??
-    // applications[0]` tail silently resurrects denied/withdrawn/funded files,
-    // which is how uploads once landed on a closed loan (see
-    // pickWorkableLoanApplication's docblock). The server-truth tools target
-    // the workable file or nothing at all.
-    const workableApp = pickWorkableLoanApplication(applications);
-
-    if (!activeApp) {
+    if (!contextApp) {
+      // Renter-path tax documents may exist before a mortgage application.
+      // Keep Homi aware of those account-level records so it does not ask for
+      // something the borrower already supplied or call a generic checklist a
+      // connected mortgage file.
+      let uploadedDocuments: VerifiedUserContext["uploadedDocuments"] = [];
+      try {
+        const documents = await storage.getDocumentsByUser(userId);
+        uploadedDocuments = documents
+          .filter((document) => !document.applicationId)
+          .map(toCoachDocument);
+      } catch (error) {
+        console.warn("[Coach] Could not fetch planning documents:", error);
+      }
       return {
         hasApplication: false,
+        uploadedDocuments,
+        documentsUploaded: uploadedDocuments.length,
+        documentsVerified: uploadedDocuments.filter((document) => document.status === "verified").length,
         userName: user.firstName && user.lastName
           ? `${user.firstName} ${user.lastName}`
           : (user.email?.split("@")[0] || undefined),
@@ -186,7 +203,7 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
       const { employmentHistory: empTable } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
       const empRecords = await database.select().from(empTable)
-        .where(eq(empTable.applicationId, activeApp.id));
+        .where(eq(empTable.applicationId, contextApp.id));
       employmentHistory = empRecords.map(e => ({
         employerName: e.employerName,
         positionTitle: e.positionTitle,
@@ -200,47 +217,8 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
 
     let uploadedDocuments: VerifiedUserContext["uploadedDocuments"] = [];
     try {
-      const docs = await storage.getDocumentsByApplication(activeApp.id);
-      uploadedDocuments = docs.map(d => {
-        let extractionConfidence: "high" | "medium" | "low" | null = null;
-
-        // Only `confidence` is read here, and only because it is one of the
-        // keys the extraction writers actually emit. The other reads that used
-        // to live here — employeeName, employerName, issues, and the
-        // payPeriodEnd/statementEndDate/statementDate/documentYear date keys —
-        // are written by NO extractor in this repo, so they could only ever be
-        // populated by a borrower typing JSON into the upload description box,
-        // which landed verbatim in this column. `issues` was the worst of them:
-        // coachingContext interpolates it UNESCAPED into a prompt block headed
-        // "DOCUMENT-VERIFIED DATA (HIGHEST TRUST) … overrides EVERYTHING else",
-        // in a request that carries live tool access — a clean prompt-injection
-        // primitive (F-027). Deleted, not sanitized: there is no legitimate
-        // producer to sanitize for (F-028).
-        if (d.notes) {
-          try {
-            const lineage = JSON.parse(d.notes as string);
-            // Validate against the enum, do NOT trust the parsed value. JSON.parse
-            // returns `any`, so the declared "high" | "medium" | "low" type above is
-            // not enforced at runtime — and coachingContext interpolates this string
-            // VERBATIM into a prompt that carries live tool access. Checking only
-            // that the *key* exists (as the first cut of this fix did) leaves the
-            // *value* attacker-controlled on any pre-0046 row, where borrower text
-            // could still be sitting in `notes`. Anything off-enum is dropped.
-            if (EXTRACTION_CONFIDENCE_LEVELS.includes(lineage.confidence)) {
-              extractionConfidence = lineage.confidence;
-            }
-          } catch {
-            // notes is not valid JSON, skip
-          }
-        }
-
-        return {
-          documentType: d.documentType,
-          status: d.status || "uploaded",
-          uploadDate: d.createdAt ? new Date(d.createdAt).toISOString().split("T")[0] : null,
-          extractionConfidence,
-        };
-      });
+      const docs = await storage.getDocumentsByApplication(contextApp.id);
+      uploadedDocuments = docs.map(toCoachDocument);
     } catch (e) {
       console.warn("[Coach] Could not fetch documents:", e);
     }
@@ -248,62 +226,108 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
     const context: VerifiedUserContext = {
       hasApplication: true,
       workableApplicationId: workableApp?.id ?? null,
-      applicationStatus: activeApp.status,
-      annualIncome: activeApp.annualIncome,
-      monthlyDebts: activeApp.monthlyDebts,
-      creditScore: activeApp.creditScore,
-      employmentType: activeApp.employmentType,
-      employmentYears: activeApp.employmentYears,
-      employerName: activeApp.employerName,
-      isVeteran: activeApp.isVeteran || false,
-      isFirstTimeBuyer: activeApp.isFirstTimeBuyer || false,
-      dtiRatio: activeApp.dtiRatio,
-      ltvRatio: activeApp.ltvRatio,
-      preApprovalAmount: activeApp.preApprovalAmount,
-      purchasePrice: activeApp.purchasePrice,
-      downPayment: activeApp.downPayment,
-      preferredLoanType: activeApp.preferredLoanType,
-      propertyType: activeApp.propertyType,
-      loanPurpose: activeApp.loanPurpose,
+      applicationStatus: contextApp.status,
+      annualIncome: contextApp.annualIncome,
+      monthlyDebts: contextApp.monthlyDebts,
+      creditScore: contextApp.creditScore,
+      employmentType: contextApp.employmentType,
+      employmentYears: contextApp.employmentYears,
+      employerName: contextApp.employerName,
+      isVeteran: contextApp.isVeteran || false,
+      isFirstTimeBuyer: contextApp.isFirstTimeBuyer || false,
+      dtiRatio: contextApp.dtiRatio,
+      ltvRatio: contextApp.ltvRatio,
+      preApprovalAmount: contextApp.preApprovalAmount,
+      purchasePrice: contextApp.purchasePrice,
+      downPayment: contextApp.downPayment,
+      preferredLoanType: contextApp.preferredLoanType,
+      propertyType: contextApp.propertyType,
+      loanPurpose: contextApp.loanPurpose,
       employmentHistory,
+      incomeSources: Array.isArray(contextApp.incomeSources)
+        ? contextApp.incomeSources.map((source: any) => ({
+            type: String(source?.type ?? "other"),
+            annualAmount: source?.annualAmount == null ? null : String(source.annualAmount),
+            employerName: source?.employerName == null ? null : String(source.employerName),
+            yearsInRole: source?.yearsInRole == null ? null : String(source.yearsInRole),
+            businessStructure: source?.businessStructure == null ? null : String(source.businessStructure),
+            ownershipPercent: source?.ownershipPercent == null ? null : String(source.ownershipPercent),
+            rentalProperties: Array.isArray(source?.rentalProperties)
+              ? source.rentalProperties.map((property: any) => ({
+                  address: String(property?.address ?? "Rental property"),
+                  monthlyRentalIncome: property?.monthlyRentalIncome == null
+                    ? null
+                    : String(property.monthlyRentalIncome),
+                  monthlyDebtPayment: property?.monthlyDebtPayment == null
+                    ? null
+                    : String(property.monthlyDebtPayment),
+                }))
+              : [],
+          }))
+        : [],
       uploadedDocuments,
       userName: user.firstName && user.lastName
         ? `${user.firstName} ${user.lastName}`
         : (user.email?.split("@")[0] || undefined),
     };
 
-    try {
-      const graph = await buildBorrowerGraph(userId);
-      if (graph) {
-        context.completionPercentage = graph.readiness.completionPercentage;
-        context.readinessTier = graph.readiness.tier;
-        context.outstandingInputs = graph.readiness.outstandingInputs;
-        context.completedInputs = graph.readiness.completedInputs;
-        context.documentsMissing = graph.documentsMissing;
-        context.documentsUploaded = graph.documentsUploaded;
-        context.documentsVerified = graph.documentsVerified;
-        context.daysSinceLastActivity = graph.predictiveSignals.daysSinceLastActivity;
-        context.engagementLevel = graph.predictiveSignals.engagementLevel;
-        context.suggestedNextAction = graph.predictiveSignals.suggestedNextAction;
+    const selfEmployed = employmentHistory.some((employment) => employment.isSelfEmployed);
+    context.hasMultipleIncomes = employmentHistory.length > 1;
+    context.hasBusinessIncome = selfEmployed || contextApp.employmentType === "self_employed";
+    const investmentPropertyTypes = ["investment", "investment_property", "rental", "multi_family"];
+    const propertyTypeVal = (contextApp.propertyType || "").toLowerCase();
+    const loanPurposeVal = (contextApp.loanPurpose || "").toLowerCase();
+    const occupancyVal = ((contextApp as any).occupancyType || (contextApp as any).occupancy || "").toLowerCase();
+    const reportedRentalSources = context.incomeSources?.some(
+      (source) => source.type === "rental" || (source.rentalProperties?.length ?? 0) > 0,
+    ) ?? false;
+    context.hasInvestmentProperties = reportedRentalSources
+      || investmentPropertyTypes.includes(propertyTypeVal)
+      || loanPurposeVal.includes("investment")
+      || loanPurposeVal.includes("rental")
+      || occupancyVal === "investment"
+      || occupancyVal === "non_owner_occupied"
+      || occupancyVal === "investor";
 
-        const selfEmployed = employmentHistory?.some(e => e.isSelfEmployed);
-        const multipleIncomes = (employmentHistory?.length || 0) > 1;
-        context.hasMultipleIncomes = multipleIncomes;
-        context.hasBusinessIncome = selfEmployed || false;
-
-        const investmentPropertyTypes = ["investment", "investment_property", "rental", "multi_family"];
-        const propertyTypeVal = (activeApp?.propertyType || "").toLowerCase();
-        const loanPurposeVal = (activeApp?.loanPurpose || "").toLowerCase();
-        const occupancyVal = ((activeApp as any)?.occupancyType || (activeApp as any)?.occupancy || "").toLowerCase();
-        context.hasInvestmentProperties = investmentPropertyTypes.includes(propertyTypeVal)
-          || loanPurposeVal.includes("investment")
-          || loanPurposeVal.includes("rental")
-          || occupancyVal === "investment"
-          || occupancyVal === "non_owner_occupied"
-          || occupancyVal === "investor";
+    if (workableApp) {
+      try {
+        // This is the same personalized checklist/status projection the Homi
+        // tools and borrower Documents page use. Readiness must never fall back
+        // to the borrowerGraph's legacy five-document template or another
+        // application's documents.
+        const truth = await loadFileTruth(workableApp.id, user);
+        if (truth) {
+          context.fileTruth = truth;
+          const missingItems = truth.checklist.documents.filter(
+            (document) => document.status === "needed" || document.status === "rejected",
+          );
+          context.documentsMissing = missingItems.map((document) => document.label);
+          context.documentsUploaded = truth.checklist.stats.uploaded + truth.checklist.stats.verified;
+          context.documentsVerified = truth.checklist.stats.verified;
+          context.suggestedNextAction = truth.status.nextAction?.title ?? null;
+          if (truth.status.lastActivityAt) {
+            const elapsed = Date.now() - new Date(truth.status.lastActivityAt).getTime();
+            if (Number.isFinite(elapsed) && elapsed >= 0) {
+              context.daysSinceLastActivity = Math.floor(elapsed / 86_400_000);
+            }
+          }
+          // Package readiness is a financial-review fact, not an inference
+          // from uploaded or accepted documents. Recompute the current memo
+          // and workpaper chain before allowing Homi to use that state.
+          const canPossiblyBePackageReady = missingItems.length === 0
+            && truth.checklist.stats.verified > 0
+            && !!(context.annualIncome && context.creditScore && context.monthlyDebts && context.employmentType);
+          if (canPossiblyBePackageReady) {
+            const approved = await import("../services/financialReview")
+              .then(module => module.getCurrentApprovedFinancialVerificationEvidence(workableApp.id));
+            context.financialPackageApproved = !!approved.memo;
+          } else {
+            context.financialPackageApproved = false;
+          }
+        }
+      } catch (error) {
+        console.warn("[Coach] Could not load current file readiness:", error);
       }
-    } catch (e) {
-      console.warn("[Coach] Could not enrich context from Borrower Graph:", e);
     }
 
     if (propertyContext) {
@@ -314,6 +338,22 @@ async function buildVerifiedContext(userId: string, user: User, propertyContext?
     context.readinessState = deriveReadinessState(context);
     context.completionPercentage = deriveCompletionPercentage(context);
     context.completedSteps = deriveCompletedSteps(context);
+    context.completedInputs = context.completedSteps;
+    const requiredInputs: Array<[unknown, string]> = [
+      [context.employmentType, "Employment type"],
+      [context.annualIncome, "Annual income"],
+      [context.creditScore, "Credit score range"],
+      [context.monthlyDebts, "Monthly debt payments"],
+      [context.purchasePrice, "Target purchase price"],
+      [context.downPayment, "Down payment"],
+      [context.propertyType, "Property type"],
+      [context.loanPurpose, "Loan purpose"],
+    ];
+    context.outstandingInputs = [
+      ...requiredInputs.filter(([value]) => !value).map(([, label]) => label),
+      ...(context.documentsMissing ?? []),
+    ];
+    context.readinessTier = deriveReadinessProfile({ ...context, readinessTier: null }).readinessTier;
 
     return context;
   } catch (error) {
@@ -728,6 +768,7 @@ export function registerCoachRoutes(app: Express) {
 
       const completionAfter = await refreshReadinessAfterCapture({
         userId: prep.user.id,
+        user: prep.user,
         verifiedContext: prep.verifiedContext,
         result,
         emit,
@@ -830,10 +871,14 @@ export function registerCoachRoutes(app: Express) {
       }
 
       let lastCaptured: Record<string, unknown> | null = null;
+      let lastPanel: Record<string, unknown> = {};
       const emit: CoachEmit = (event) => {
         if (event.type === "captured") {
           const { type, ...data } = event;
           lastCaptured = data;
+        } else if (event.type === "panel") {
+          const { type, ...data } = event;
+          lastPanel = { ...lastPanel, ...data };
         }
       };
 
@@ -856,6 +901,7 @@ export function registerCoachRoutes(app: Express) {
 
       const completionAfter = await refreshReadinessAfterCapture({
         userId: prep.user.id,
+        user: prep.user,
         verifiedContext: prep.verifiedContext,
         result,
         emit,
@@ -883,6 +929,7 @@ export function registerCoachRoutes(app: Express) {
         actionPlan: state.actionPlan || prep.conversation.actionPlan || null,
         documentChecklist: state.documentChecklist || prep.conversation.documentChecklist || null,
         borrowerPackage: state.borrowerPackage || null,
+        documentEvidence: state.documentEvidence || lastPanel.documentEvidence || null,
         captured: lastCaptured,
         suggestions: state.suggestions || null,
         ...(result.degraded ? { degraded: true } : {}),
@@ -1032,28 +1079,47 @@ export function registerCoachRoutes(app: Express) {
       const readiness = deriveReadinessProfile(verifiedContext);
 
       if (!verifiedContext.workableApplicationId) {
+        const planningDocuments = verifiedContext.uploadedDocuments ?? [];
         return res.json({
           hasApplication: false,
+          applicationId: null,
           loanStatus: EMPTY_LOAN_STATUS,
           documentChecklist: [],
           checklistStats: null,
+          planningDocumentStats: {
+            total: planningDocuments.length,
+            verified: planningDocuments.filter((document) => document.status === "verified").length,
+            underReview: planningDocuments.filter((document) => !["verified", "rejected"].includes(document.status)).length,
+            rejected: planningDocuments.filter((document) => document.status === "rejected").length,
+          },
+          fileDocumentStats: null,
           tasks: [],
           readiness,
         });
       }
 
-      const truth = await loadFileTruth(verifiedContext.workableApplicationId, user);
+      const truth = verifiedContext.fileTruth
+        ?? await loadFileTruth(verifiedContext.workableApplicationId, user);
       if (!truth) {
         // The access check refused. Say so rather than serving an empty file,
         // which would read to the borrower as "you have nothing outstanding".
         return res.status(403).json({ error: "Access denied" });
       }
 
+      const fileDocuments = verifiedContext.uploadedDocuments ?? [];
       res.json({
         hasApplication: true,
+        applicationId: truth.applicationId,
         loanStatus: truth.status,
         documentChecklist: truth.checklist.documents,
         checklistStats: truth.checklist.stats,
+        planningDocumentStats: null,
+        fileDocumentStats: {
+          total: fileDocuments.length,
+          verified: fileDocuments.filter((document) => document.status === "verified").length,
+          underReview: fileDocuments.filter((document) => !["verified", "rejected"].includes(document.status)).length,
+          rejected: fileDocuments.filter((document) => document.status === "rejected").length,
+        },
         tasks: truth.tasks,
         readiness,
       });

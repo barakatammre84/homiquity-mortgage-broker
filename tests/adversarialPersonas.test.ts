@@ -190,6 +190,7 @@ const mocks = vi.hoisted(() => ({
   getUrlaLiabilities: vi.fn(),
   getUrlaAssets: vi.fn(),
   getUrlaPropertyInfo: vi.fn(),
+  getRealEstateOwnedByApplication: vi.fn(),
   // B3-5.3-07: the decision now reads Section 5 declarations across ALL
   // borrowers. These personas declare no derogatory events, so the default is
   // an empty list — set `data.declarations` to exercise the review route.
@@ -198,6 +199,7 @@ const mocks = vi.hoisted(() => ({
   generateLoanEstimate: vi.fn(),
   computeDecisionPaymentProjection: vi.fn(),
   getCurrentDecisionGrade: vi.fn(),
+  loadProfitLossActivity: vi.fn(async () => ({ signals: [], issues: [] })),
 }));
 
 vi.mock("../server/storage", () => ({ storage: mocks }));
@@ -208,6 +210,9 @@ vi.mock("../server/services/loanEstimate", () => ({
 }));
 vi.mock("../server/services/currentDecisionGrade", () => ({
   getCurrentDecisionGrade: mocks.getCurrentDecisionGrade,
+}));
+vi.mock("../server/services/profitLossActivity", () => ({
+  loadProfitLossActivity: mocks.loadProfitLossActivity,
 }));
 
 import { runInstantDecision } from "../server/services/decisionEngine";
@@ -225,6 +230,7 @@ function makeApp(overrides: Record<string, unknown> = {}) {
     annualIncome: "0",
     monthlyDebts: "0",
     financialDataProvenance: null,
+    ownsOtherRealEstate: false,
     preferredLoanType: "conventional",
     ...overrides,
   };
@@ -244,6 +250,7 @@ function primeOrchestrator(app: Record<string, unknown>, data: {
   mocks.getUrlaLiabilities.mockResolvedValue(data.liabilities ?? []);
   mocks.getUrlaAssets.mockResolvedValue(data.urlaAssets ?? []);
   mocks.getUrlaPropertyInfo.mockResolvedValue(data.propertyInfo ?? undefined);
+  mocks.getRealEstateOwnedByApplication.mockResolvedValue([]);
   mocks.getAllBorrowerDeclarations.mockResolvedValue(data.declarations ?? []);
   mocks.getLatestBankStatementAnalysis.mockResolvedValue(undefined);
   mocks.generateLoanEstimate.mockResolvedValue({
@@ -276,6 +283,125 @@ function baseConventionalInput(overrides: Partial<UnderwritingInput> = {}): Unde
   };
 }
 
+describe("Multiple financed property decision gates", () => {
+  const assessment = (count: number, additionalReserveRequirement: number) => ({
+    ...(count <= 4 ? { aggregateReserveUpb: additionalReserveRequirement / 0.02, reserveFactor: 0.02 as const }
+      : count <= 6 ? { aggregateReserveUpb: additionalReserveRequirement / 0.04, reserveFactor: 0.04 as const }
+      : { aggregateReserveUpb: additionalReserveRequirement / 0.06, reserveFactor: 0.06 as const }),
+    complete: true,
+    missingItems: [],
+    financedPropertiesCount: count,
+    additionalReserveRequirement,
+    subjectOccupancy: "investment" as const,
+    countedPropertyIds: [],
+  });
+
+  it("routes an investment borrower with more than ten financed properties to review", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      occupancyType: "investment",
+      contractSalesPrice: 600000,
+      appraisalValue: 600000,
+      assets: [{ type: "CHECKING_SAVINGS", balance: 500000 }],
+      multipleFinancedProperties: assessment(11, 10000),
+    }));
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.reviewReasons.join(" ")).toMatch(/maximum of 10/i);
+  });
+
+  it("routes an investment borrower below combined subject and other-property reserves to review", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      occupancyType: "investment",
+      contractSalesPrice: 600000,
+      appraisalValue: 600000,
+      assets: [{ type: "CHECKING_SAVINGS", balance: 130000 }],
+      multipleFinancedProperties: assessment(3, 10000),
+    }));
+    // $100k down leaves $30k; six months of $4k PITIA plus $10k additional = $34k.
+    expect(result.calculatedPostClosingLiquidAssets).toBe(30000);
+    expect(result.calculatedRequiredReserves).toBe(34000);
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.reviewReasons.join(" ")).toMatch(/below the .*reserve requirement/i);
+  });
+
+  it("keeps a sufficiently reserved investment file priceable", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      occupancyType: "investment",
+      contractSalesPrice: 600000,
+      appraisalValue: 600000,
+      assets: [{ type: "CHECKING_SAVINGS", balance: 140000 }],
+      multipleFinancedProperties: assessment(3, 10000),
+    }));
+    expect(result.calculatedPostClosingLiquidAssets).toBe(40000);
+    expect(result.calculatedRequiredReserves).toBe(34000);
+    expect(result.decision).toBe("APPROVED");
+    expect(result.resolvedLlpafUpfrontFee).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("Open 30-day charge account asset gate", () => {
+  const completePrimaryAssessment = {
+    complete: true,
+    missingItems: [],
+    financedPropertiesCount: 1,
+    aggregateReserveUpb: 0,
+    reserveFactor: 0 as const,
+    additionalReserveRequirement: 0,
+    subjectOccupancy: "primary" as const,
+    countedPropertyIds: [],
+  };
+
+  it("routes the file to review when verified assets cannot cover the down payment and open balance", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      contractSalesPrice: 600000,
+      appraisalValue: 600000,
+      assets: [{ type: "CHECKING_SAVINGS", balance: 105000 }],
+      openThirtyDayChargeBalance: 10000,
+      multipleFinancedProperties: completePrimaryAssessment,
+    }));
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.reviewReasons.join(" ")).toMatch(/open 30-day charge balances/i);
+  });
+
+  it("keeps the file priceable when the same balance is fully covered after down payment", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      contractSalesPrice: 600000,
+      appraisalValue: 600000,
+      assets: [{ type: "CHECKING_SAVINGS", balance: 112000 }],
+      openThirtyDayChargeBalance: 10000,
+      multipleFinancedProperties: completePrimaryAssessment,
+    }));
+    expect(result.decision).toBe("APPROVED");
+  });
+});
+
+describe("Subject-property subordinate financing gate", () => {
+  it("calculates all three lien ratios and routes the file to current-matrix review", async () => {
+    const result = await consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      originalLoanAmount: 400000,
+      contractSalesPrice: 500000,
+      appraisalValue: 490000,
+      subordinateFinancingExists: true,
+      combinedLoanToValue: 87.7551,
+      homeEquityCombinedLoanToValue: 95.9184,
+    }));
+    expect(result).toMatchObject({
+      calculatedLtv: 81.63,
+      calculatedCltv: 87.7551,
+      calculatedHcltv: 95.9184,
+      decision: "MANUAL_REVIEW",
+    });
+    expect(result.reviewReasons.join(" ")).toMatch(/eligibility matrix/i);
+  });
+
+  it("rejects internally inconsistent combined-lien ratios", async () => {
+    await expect(consolidatedUnderwritingEngine.evaluate(baseConventionalInput({
+      subordinateFinancingExists: true,
+      combinedLoanToValue: 45,
+      homeEquityCombinedLoanToValue: 40,
+    }))).rejects.toMatchObject({ kind: "INPUT_INVALID" });
+  });
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getCurrentDecisionGrade.mockResolvedValue({
@@ -285,11 +411,36 @@ beforeEach(() => {
       financialMemoId: null,
       incomeWorkpaperId: null,
       assetWorkpaperId: null,
+      liabilityWorkpaperId: null,
       creditPullId: null,
       creditPullIsSimulated: false,
       creditPullIsCurrent: false,
+      creditPullHasProviderReference: false,
+      creditPullScoreIsUsable: false,
+      creditPullLiabilitiesAreUsable: false,
+      creditPullHasOpenLiabilities: false,
     },
     verification: { income: false, assets: false, credit: false },
+    decisionCredit: null,
+  });
+});
+
+describe("Instant-decision liability parity", () => {
+  it("uses the same revolving-payment imputation as the reviewed liability workpaper", async () => {
+    const app = makeApp({ annualIncome: "180000" });
+    primeOrchestrator(app, {
+      liabilities: [{
+        id: "card-1",
+        applicationId: "app-1",
+        borrowerSequenceNumber: 1,
+        liabilityType: "Revolving (Credit Card)",
+        unpaidBalance: "12000",
+        monthlyPayment: "0",
+        toBePaidOff: false,
+      }],
+    });
+    const result = await runInstantDecision("app-1");
+    expect(result.metrics?.monthlyDebts).toBe(600);
   });
 });
 
@@ -349,11 +500,25 @@ describe("Explicit underwriting program selection", () => {
         financialMemoId: "memo-1",
         incomeWorkpaperId: "income-1",
         assetWorkpaperId: "assets-1",
+        liabilityWorkpaperId: "liabilities-1",
         creditPullId: "credit-1",
         creditPullIsSimulated: false,
         creditPullIsCurrent: true,
+        creditPullHasProviderReference: true,
+        creditPullScoreIsUsable: true,
+        creditPullLiabilitiesAreUsable: true,
+        creditPullHasOpenLiabilities: false,
       },
       verification: { income: true, assets: true, credit: true },
+      decisionCredit: {
+        pullId: "credit-1",
+        representativeScore: 720,
+        borrowerScores: [{ borrowerSequenceNumber: 1, experianScore: 720, equifaxScore: 710, transunionScore: 730, representativeScore: 720 }],
+        tradelines: [],
+        reportedMonthlyPayments: 0,
+        adjustedMonthlyDebt: 0,
+        fingerprint: "a".repeat(64),
+      },
     });
     primeOrchestrator(makeApp({ preferredLoanType: null, annualIncome: "144000" }), { piti: 2200 });
 
@@ -410,6 +575,59 @@ describe("Explicit underwriting program selection", () => {
     expect(decision.loanProgram).toBe("VA");
     expect(decision.reasons.join(" ")).toMatch(/confirm VA eligibility/i);
     expect(mocks.computeDecisionPaymentProjection).not.toHaveBeenCalled();
+  });
+});
+
+describe("Verified bureau inputs", () => {
+  it("uses the bureau score for pricing and eligibility, and routes an unreconciled debt total to review", async () => {
+    mocks.getCurrentDecisionGrade.mockResolvedValueOnce({
+      isDecisionGrade: true,
+      reasons: [],
+      evidence: {
+        financialMemoId: "memo-1",
+        incomeWorkpaperId: "income-1",
+        assetWorkpaperId: "assets-1",
+        liabilityWorkpaperId: "liabilities-1",
+        creditPullId: "credit-1",
+        creditPullIsSimulated: false,
+        creditPullIsCurrent: true,
+        creditPullHasProviderReference: true,
+        creditPullScoreIsUsable: true,
+        creditPullLiabilitiesAreUsable: true,
+        creditPullHasOpenLiabilities: true,
+      },
+      verification: { income: true, assets: true, credit: true },
+      decisionCredit: {
+        pullId: "credit-1",
+        representativeScore: 640,
+        borrowerScores: [{ borrowerSequenceNumber: 1, experianScore: 640, equifaxScore: 630, transunionScore: 650, representativeScore: 640 }],
+        tradelines: [{ creditor: "Bureau debt", type: "installment", balance: 20_000, monthlyPayment: 1_000 }],
+        reportedMonthlyPayments: 1_000,
+        adjustedMonthlyDebt: 1_000,
+        fingerprint: "b".repeat(64),
+      },
+    });
+    primeOrchestrator(makeApp({ annualIncome: "144000", creditScore: 780 }), {
+      liabilities: [{ borrowerSequenceNumber: 1, monthlyPayment: "200", toBePaidOff: false }],
+      piti: 2_200,
+    });
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(mocks.computeDecisionPaymentProjection).toHaveBeenCalledWith(
+      "app-1",
+      "conventional",
+      { creditScore: 640 },
+    );
+    expect(decision.qualifier).toBe("VERIFIED");
+    expect(decision.decision).toBe("MANUAL_REVIEW");
+    expect(decision.reasons.join(" ")).toMatch(/reconcile the difference/i);
+    expect(decision.metrics).toMatchObject({
+      creditScore: 640,
+      creditScoreSource: "bureau_report",
+      monthlyDebts: 1_000,
+      monthlyDebtsSource: "bureau_reconciled",
+    });
   });
 });
 
@@ -477,25 +695,22 @@ describe("Persona 1 — Marcus Vale (K-1 losses + $2M asset spike)", () => {
     expect(d.metrics!.liquidAssets).toBe(2_050_000);
   });
 
-  it("FIXED: the $2M unsourced wire is flagged regardless of the vendor's sign convention", () => {
-    // Detection is now magnitude-based: keying off one provider's sign
-    // convention (Plaid-style negative = inflow) silently disabled B3-4.2-04
-    // sourcing for vendors using the opposite convention. A large outflow can
-    // now be flagged too — an accepted false positive for a warning-severity
-    // documentation request.
-    const positiveConvention = detectSignificantDeposits(
-      [{ amount: 2_000_000, date: "2026-02-11", description: "WIRE IN" }],
+  it("FIXED: the $2M Plaid inflow is flagged while an outflow is ignored", () => {
+    // The Plaid adapter is the normalization boundary: negative is an inflow
+    // and positive is an outflow. The decision rule must not ask a borrower to
+    // source money that left the account.
+    const outflow = detectSignificantDeposits(
+      [{ amount: 2_000_000, date: "2026-02-11", description: "WIRE PAYMENT" }],
       27700,
     );
-    expect(positiveConvention).toHaveLength(1);
-    expect(positiveConvention[0].amount).toBe(2_000_000);
+    expect(outflow).toHaveLength(0);
 
-    // Control: the Plaid-style convention still flags identically.
-    const negativeConvention = detectSignificantDeposits(
+    const inflow = detectSignificantDeposits(
       [{ amount: -2_000_000, date: "2026-02-11", description: "WIRE IN" }],
       27700,
     );
-    expect(negativeConvention).toHaveLength(1);
+    expect(inflow).toHaveLength(1);
+    expect(inflow[0].amount).toBe(2_000_000);
   });
 
   it("FIXED: instant-decision reserves are post-closing (net of down payment), same basis as pre-underwriting", async () => {
@@ -542,6 +757,40 @@ describe("Persona 2 — Dana Okafor (multi-unit filed as SFR primary)", () => {
     expect(result.rejectionReasons.join(" ")).toMatch(/75% maximum/);
     // Nothing priced on the rejected file.
     expect(result.resolvedPmiMonthlyPremium).toBe(0);
+  });
+
+  it("routes a 90% LTV 3-unit primary purchase to DU review rather than falsely rejecting it", async () => {
+    const result = await makeEngine().evaluate(
+      baseConventionalInput({
+        occupancyType: "primary_residence",
+        numberOfUnits: 3,
+        originalLoanAmount: 900_000,
+        contractSalesPrice: 1_000_000,
+        appraisalValue: 1_000_000,
+      }),
+    );
+
+    expect(result.calculatedLtv).toBe(90);
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.rejectionReasons).toHaveLength(0);
+    expect(result.reviewReasons.join(" ")).toMatch(/75% manual-underwriting ceiling/i);
+    expect(result.reviewReasons.join(" ")).toMatch(/95% Desktop Underwriter.*current DU finding/i);
+    expect(result.resolvedPmiMonthlyPremium).toBe(0);
+  });
+
+  it("still rejects a 3-unit primary purchase above the 95% automated ceiling", async () => {
+    const result = await makeEngine().evaluate(
+      baseConventionalInput({
+        occupancyType: "primary_residence",
+        numberOfUnits: 3,
+        originalLoanAmount: 960_000,
+        contractSalesPrice: 1_000_000,
+        appraisalValue: 1_000_000,
+      }),
+    );
+
+    expect(result.decision).toBe("REJECTED");
+    expect(result.rejectionReasons.join(" ")).toMatch(/exceeds policy ceiling of 95%/i);
   });
 
   it("DEFAULT: a consistent misstatement (SFR/1-unit that is really a 4-plex) still approves without the observed descriptor", async () => {

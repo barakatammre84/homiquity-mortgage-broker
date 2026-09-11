@@ -18,7 +18,11 @@ import { MarketPricingSection, type MarketOffersResponse } from "./loanOptions/M
 import { LoanOptionCard } from "./loanOptions/LoanOptionCard";
 import { LoanLetterButton } from "./loanOptions/LoanLetterButton";
 import { WhatIfPanel } from "./loanOptions/WhatIfPanel";
-import { getLoanOptionsPresentation, isIntakeStillFinalizing } from "./loanOptions/loanOptionsPresentation";
+import {
+  getLoanOptionsPresentation,
+  isIntakeStillFinalizing,
+  shouldShowAntiSteeringConsent,
+} from "./loanOptions/loanOptionsPresentation";
 
 interface LoanOptionsData {
   application: LoanApplication;
@@ -35,18 +39,15 @@ export default function LoanOptions() {
   const { data, isLoading, error } = useQuery<LoanOptionsData>({
     queryKey: loanApplicationKeys.options(id),
     enabled: !!id,
-    // Scenarios are computed right after the 201, so the first visit can land
-    // before they exist. Poll until they arrive instead of waiting for a
-    // window-focus refetch — the page used to sit on "Analyzing…" until the
-    // borrower happened to tab away and back. Terminal statuses (denied,
-    // withdrawn, …) legitimately have no options; don't poll those.
+    // The first visit can land while intake is still finishing. Poll only for
+    // those transitional statuses. An under-review complex-income file can
+    // intentionally have no scenarios until its documents are verified; it is
+    // a settled review plan, not an endless analysis job.
     refetchInterval: (query) => {
       const current = query.state.data;
       if (!current) return 4000;
       if (isIntakeStillFinalizing(current.application.status)) return 2000;
-      return current.options.length === 0 && ["under_review", "pre_approved"].includes(
-        current.application.status,
-      ) ? 4000 : false;
+      return false;
     },
   });
 
@@ -58,13 +59,18 @@ export default function LoanOptions() {
     staleTime: 60_000,
   });
   const marketPriced = market?.status === "PRICED";
+  const hasPresentedOptions = shouldShowAntiSteeringConsent(
+    data?.options.length ?? 0,
+    market?.status,
+    market?.offers.length ?? 0,
+  );
 
   // Reg Z anti-steering: the loan-options disclosure must be acknowledged
   // before a rate can be locked. The server enforces this on the lock
   // endpoint; this query drives the disclosure card and button state.
   const { data: steeringConsent } = useQuery<{ hasConsent: boolean }>({
     queryKey: consentKeys.check(id, 'anti_steering'),
-    enabled: !!id,
+    enabled: !!id && hasPresentedOptions,
   });
   const steeringAcknowledged = steeringConsent?.hasConsent === true;
 
@@ -131,6 +137,7 @@ export default function LoanOptions() {
     financialsVerified,
     hasOptions: options.length > 0,
   });
+  const intakeStillFinalizing = isIntakeStillFinalizing(application.status);
 
   return (
     <div className="min-h-screen">
@@ -194,9 +201,9 @@ export default function LoanOptions() {
             server-computed action items (documents, consents, conditions). */}
         <ActionItemsSection
           applicationId={application.id}
-          stillAnalyzing={isIntakeStillFinalizing(application.status) || options.length === 0}
+          stillAnalyzing={intakeStillFinalizing}
         />
-        {!steeringAcknowledged && (
+        {hasPresentedOptions && !steeringAcknowledged && (
           <div className="mb-8 flex justify-center" data-testid="section-anti-steering">
             <ConsentGateCard
               applicationId={id!}
@@ -221,9 +228,13 @@ export default function LoanOptions() {
         )}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">{marketPriced ? "Payment Scenarios" : "Your Loan Options"}</h2>
+            <h2 className="text-2xl font-bold">
+              {options.length === 0 ? "Loan scenarios" : marketPriced ? "Payment Scenarios" : "Your Loan Options"}
+            </h2>
             <p className="text-muted-foreground" data-testid="text-options-qualifier">
-              {marketPriced
+              {options.length === 0
+                ? "Available after the requested figures are verified"
+                : marketPriced
                 ? "Illustrative payment breakdowns by loan program"
                 : "Estimates from your self-reported answers — not offers or approvals"}
             </p>
@@ -231,7 +242,9 @@ export default function LoanOptions() {
           <div className="flex items-center gap-4">
             <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
               <Shield className="h-4 w-4" />
-              <span>{marketPriced ? "Rates as of today" : "Planning estimates"}</span>
+              <span>
+                {options.length === 0 ? "Pending verification" : marketPriced ? "Rates as of today" : "Planning estimates"}
+              </span>
             </div>
             {options.length > 1 && (
               <div className="flex rounded-lg border p-0.5" role="group" aria-label="View mode">
@@ -259,9 +272,13 @@ export default function LoanOptions() {
         {options.length === 0 ? (
           <Card className="p-12 text-center">
             <Clock className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-semibold">Analyzing Your Application</h3>
+            <h3 className="mt-4 text-lg font-semibold">
+              {intakeStillFinalizing ? "Analyzing Your Application" : "Loan scenarios need verified figures"}
+            </h3>
             <p className="mt-2 text-muted-foreground">
-              Your scenarios are being computed against underwriting guidelines. This usually takes less than a minute.
+              {intakeStillFinalizing
+                ? "Your scenarios are being computed against underwriting guidelines. This usually takes less than a minute."
+                : "Your loan team needs to verify the income, debt, and property records requested above before showing scenarios you can rely on."}
             </p>
           </Card>
         ) : viewMode === "compare" ? (

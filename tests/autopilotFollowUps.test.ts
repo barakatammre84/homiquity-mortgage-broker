@@ -47,6 +47,14 @@ describe("planFollowUpForFlag", () => {
     expect(plan!.description).toContain("Fannie Mae B3-3.5-01");
   });
 
+  it("preserves an evidence-specific condition identity", () => {
+    const plan = planFollowUpForFlag(flag({
+      code: "LARGE_DEPOSIT_SOURCING",
+      conditionSourceRule: "AUTOPILOT_LARGE_DEPOSIT_SOURCING:abc123",
+    }));
+    expect(plan?.sourceRule).toBe("AUTOPILOT_LARGE_DEPOSIT_SOURCING:abc123");
+  });
+
   it("cites B3-6-05 for VERIFIED_DEBT_DTI and B3-3.8-01 for rental offsets", () => {
     expect(planFollowUpForFlag(flag({ code: "VERIFIED_DEBT_DTI" }))!.description).toContain(
       "Fannie Mae B3-6-05",

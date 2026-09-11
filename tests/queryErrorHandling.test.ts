@@ -60,8 +60,12 @@ const PAGES = join(REPO_ROOT, "client", "src", "pages");
  * detector stops seeing them. Confirmed by reading the children, not by trusting
  * the commit subjects — which said "guard its query errors" while the page files
  * themselves gained no error branch at all.
+ *
+ * 8 → 7: Documents.tsx now treats application-list and personalized-checklist
+ * failures as failures, with one visible retry path. It no longer turns either
+ * failed request into an empty document plan.
  */
-const BASELINE_UNGUARDED = 8;
+const BASELINE_UNGUARDED = 7;
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];

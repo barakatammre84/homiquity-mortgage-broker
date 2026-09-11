@@ -24,6 +24,7 @@ import {
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractProfitLossData,
   extractW2Data,
 } from "../extractionService";
 import {
@@ -38,6 +39,7 @@ import { assessDocumentClassification } from "./documentClassification";
 import { buildDocumentFacts } from "./documentFacts";
 import { coarseConfidenceToNumeric } from "./documentConfidence";
 import type { DatabaseTransaction } from "./documentLineage";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
 
 const NORMALIZED_MAX_DIMENSION = 2_200;
 const PDF_RENDER_SCALE = 2;
@@ -215,8 +217,16 @@ const SEGMENT_EXTRACTOR_TYPE: Partial<Record<DocumentTypeTaxonomy, string>> = {
   w2: "w2",
   bank_statement_checking: "bank_statement",
   bank_statement_savings: "bank_statement",
+  business_bank_statement: "bank_statement",
   lease_agreement: "lease_agreement",
+  profit_loss_statement: "profit_loss",
 };
+
+export function packetSegmentExtractorType(
+  documentType: DocumentTypeTaxonomy,
+): string | null {
+  return SEGMENT_EXTRACTOR_TYPE[documentType] ?? null;
+}
 
 async function pagesAsPdf(pages: MaterializedSegmentPage[]): Promise<Buffer> {
   const buffers: Buffer[] = [];
@@ -246,6 +256,7 @@ async function extractSegment(
     case "w2": return extractW2Data(source, "application/pdf");
     case "bank_statement": return extractBankStatementData(source, "application/pdf");
     case "lease_agreement": return extractLeaseData(source, "application/pdf");
+    case "profit_loss": return extractProfitLossData(source, "application/pdf");
     default: throw new DocumentPageMaterializationError(`Unsupported logical document type: ${documentType}`);
   }
 }
@@ -306,7 +317,7 @@ export async function extractMaterializedPacketSegments(input: {
   let attemptedSegments = 0;
 
   for (const pages of grouped.values()) {
-    const canonicalType = SEGMENT_EXTRACTOR_TYPE[pages[0].documentType];
+    const canonicalType = packetSegmentExtractorType(pages[0].documentType);
     if (!canonicalType) {
       unsupportedTypes.add(pages[0].documentType);
       continue;
@@ -734,7 +745,7 @@ export async function correctDocumentPacketBoundaries(input: {
   reviewedByUserId: string;
   corrections: Array<{ pageNumber: number; documentType: DocumentTypeTaxonomy }>;
 }): Promise<DocumentPacketReview> {
-  if (input.document.documentType === "tax_return") {
+  if (isTaxReturnDocumentType(input.document.documentType)) {
     throw new DocumentPageMaterializationError(
       "Tax form boundaries carry year and entity identity; replace or reprocess the tax package instead of applying a page-type-only correction",
     );

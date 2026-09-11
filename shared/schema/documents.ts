@@ -547,6 +547,12 @@ export const borrowerBusinessEntities = pgTable("borrower_business_entities", {
   sourceFormCount: integer("source_form_count").default(0).notNull(),
   resolutionNotes: text("resolution_notes"),
 
+  // True when the borrower named this business in mortgage intake. Tax
+  // extraction may enrich the same row, but consent revocation must remove
+  // only the tax-derived fields rather than deleting the borrower's own fact
+  // or breaking non-tax document lineage that points at this entity.
+  reportedByBorrower: boolean("reported_by_borrower").default(false).notNull(),
+
   autoResolved: boolean("auto_resolved").default(true).notNull(),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),

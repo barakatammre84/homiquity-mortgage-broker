@@ -30,6 +30,7 @@ function syntheticEmployment(
     commissionIncome: null,
     otherIncome: null,
     totalMonthlyIncome: null,
+    paidInVirtualCurrency: false,
     selfEmploymentIncome: null,
     ...overrides,
   } as EmploymentHistory;
@@ -80,9 +81,15 @@ function syntheticFinancialAnalysisInput(): IncomePathsCoreInput {
     otherIncome: [{
       id: "synthetic-other-income",
       applicationId: "synthetic-core-canary",
+      borrowerSequenceNumber: 1,
       createdAt: null,
       incomeSource: "other",
       monthlyAmount: "400",
+      taxTreatment: "taxable",
+      nonTaxableMonthlyAmount: null,
+      hasDefinedExpiration: false,
+      expirationDate: null,
+      paidInVirtualCurrency: false,
     }],
     rentalProperties: [
       {

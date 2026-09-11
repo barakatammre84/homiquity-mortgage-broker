@@ -167,8 +167,27 @@ export async function revokeTaxDocumentConsentAndPurge(
 
     const deletedEntities = await transaction
       .delete(borrowerBusinessEntities)
-      .where(eq(borrowerBusinessEntities.userId, userId))
+      .where(and(
+        eq(borrowerBusinessEntities.userId, userId),
+        eq(borrowerBusinessEntities.reportedByBorrower, false),
+      ))
       .returning({ id: borrowerBusinessEntities.id });
+    // Keep borrower-stated identity and non-tax document lineage while
+    // removing every field that came from the revoked tax projections.
+    await transaction
+      .update(borrowerBusinessEntities)
+      .set({
+        einLast4: null,
+        firstTaxYear: null,
+        lastTaxYear: null,
+        sourceFormCount: 0,
+        resolutionNotes: "Reported by borrower in mortgage intake; tax-derived details removed after authorization revocation.",
+        updatedAt: now,
+      })
+      .where(and(
+        eq(borrowerBusinessEntities.userId, userId),
+        eq(borrowerBusinessEntities.reportedByBorrower, true),
+      ));
     const deletedSituations = await transaction
       .delete(situationProfiles)
       .where(eq(situationProfiles.userId, userId))

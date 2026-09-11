@@ -141,6 +141,20 @@ describe("multi-borrower PARTY delivery", () => {
       { borrowerSequenceNumber: 1, hasDeclaredBankruptcy: false } as any,
       { borrowerSequenceNumber: 2, hasDeclaredBankruptcy: true } as any,
     ];
+    dto.otherIncome = [
+      {
+        borrowerSequenceNumber: 1,
+        incomeSource: "Social Security",
+        monthlyAmount: "1200",
+        taxTreatment: "fully_non_taxable",
+      } as any,
+      {
+        borrowerSequenceNumber: 2,
+        incomeSource: "Retirement (e.g., Pension, IRA)",
+        monthlyAmount: "900",
+        taxTreatment: "taxable",
+      } as any,
+    ];
 
     const parties = partyBodies(generateMISMO34XML(dto));
     expect(parties).toHaveLength(2);
@@ -148,6 +162,8 @@ describe("multi-borrower PARTY delivery", () => {
     expect(parties[0]).toContain("<BorrowerClassificationType>Primary</BorrowerClassificationType>");
     expect(parties[0]).toContain("<FullName>Primary Employer</FullName>");
     expect(parties[0]).not.toContain("Secondary Employer");
+    expect(parties[0]).toContain("<URLABorrowerTotalOtherIncomeAmount>1200.00</URLABorrowerTotalOtherIncomeAmount>");
+    expect(parties[0]).not.toContain("900.00");
     expect(parties[0]).toContain("<TaxpayerIdentifierValue>111223333</TaxpayerIdentifierValue>");
     expect(parties[0]).toContain("<BankruptcyIndicator>false</BankruptcyIndicator>");
 
@@ -155,6 +171,8 @@ describe("multi-borrower PARTY delivery", () => {
     expect(parties[1]).toContain("<BorrowerClassificationType>Secondary</BorrowerClassificationType>");
     expect(parties[1]).toContain("<FullName>Secondary Employer</FullName>");
     expect(parties[1]).not.toContain("Primary Employer");
+    expect(parties[1]).toContain("<URLABorrowerTotalOtherIncomeAmount>900.00</URLABorrowerTotalOtherIncomeAmount>");
+    expect(parties[1]).not.toContain("1200.00");
     expect(parties[1]).toContain("<TaxpayerIdentifierValue>444556666</TaxpayerIdentifierValue>");
     expect(parties[1]).toContain("<BankruptcyIndicator>true</BankruptcyIndicator>");
   });
@@ -209,6 +227,77 @@ describe("dangling xlink relationships removed (Fix 7)", () => {
     expect(xml).not.toContain("RELATIONSHIPS");
     expect(xml).not.toContain("xlink:href");
     expect(xml).not.toContain("RelationshipType");
+  });
+});
+
+describe("subject-property housing expense and combined-lien export", () => {
+  const propertyInfo = {
+    occupancyType: "primary_residence",
+    monthlyAssociationDues: "175",
+    monthlyFloodInsurance: "80",
+    monthlyGroundRent: "25",
+    monthlySpecialAssessments: "40",
+    subordinateFinancingExists: true,
+    closedEndSubordinateBalance: "15000",
+    helocDrawnBalance: "10000",
+    helocCreditLimit: "30000",
+    monthlySubordinateFinancingPayment: "225",
+  } as any;
+
+  it("exports the exact proposed housing expenses used by qualification", () => {
+    const xml = generateMISMO34XML(baseDto({ propertyInfo }));
+    expect(xml).toContain("<HousingExpenseType>HomeownersAssociationDuesAndCondominiumFees</HousingExpenseType>");
+    expect(xml).toContain("<HousingExpenseType>HazardInsurance</HousingExpenseType>");
+    expect(xml).toContain("<HousingExpenseType>GroundRent</HousingExpenseType>");
+    expect(xml).toContain("<HousingExpenseTypeOtherDescription>Special assessments</HousingExpenseTypeOtherDescription>");
+    expect(xml).toContain("<HousingExpenseType>OtherMortgageLoanPrincipalAndInterest</HousingExpenseType>");
+  });
+
+  it("exports CLTV using the drawn HELOC and HCLTV using its full limit", () => {
+    const xml = generateMISMO34XML(baseDto({ propertyInfo }));
+    // $400k first + $15k closed-end + $10k drawn, divided by $500k.
+    expect(xml).toContain("<CombinedLTVRatioPercent>85.000</CombinedLTVRatioPercent>");
+    // $400k first + $15k closed-end + $30k full HELOC limit, divided by $500k.
+    expect(xml).toContain("<HomeEquityCombinedLTVRatioPercent>89.000</HomeEquityCombinedLTVRatioPercent>");
+  });
+
+  it("does not invent combined ratios from an incomplete property section", () => {
+    const xml = generateMISMO34XML(baseDto({
+      propertyInfo: { ...propertyInfo, helocCreditLimit: null } as any,
+    }));
+    expect(xml).not.toContain("<COMBINED_LTVS>");
+  });
+});
+
+describe("URLA Section 1e income export", () => {
+  it("delivers each other-income source, amount, type, and known tax status", () => {
+    const xml = generateMISMO34XML({
+      ...baseDto(),
+      otherIncome: [
+        {
+          incomeSource: "Social Security",
+          monthlyAmount: "2000",
+          taxTreatment: "partially_non_taxable",
+          nonTaxableMonthlyAmount: "300",
+          hasDefinedExpiration: false,
+          expirationDate: null,
+          paidInVirtualCurrency: false,
+        } as any,
+        {
+          incomeSource: "Child Support",
+          monthlyAmount: "900",
+          taxTreatment: "fully_non_taxable",
+          hasDefinedExpiration: true,
+          expirationDate: "2032-01-01",
+          paidInVirtualCurrency: false,
+        } as any,
+      ],
+    });
+    expect(xml).toContain("<URLABorrowerTotalOtherIncomeAmount>2900.00</URLABorrowerTotalOtherIncomeAmount>");
+    expect(xml).toContain("<IncomeType>SocialSecurity</IncomeType>");
+    expect(xml).toContain("<IncomeType>AlimonyChildSupport</IncomeType>");
+    // Partial tax exemption cannot be represented truthfully by a boolean.
+    expect(xml.match(/<IncomeFederalTaxExemptIndicator>true<\/IncomeFederalTaxExemptIndicator>/g)).toHaveLength(1);
   });
 });
 

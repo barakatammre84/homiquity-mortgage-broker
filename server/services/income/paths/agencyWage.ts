@@ -3,7 +3,6 @@ import type { DtiIncomePathResult } from "@shared/incomePaths";
 import { roundCents, parseFinancialNumber, isPresentFinancialNumber } from "@shared/incomePaths";
 import {
   classifyOtherIncomeSource,
-  hasUncitedQualifyingTreatment,
   otherIncomeTypeLabel,
 } from "@shared/incomeTypes";
 
@@ -47,6 +46,10 @@ export interface AgencyWageInput {
   otherIncome: OtherIncomeSource[];
   /** Application-summary fallback used only when no wage line item exists. */
   fallbackAnnualIncome?: number | string | null;
+  /** Expected note/closing date used for the B3-3.1-01 three-year test. */
+  expectedNoteDate?: Date | string | null;
+  /** True only for an evidence-backed, approved income workpaper. */
+  applyVerifiedOtherIncomeAdjustments?: boolean;
 }
 
 export interface AgencyWageComputation {
@@ -58,14 +61,40 @@ export interface AgencyWageComputation {
   usedLineItems: boolean;
 }
 
+function parseDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? new Date(value) : new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function threeYearsAfter(value: Date): Date {
+  const result = new Date(value);
+  result.setUTCFullYear(result.getUTCFullYear() + 3);
+  return result;
+}
+
 export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageComputation {
   const notes: string[] = [];
   let base = 0;
   let variable = 0;
   let sawLineItem = false;
+  const unclassifiedSources = new Set<string>();
+  const treatmentGaps = new Set<string>();
+  let favorableAdjustmentWithheld = false;
+  let otherIncomeRequiresReview = false;
 
   for (const e of input.employment) {
     if (e.isSelfEmployed) continue; // handled by the self-employment (1084) path
+    const jobLabel = e.employerName?.trim() || "Employment income";
+    if (e.paidInVirtualCurrency === true) {
+      sawLineItem = true;
+      notes.push(`${jobLabel} excluded because the income is paid in virtual currency.`);
+      continue;
+    }
+    if (e.paidInVirtualCurrency !== false) {
+      otherIncomeRequiresReview = true;
+      treatmentGaps.add(`${jobLabel}: confirm whether any income is paid in virtual currency`);
+    }
     const itemized = [e.baseIncome, e.overtimeIncome, e.bonusIncome, e.commissionIncome, e.otherIncome];
     if (itemized.some(isPresentNumber)) {
       base += toNum(e.baseIncome);
@@ -78,51 +107,88 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
     }
   }
 
-  // Section 1e other income. Every source is still summed at exactly its declared
-  // amount — that is deliberate and unchanged. What is new is that the TYPE is now
-  // read (shared/incomeTypes.ts) so the file can say which types it is carrying at
-  // face value and why, instead of the fact being invisible.
-  //
-  // Face value is not obviously correct for several of these. A non-taxable benefit
-  // may be eligible to be grossed up, and a support payment may require documented
-  // continuance before it counts at all — the first would UNDER-state this
-  // borrower's income, the second could OVER-state it.
-  //
-  // Neither adjustment is made here, and as of 2026-08-22 that is no longer for
-  // want of authority: B3-3.1-01 states both (Nontaxable Income — add 25% of the
-  // non-taxable amount; Continuance of Income — income with a defined expiration
-  // or asset-depletion dependency must be documented to continue three years from
-  // the note date). They are withheld for two DIFFERENT reasons:
-  //
-  //   * gross-up RAISES qualifying income, loosening the DTI gate. This repo's
-  //     rail permits a reading to tighten a gate, never to loosen one — so it is
-  //     a founder decision, not an agent's.
-  //   * continuance TIGHTENS, which is permitted, but other_income_sources holds
-  //     only income_source and monthly_amount. There is no expiration date to
-  //     test, so the rule is unimplementable until that is captured.
-  //
-  // See knowledge-base/compliance/SELLING_GUIDE_CONFORMANCE.md. The note below is
-  // how the gap reaches a human instead of silently resolving to "100%".
-  const uncitedTypes = new Set<string>();
-  const unclassifiedSources = new Set<string>();
+  // Section 1e other income: B3-3.1-01 continuance and nontaxable treatment.
+  // A current approved workpaper is required before a favorable gross-up can
+  // affect DTI; an ineligible virtual-currency source is excluded immediately.
   for (const o of input.otherIncome) {
     if (isPresentNumber(o.monthlyAmount)) {
-      variable += toNum(o.monthlyAmount);
+      const declaredAmount = Math.max(toNum(o.monthlyAmount), 0);
       sawLineItem = true;
       const typeId = classifyOtherIncomeSource(o.incomeSource);
+      const label = typeId === null
+        ? ((o.incomeSource ?? "").trim() || "Other income")
+        : otherIncomeTypeLabel(typeId);
+      if (o.paidInVirtualCurrency === true) {
+        notes.push(`${label} excluded because the income is paid in virtual currency.`);
+        continue;
+      }
+      if (o.paidInVirtualCurrency !== false) {
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${label}: confirm whether any income is paid in virtual currency`);
+      }
       if (typeId === null) {
         const raw = (o.incomeSource ?? "").trim();
         unclassifiedSources.add(raw === "" ? "(blank)" : raw);
-      } else if (hasUncitedQualifyingTreatment(typeId)) {
-        uncitedTypes.add(otherIncomeTypeLabel(typeId));
       }
+
+      let qualifyingAmount = declaredAmount;
+      const noteDate = parseDate(input.expectedNoteDate);
+      const expirationDate = parseDate(o.expirationDate);
+      if (o.hasDefinedExpiration === true) {
+        if (!noteDate || !expirationDate) {
+          otherIncomeRequiresReview = true;
+          treatmentGaps.add(`${label}: confirm the expiration date and expected note date`);
+        } else if (expirationDate.getTime() < threeYearsAfter(noteDate).getTime()) {
+          qualifyingAmount = 0;
+          notes.push(
+            `${label} excluded: it is documented to expire before three years after the expected note date.`,
+          );
+        }
+      } else if (o.hasDefinedExpiration !== false) {
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${label}: confirm whether the income has a defined expiration date`);
+      }
+
+      let nonTaxableAmount = 0;
+      if (o.taxTreatment === "fully_non_taxable") {
+        nonTaxableAmount = declaredAmount;
+      } else if (o.taxTreatment === "partially_non_taxable") {
+        const captured = isPresentNumber(o.nonTaxableMonthlyAmount)
+          ? toNum(o.nonTaxableMonthlyAmount)
+          : NaN;
+        if (!Number.isFinite(captured) || captured <= 0 || captured > declaredAmount) {
+          otherIncomeRequiresReview = true;
+          treatmentGaps.add(`${label}: confirm the monthly portion that is exempt from federal income tax`);
+        } else {
+          nonTaxableAmount = captured;
+        }
+      } else if (o.taxTreatment !== "taxable") {
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${label}: confirm its federal income-tax treatment`);
+      }
+
+      if (qualifyingAmount > 0 && nonTaxableAmount > 0) {
+        if (input.applyVerifiedOtherIncomeAdjustments) {
+          const grossUp = roundCents(nonTaxableAmount * 0.25);
+          qualifyingAmount = roundCents(qualifyingAmount + grossUp);
+          notes.push(
+            `${label}: added ${grossUp.toLocaleString("en-US", { style: "currency", currency: "USD" })} (25% of the verified nontaxable portion) to qualifying income.`,
+          );
+        } else {
+          favorableAdjustmentWithheld = true;
+        }
+      }
+      variable += qualifyingAmount;
     }
   }
-  if (uncitedTypes.size > 0) {
+  if (treatmentGaps.size > 0) {
     notes.push(
-      `Other income counted at declared face value, with no adjustment applied: ${[...uncitedTypes]
-        .sort()
-        .join(", ")}. Selling Guide B3-3.1-01 allows grossing up verified non-taxable income by 25% (raises income — withheld pending a policy decision) and requires three-year continuance for income with a defined expiration date (lowers income — not testable, no expiration date is captured). No factor was applied in either direction; confirm the treatment before this figure reaches a lender.`,
+      `Other-income qualification needs confirmation: ${[...treatmentGaps].sort().join("; ")}.`,
+    );
+  }
+  if (favorableAdjustmentWithheld) {
+    notes.push(
+      "A potential nontaxable-income gross-up is shown but not applied until the current evidence-backed income workpaper is approved.",
     );
   }
   if (unclassifiedSources.size > 0) {
@@ -164,7 +230,7 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
       monthlyQualifyingIncome: monthly,
       appliedToDti: true,
       citations: AGENCY_WAGE_CITATIONS,
-      requiresManualReview: false,
+      requiresManualReview: otherIncomeRequiresReview,
       notes,
     },
   };

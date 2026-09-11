@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { AlertCircle, ArrowLeft, ClipboardList, ExternalLink, FileText, MessageSquare, TrendingUp } from "lucide-react";
+import { AlertCircle, ArrowLeft, BriefcaseBusiness, ClipboardList, ExternalLink, FileText, MessageSquare, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,7 @@ export function ActiveBorrowerPane({
   }
 
   const { application: app, income, conditions, documents, messages } = data;
+  const reportedIncome = data.reportedIncome;
   const statusMeta = getLoanAppStatusMeta(app.status);
   const financialsVerified = app.currentDecisionGrade;
   const isPreliminaryReview = app.status === "pre_approved" && !financialsVerified;
@@ -183,6 +184,68 @@ export function ActiveBorrowerPane({
         </div>
       </section>
 
+      {/* Reported income story — the intake facts the calculation below must
+          eventually reconcile, shown separately from qualifying income. */}
+      <Card data-testid="cockpit-reported-income">
+        <CardContent className="p-4">
+          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+            <BriefcaseBusiness className="h-4 w-4 text-primary" aria-hidden="true" />
+            Reported income story
+          </h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-muted-foreground">Household total</span>
+              <span className="font-semibold tabular-nums">
+                {reportedIncome.householdAnnualTotal == null
+                  ? "Not provided"
+                  : `${formatCurrency(reportedIncome.householdAnnualTotal)}/yr`}
+                <Badge variant="outline" className="ml-2">Self-reported</Badge>
+              </span>
+            </div>
+            {reportedIncome.unitemizedAnnualAmount !== null && reportedIncome.unitemizedAnnualAmount > 0 && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="capitalize text-muted-foreground">
+                  {reportedIncome.employmentType?.replace(/_/g, " ") || "Main source"} / household income not itemized
+                </span>
+                <span className="tabular-nums">{formatCurrency(reportedIncome.unitemizedAnnualAmount)}/yr</span>
+              </div>
+            )}
+            {reportedIncome.sources.map((source, index) => (
+              <div key={`${source.type}-${source.name ?? index}`} className="flex items-start justify-between gap-3">
+                <span className="min-w-0 text-muted-foreground">
+                  <span className="capitalize">{source.type === "self_employed" ? "Business / 1099" : source.type.replace(/_/g, " ")}</span>
+                  {source.name ? ` · ${source.name}` : ""}
+                  {source.rentalPropertyCount > 0 ? ` · ${source.rentalPropertyCount} properties` : ""}
+                  {source.yearsInRole ? ` · ${source.yearsInRole} years` : ""}
+                  {source.ownershipPercent ? ` · ${source.ownershipPercent}% ownership` : ""}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {source.annualAmount == null ? "Not itemized" : `${formatCurrency(source.annualAmount)}/yr`}
+                </span>
+              </div>
+            ))}
+            {reportedIncome.breakdownExceedsHouseholdTotal && (
+              <p className="rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+                The itemized source amounts exceed the reported household total. Resolve this conflict before relying on the file.
+              </p>
+            )}
+            {reportedIncome.rental && (
+              <div className="rounded-md bg-muted/50 p-2 text-xs leading-relaxed" data-testid="cockpit-reported-rental">
+                <span className="font-medium">Rental screen:</span>{" "}
+                {formatCurrency(reportedIncome.rental.grossMonthlyRent)}/mo gross × 75% ={" "}
+                {formatCurrency(reportedIncome.rental.planningMonthlyRent)}/mo, less{" "}
+                {formatCurrency(reportedIncome.rental.monthlyPropertyPayments)}/mo reported property payments ={" "}
+                {reportedIncome.rental.preliminaryMonthlyOffset >= 0 ? "+" : "−"}
+                {formatCurrency(Math.abs(reportedIncome.rental.preliminaryMonthlyOffset))}/mo preliminary offset.
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Intake amounts only. Use reviewed wage records, tax returns, P&amp;L, leases or Schedule E, and liabilities for the qualifying calculation.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Income */}
       <Card data-testid="cockpit-income">
         <CardContent className="p-4">
@@ -197,7 +260,7 @@ export function ActiveBorrowerPane({
                   {formatCurrency(income.primaryMonthlyQualifyingIncome)}/mo
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {income.incomeBasis === "urla_line_items" ? "URLA line items" : "application summary"}
+                  {income.incomeBasis === "urla_line_items" ? "URLA line items" : "household-total fallback"}
                   {!financialsVerified && " · self-reported"}
                 </span>
                 {income.requiresManualReview && <Badge variant="warning">Manual review</Badge>}
@@ -212,7 +275,9 @@ export function ActiveBorrowerPane({
                   .map((p) => (
                     <li key={p.pathId} className="flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">
-                        {prettyPathId(p.pathId)}
+                        {income.incomeBasis === "application_summary" && p.pathId === "agency_wage"
+                          ? "Household Total Fallback"
+                          : prettyPathId(p.pathId)}
                         {p.role === "alternative" && <span className="ml-1 text-xs">(alt)</span>}
                         {p.kind === "dti_income" && (p.appliedMonthlyObligation ?? 0) > 0 && (
                           <span className="ml-1 text-xs">
@@ -234,7 +299,9 @@ export function ActiveBorrowerPane({
               </ul>
               {!financialsVerified && (
                 <p className="rounded-md bg-warning-subtle p-2 text-xs text-warning-subtle-foreground" data-testid="cockpit-income-unverified">
-                  Preliminary calculation only. Verify income, assets, credit, and property evidence before using it for qualification or a lender package.
+                  {income.incomeBasis === "application_summary"
+                    ? "This preliminary fallback uses the reported household total because reviewed wage and business line items are not available yet. It does not establish W-2 or qualifying income."
+                    : "Preliminary calculation only. Verify income, assets, credit, and property evidence before using it for qualification or a lender package."}
                 </p>
               )}
             </div>

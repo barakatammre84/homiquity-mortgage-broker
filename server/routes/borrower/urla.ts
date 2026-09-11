@@ -38,12 +38,15 @@ const realEstateOwnedSaveSchema = z.object({
     propertyType: z.enum(["single_family", "condo", "townhouse", "multi_family", "other"]).optional().nullable(),
     marketValue: optionalMoney,
     mortgageBalance: optionalMoney,
+    helocBalance: optionalMoney,
     mortgagePayment: optionalMoney,
+    helocPayment: optionalMoney,
     monthlyRentalIncome: optionalMoney,
     monthlyInsurance: optionalMoney,
     monthlyTaxes: optionalMoney,
     monthlyHoa: optionalMoney,
     occupancyType: z.enum(["primary", "second_home", "investment"]).optional().nullable(),
+    personallyObligated: z.boolean().optional().nullable(),
     status: z.enum(["retained", "pending_sale", "sold"]).optional().nullable(),
     willBeSold: z.boolean().optional().nullable(),
     willBeRented: z.boolean().optional().nullable(),
@@ -71,6 +74,45 @@ function scheduleThirdPartyPaidDebtReconcile(applicationId: string): void {
   })().catch((err) =>
     console.warn(`[B3-6-05] Third-party-paid debt reconcile failed for ${applicationId} (non-fatal):`, err?.message || err),
   );
+}
+
+const liabilityTreatmentBasisKeys = [
+  "liabilityType",
+  "unpaidBalance",
+  "monthlyPayment",
+  "remainingTermMonths",
+  "studentLoanRepaymentPlan",
+] as const;
+
+function comparableLiabilityValue(key: typeof liabilityTreatmentBasisKeys[number], value: unknown) {
+  if (key === "unpaidBalance" || key === "monthlyPayment" || key === "remainingTermMonths") {
+    if (value === null || value === undefined || value === "") return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : String(value);
+  }
+  return value === "" || value === undefined ? null : value;
+}
+
+/** Clear a staff-reviewed exception only when a borrower changes the exact
+ * facts it reviewed. Bulk URLA saves echo whole rows, so presence alone cannot
+ * invalidate a treatment or every unrelated Continue click would erase it. */
+function invalidateLiabilityTreatmentWhenBasisChanged(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown>,
+) {
+  const changed = liabilityTreatmentBasisKeys.some(key =>
+    key in patch
+    && comparableLiabilityValue(key, patch[key]) !== comparableLiabilityValue(key, existing[key]),
+  );
+  return changed ? {
+    ...patch,
+    underwritingTreatment: null,
+    treatmentSourceDocumentId: null,
+    treatmentCreditPullId: null,
+    treatmentTradelineIndex: null,
+    treatmentReviewedBy: null,
+    treatmentReviewedAt: null,
+  } : patch;
 }
 
 export function registerUrlaRoutes(
@@ -400,7 +442,10 @@ export function registerUrlaRoutes(
       }
       // Whitelist to table columns; applicationId is always stripped (immutable).
       const safeBody = pickTableFields(URLA_TABLES.liability, req.body, ["accountNumber"]);
-      const result = await storage.updateUrlaLiability(id, safeBody as any);
+      const result = await storage.updateUrlaLiability(
+        id,
+        invalidateLiabilityTreatmentWhenBasisChanged(record as any, safeBody) as any,
+      );
       if (!result) {
         return res.status(404).json({ error: "Liability not found" });
       }
@@ -493,6 +538,7 @@ export function registerUrlaRoutes(
         isPrimary: boolean;
         personalInfo?: any;
         employmentHistory?: any[];
+        otherIncomeSources?: any[];
         assets?: any[];
         liabilities?: any[];
         declarations?: any;
@@ -574,6 +620,35 @@ export function registerUrlaRoutes(
           }
         }
 
+        if (Array.isArray(opts.otherIncomeSources) && opts.otherIncomeSources.length > 0) {
+          results.otherIncomeSources = [];
+          for (const income of opts.otherIncomeSources) {
+            if (!isUrlaRowSaveable("otherIncome", income)) continue;
+            const cleanIncome = {
+              ...pickTableFields(URLA_TABLES.otherIncome, income),
+              borrowerSequenceNumber: seq,
+            };
+            if (income.id) {
+              const existing = await storage.getOtherIncomeSourceById(income.id);
+              if (!existing || existing.applicationId !== applicationId) {
+                return { ok: false, status: 403, error: "Access denied", results };
+              }
+              const updated = await storage.updateOtherIncomeSource(income.id, cleanIncome as any);
+              if (updated) {
+                results.otherIncomeSources.push(updated);
+                decisionInputsChanged = true;
+              }
+            } else {
+              const created = await storage.createOtherIncomeSource({
+                ...cleanIncome,
+                applicationId,
+              } as any);
+              results.otherIncomeSources.push(created);
+              decisionInputsChanged = true;
+            }
+          }
+        }
+
         if (Array.isArray(opts.assets) && opts.assets.length > 0) {
           results.assets = [];
           for (const asset of opts.assets) {
@@ -603,7 +678,13 @@ export function registerUrlaRoutes(
             if (liability.id) {
               const existing = await storage.getUrlaLiabilityById(liability.id);
               if (!existing || existing.applicationId !== applicationId) return { ok: false, results };
-              const updated = await storage.updateUrlaLiability(liability.id, { ...cleanLiability, borrowerSequenceNumber: seq } as any);
+              const updated = await storage.updateUrlaLiability(
+                liability.id,
+                {
+                  ...invalidateLiabilityTreatmentWhenBasisChanged(existing as any, cleanLiability),
+                  borrowerSequenceNumber: seq,
+                } as any,
+              );
               if (updated) {
                 results.liabilities.push(updated);
                 decisionInputsChanged = true;
@@ -643,6 +724,7 @@ export function registerUrlaRoutes(
         isPrimary: true,
         personalInfo,
         employmentHistory,
+        otherIncomeSources,
         assets,
         liabilities,
         declarations,
@@ -726,37 +808,11 @@ export function registerUrlaRoutes(
         }
         results.realEstateOwned = savedReo;
         results.ownsOtherRealEstate = parsedReo.data.ownsOtherRealEstate;
+        decisionInputsChanged = true;
         await logAudit(req, "urla.real_estate_owned.saved", "loan_application", applicationId, {
           ownsOtherRealEstate: parsedReo.data.ownsOtherRealEstate,
           propertyCount: savedReo.length,
         });
-      }
-
-      // Other income sources (primary only)
-      if (otherIncomeSources && Array.isArray(otherIncomeSources) && otherIncomeSources.length > 0) {
-        results.otherIncomeSources = [];
-        for (const income of otherIncomeSources) {
-          if (!isUrlaRowSaveable("otherIncome", income)) continue;
-          const cleanIncome = pickTableFields(URLA_TABLES.otherIncome, income);
-          if (income.id) {
-            const existing = await storage.getOtherIncomeSourceById(income.id);
-            if (!existing || existing.applicationId !== applicationId) {
-              return res.status(403).json({ error: "Access denied" });
-            }
-            const updated = await storage.updateOtherIncomeSource(income.id, cleanIncome as any);
-            if (updated) {
-              results.otherIncomeSources.push(updated);
-              decisionInputsChanged = true;
-            }
-          } else {
-            const created = await storage.createOtherIncomeSource({
-              ...cleanIncome,
-              applicationId,
-            } as any);
-            results.otherIncomeSources.push(created);
-            decisionInputsChanged = true;
-          }
-        }
       }
 
       // Co-applicants (sequence 2, 3, ...)
@@ -769,6 +825,7 @@ export function registerUrlaRoutes(
             isPrimary: false,
             personalInfo: co.personalInfo,
             employmentHistory: co.employmentHistory,
+            otherIncomeSources: co.otherIncomeSources,
             assets: co.assets,
             liabilities: co.liabilities,
             declarations: co.declarations,

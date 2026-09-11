@@ -131,8 +131,8 @@ describe("URLA intake handoff", () => {
       expect.objectContaining({ employmentType: "additional", employerName: "Weekend Clinic", baseIncome: "2083.33" }),
     ]);
     expect(prefillOtherIncomeSources([], mixedApplication)).toEqual([
-      expect.objectContaining({ incomeSource: "Retirement (e.g., Pension, IRA)", monthlyAmount: "1000" }),
-      expect.objectContaining({ incomeSource: "Other", monthlyAmount: "666.67" }),
+      expect.objectContaining({ borrowerSequenceNumber: 1, incomeSource: "Retirement (e.g., Pension, IRA)", monthlyAmount: "1000" }),
+      expect.objectContaining({ borrowerSequenceNumber: 1, incomeSource: "Other", monthlyAmount: "666.67" }),
     ]);
   });
 
@@ -519,7 +519,14 @@ describe("URLAForm — the progress bar counts the application, not the open tab
     allDeclarations: [],
     hmdaDemographics: [],
     otherIncomeSources: [],
-    propertyInfo: { propertyStreet: "1 Main St", propertyValue: "400000" },
+    propertyInfo: {
+      propertyStreet: "1 Main St",
+      propertyValue: "400000",
+      monthlyFloodInsurance: "0",
+      monthlyGroundRent: "0",
+      monthlySpecialAssessments: "0",
+      subordinateFinancingExists: false,
+    },
     realEstateOwned: [],
   };
 

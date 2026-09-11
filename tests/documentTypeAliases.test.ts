@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { canonicalDocumentType, documentTypesMatch } from "../shared/documentTypes";
+import {
+  canonicalDocumentType,
+  documentTypesMatch,
+  extractionDocumentType,
+  isBusinessBankStatementDocumentType,
+  isTaxReturnDocumentType,
+} from "../shared/documentTypes";
 
 // Guards the vocabulary bridge between the pipeline engine's condition
 // requirements and the borrower checklist's upload types. Before this bridge,
@@ -18,12 +24,31 @@ describe("document type vocabulary bridge", () => {
       ["tax_return_1040", "tax_return"],
       ["bank_statement_checking", "bank_statement"],
       ["bank_statement_savings", "bank_statement"],
+      ["bank_statement_business", "business_bank_statement"],
       ["homeowners_insurance_binder", "homeowners_insurance"],
     ];
     for (const [catalog, engine] of pairs) {
       expect(canonicalDocumentType(catalog)).toBe(engine);
       expect(documentTypesMatch(engine, catalog)).toBe(true);
     }
+  });
+
+  it("routes checklist aliases through the correct extraction family", () => {
+    expect(extractionDocumentType("paystub")).toBe("pay_stub");
+    expect(extractionDocumentType("bank_statement_checking")).toBe("bank_statement");
+    expect(extractionDocumentType("bank_statement_business")).toBe("bank_statement");
+    expect(extractionDocumentType("business_bank_statement")).toBe("bank_statement");
+    expect(extractionDocumentType("tax_return_1040")).toBe("tax_return");
+    expect(extractionDocumentType("1099_misc")).toBe("tax_return");
+    expect(extractionDocumentType("1099_nec")).toBe("tax_return");
+    expect(extractionDocumentType("business_tax_return_1120s")).toBe("tax_return");
+    expect(extractionDocumentType("profit_loss")).toBe("profit_loss");
+    expect(extractionDocumentType("profit_loss_statement")).toBe("profit_loss");
+    expect(isTaxReturnDocumentType("tax_return_1040")).toBe(true);
+    expect(isTaxReturnDocumentType("1099_misc")).toBe(true);
+    expect(documentTypesMatch("tax_return", "1099_misc")).toBe(false);
+    expect(isBusinessBankStatementDocumentType("bank_statement_business")).toBe(true);
+    expect(extractionDocumentType("government_id")).toBeNull();
   });
 
   it("matches identical types without an alias entry", () => {

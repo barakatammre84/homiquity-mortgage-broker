@@ -110,11 +110,31 @@ function baseDto(overrides: Partial<MISMOLoanDTO> = {}): MISMOLoanDTO {
         employerPhone: "(512) 555-0100",
       } as any,
     ],
+    otherIncome: overrides.otherIncome ?? [{
+      incomeSource: "Social Security",
+      monthlyAmount: "1500",
+      taxTreatment: "fully_non_taxable",
+      nonTaxableMonthlyAmount: null,
+      hasDefinedExpiration: false,
+      expirationDate: null,
+      paidInVirtualCurrency: false,
+    } as any],
     assets: overrides.assets ?? [{ accountType: "checking", cashOrMarketValue: "5000" } as any],
     liabilities: overrides.liabilities ?? [
       { liabilityType: "credit_card", monthlyPayment: "50" } as any,
     ],
-    propertyInfo: overrides.propertyInfo ?? null,
+    propertyInfo: overrides.propertyInfo ?? {
+      occupancyType: "primary_residence",
+      monthlyAssociationDues: "175",
+      monthlyFloodInsurance: "80",
+      monthlyGroundRent: "25",
+      monthlySpecialAssessments: "40",
+      subordinateFinancingExists: true,
+      closedEndSubordinateBalance: "15000",
+      helocDrawnBalance: "10000",
+      helocCreditLimit: "30000",
+      monthlySubordinateFinancingPayment: "225",
+    } as any,
     // URLA §5 + §1 citizenship. Every field non-null, so the export emits every
     // declaration data point it is capable of emitting — the fields with no
     // MISMO 3.0 home are omitted by the exporter, not by the fixture.

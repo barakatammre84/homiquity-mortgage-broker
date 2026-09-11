@@ -141,6 +141,10 @@ function baseUrla(overrides: Record<string, any> = {}) {
       propertyZip: "78701",
       occupancyType: "primary",
       numberOfUnits: 1,
+      monthlyFloodInsurance: "0",
+      monthlyGroundRent: "0",
+      monthlySpecialAssessments: "0",
+      subordinateFinancingExists: false,
     },
     declarations: {
       willOccupyAsPrimaryResidence: true,
@@ -654,18 +658,18 @@ function militaryProfile(overrides: Record<string, any> = {}) {
 }
 
 // ---------------------------------------------------------------------------
-describe("employment 2-year-history rule (section 1b-1e)", () => {
+describe("employment 2-year-history rule (sections 1b-1d)", () => {
   it("does not require a prior employer when the current job exceeds 2 years", async () => {
     setFixtures({ urla: baseUrla({ employmentHistory: [currentJob("2020-01-01")] }) });
     const result = await validateMISMOCompleteness("app-1");
-    const emp = sectionByNumber(result, "1b-1e");
+    const emp = sectionByNumber(result, "1b-1d");
     expect(emp.missingFields).toEqual([]);
   });
 
   it("requires prior-employer fields when the current job is under 2 years old", async () => {
     setFixtures({ urla: baseUrla({ employmentHistory: [currentJob("2025-06-01")] }) });
     const result = await validateMISMOCompleteness("app-1");
-    const emp = sectionByNumber(result, "1b-1e");
+    const emp = sectionByNumber(result, "1b-1d");
     expect(emp.missingFields).toEqual(
       expect.arrayContaining([
         "Prior Employer Name (2-year history required)",
@@ -680,7 +684,7 @@ describe("employment 2-year-history rule (section 1b-1e)", () => {
       urla: baseUrla({ employmentHistory: [currentJob("2025-06-01"), priorJob()] }),
     });
     const result = await validateMISMOCompleteness("app-1");
-    const emp = sectionByNumber(result, "1b-1e");
+    const emp = sectionByNumber(result, "1b-1d");
     expect(emp.missingFields).toEqual([]);
   });
 });
@@ -983,18 +987,24 @@ describe("co-applicant scoring (borrowerSequenceNumber > 1)", () => {
     expect(result.coApplicants.length).toBe(1);
     const co = result.coApplicants[0];
     expect(co.borrowerSequenceNumber).toBe(2);
-    // Independently scored sections: employment, assets, liabilities, demographics.
+    // Independently scored sections: employment, other income, assets,
+    // liabilities, demographics.
     expect(co.sections.map((s: any) => s.sectionNumber)).toEqual([
-      "1b-1e",
+      "1b-1d",
+      "1e",
       "2a",
       "2b",
       "7",
     ]);
-    // No required fields are missing in any co-applicant section.
+    // No required fields are missing in any co-applicant section. A borrower
+    // with no other income legitimately leaves optional Section 1e empty, so
+    // that section remains below the optional-completeness target.
     co.sections.forEach((s: any) => {
       expect(s.missingFields).toEqual([]);
-      expect(s.completeness).toBeGreaterThanOrEqual(90);
     });
+    expect(
+      co.sections.find((s: any) => s.sectionNumber === "1e").completeness
+    ).toBe(80);
     // Assets, liabilities, and demographics have no optional gaps => 100.
     expect(
       co.sections.find((s: any) => s.sectionNumber === "2a").completeness
@@ -1011,12 +1021,12 @@ describe("co-applicant scoring (borrowerSequenceNumber > 1)", () => {
     const result = await validateMISMOCompleteness("app-1");
 
     // Primary employment is untouched and complete.
-    const primaryEmp = sectionByNumber(result, "1b-1e");
+    const primaryEmp = sectionByNumber(result, "1b-1d");
     expect(primaryEmp.missingFields).toEqual([]);
 
     // The co-applicant's employment section reflects the missing fields.
     const coEmp = result.coApplicants[0].sections.find(
-      (s: any) => s.sectionNumber === "1b-1e"
+      (s: any) => s.sectionNumber === "1b-1d"
     );
     expect(coEmp.missingFields).toEqual(
       expect.arrayContaining(["Employer Name", "Position/Title"])
@@ -1137,7 +1147,7 @@ describe("co-applicant missing fields surface into criticalErrors", () => {
     const result = await validateMISMOCompleteness("app-1");
 
     expect(result.criticalErrors).toContain(
-      "Co-applicant #2 Employment & Income: Employer Name is required"
+      "Co-applicant #2 Employment: Employer Name is required"
     );
   });
 
@@ -1202,7 +1212,7 @@ describe("co-applicant name resolution", () => {
     const result = await validateMISMOCompleteness("app-1");
 
     expect(result.criticalErrors).toContain(
-      "Co-applicant #2 (Sam Cobright) Employment & Income: Employer Name is required"
+      "Co-applicant #2 (Sam Cobright) Employment: Employer Name is required"
     );
   });
 
@@ -1216,7 +1226,7 @@ describe("co-applicant name resolution", () => {
 
     expect(result.coApplicants[0].name).toBeNull();
     expect(result.criticalErrors).toContain(
-      "Co-applicant #2 Employment & Income: Employer Name is required"
+      "Co-applicant #2 Employment: Employer Name is required"
     );
   });
 });
@@ -1632,7 +1642,7 @@ describe("evaluateGseSubmissionReadiness — submit-gse 422 gate", () => {
     expect(result.gseGatingFailed).toBe(false); // gating scores the primary only
     expect(gate.blocked).toBe(true);
     expect(gate.body.criticalErrors).toContain(
-      "Co-applicant #2 Employment & Income: Employer Name is required"
+      "Co-applicant #2 Employment: Employer Name is required"
     );
   });
 

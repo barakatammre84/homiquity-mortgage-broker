@@ -9,6 +9,7 @@ import {
   boolean,
   timestamp,
   decimal,
+  date,
   jsonb,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -286,6 +287,9 @@ export const employmentHistory = pgTable("employment_history", {
   monthsInLineOfWork: integer("months_in_line_of_work"),
   
   isSelfEmployed: boolean("is_self_employed").default(false),
+  // B3-3.1-01: income paid to or earned in virtual currency is ineligible.
+  // Null is unanswered; false is an affirmative borrower/LO answer.
+  paidInVirtualCurrency: boolean("paid_in_virtual_currency"),
   ownershipShareLessThan25: boolean("ownership_share_less_than_25"),
   ownershipShare25OrMore: boolean("ownership_share_25_or_more"),
   isEmployedByFamilyMember: boolean("is_employed_by_family_member").default(false),
@@ -324,9 +328,25 @@ export type EmploymentHistory = typeof employmentHistory.$inferSelect;
 export const otherIncomeSources = pgTable("other_income_sources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   applicationId: varchar("application_id").references(() => loanApplications.id).notNull(),
+  // URLA Section 1e belongs to a borrower, just like employment. Keeping the
+  // sequence on the row prevents a co-borrower's pension or Social Security
+  // from being exported under the primary borrower or disappearing from the
+  // per-borrower income analysis. Existing rows are primary borrower rows.
+  borrowerSequenceNumber: integer("borrower_sequence_number").default(1).notNull(),
   
   incomeSource: varchar("income_source", { length: 100 }).notNull(),
   monthlyAmount: decimal("monthly_amount", { precision: 12, scale: 2 }).notNull(),
+  // B3-3.1-01: the favorable 25% gross-up is applied only after the current
+  // income workpaper (including supporting documents) is approved. These
+  // borrower answers describe the candidate treatment; approval supplies the
+  // human verification boundary.
+  taxTreatment: varchar("tax_treatment", { length: 32 }),
+  nonTaxableMonthlyAmount: decimal("non_taxable_monthly_amount", { precision: 12, scale: 2 }),
+  // B3-3.1-01: a defined expiration must reach at least three years beyond
+  // the expected note date. Null means unanswered, never "continues forever."
+  hasDefinedExpiration: boolean("has_defined_expiration"),
+  expirationDate: date("expiration_date"),
+  paidInVirtualCurrency: boolean("paid_in_virtual_currency"),
   
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -388,6 +408,19 @@ export const urlaLiabilities = pgTable("urla_liabilities", {
   monthlyPayment: decimal("monthly_payment", { precision: 10, scale: 2 }),
   toBePaidOff: boolean("to_be_paid_off").default(false),
 
+  // Facts the borrower can supply so a reviewer can apply B3-6-05 without a
+  // spreadsheet. A short-term installment or documented $0 income-driven
+  // student-loan payment remains conservative until the staff-only treatment
+  // below is tied to both accepted source evidence and the current bureau row.
+  remainingTermMonths: integer("remaining_term_months"),
+  studentLoanRepaymentPlan: varchar("student_loan_repayment_plan", { length: 40 }),
+  underwritingTreatment: varchar("underwriting_treatment", { length: 60 }),
+  treatmentSourceDocumentId: varchar("treatment_source_document_id"),
+  treatmentCreditPullId: varchar("treatment_credit_pull_id"),
+  treatmentTradelineIndex: integer("treatment_tradeline_index"),
+  treatmentReviewedBy: varchar("treatment_reviewed_by").references(() => users.id),
+  treatmentReviewedAt: timestamp("treatment_reviewed_at"),
+
   // B3-6-05, Debts Paid by Others — the borrower's declaration that another
   // party makes the payments, plus the facts the exclusion turns on. The rule
   // itself is shared/liabilityExclusions.ts. The 12-month payment-history
@@ -445,6 +478,21 @@ export const urlaPropertyInfo = pgTable("urla_property_info", {
   // null on an association-bearing property type as a gap to fill rather than
   // quietly qualifying the borrower without their dues.
   monthlyAssociationDues: decimal("monthly_association_dues", { precision: 10, scale: 2 }),
+  // Remaining B3-6-03 subject-property housing-expense components. A null is
+  // deliberately "not answered"; the borrower enters 0 when the cost does not
+  // apply so the lender-ready path never turns an unknown into a free payment.
+  monthlyFloodInsurance: decimal("monthly_flood_insurance", { precision: 10, scale: 2 }),
+  monthlyGroundRent: decimal("monthly_ground_rent", { precision: 10, scale: 2 }),
+  monthlySpecialAssessments: decimal("monthly_special_assessments", { precision: 10, scale: 2 }),
+
+  // Other new financing secured by the subject property (URLA 4b). Closed-end
+  // UPB and the drawn HELOC balance feed CLTV; the full HELOC line feeds HCLTV.
+  // The monthly payment belongs in the subject housing expense.
+  subordinateFinancingExists: boolean("subordinate_financing_exists"),
+  closedEndSubordinateBalance: decimal("closed_end_subordinate_balance", { precision: 12, scale: 2 }),
+  helocDrawnBalance: decimal("heloc_drawn_balance", { precision: 12, scale: 2 }),
+  helocCreditLimit: decimal("heloc_credit_limit", { precision: 12, scale: 2 }),
+  monthlySubordinateFinancingPayment: decimal("monthly_subordinate_financing_payment", { precision: 10, scale: 2 }),
   
   isMixedUse: boolean("is_mixed_use").default(false),
   mixedUseDescription: text("mixed_use_description"),

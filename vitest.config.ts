@@ -106,6 +106,8 @@ export default defineConfig({
       "tests/coreTaxPacketCanary.integration.test.ts",
       "tests/coreTaxPacketRestartProof.integration.test.ts",
       "tests/documentPageMaterialization.integration.test.ts",
+      "tests/planningDocumentHandoff.integration.test.ts",
+      "tests/taxDocumentReviewConsent.integration.test.ts",
     ],
     // Some modules under test transitively import server/db.ts, which refuses to
     // boot without a DATABASE_URL. Unit tests never touch the database, so a

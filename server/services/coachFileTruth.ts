@@ -39,7 +39,26 @@ import { getUserActivitySummary } from "./activitySummary";
 import { toBorrowerTaskViews, type BorrowerTaskView } from "@shared/borrowerTaskView";
 import { deriveJourneyStepDetails, type JourneyStepId } from "@shared/borrowerJourney";
 import { getLoanAppStatusMeta } from "@shared/loanApplicationStatus";
+import { pickActiveLoanApplication, pickWorkableLoanApplication } from "@shared/loanApplicationStatus";
 import type { User } from "@shared/schema";
+
+/**
+ * Resolve one coherent Homi file. A submitted file takes priority over a newer
+ * draft; closed history is narrative-only and can never receive actions.
+ */
+export function selectCoachApplications<T extends { status: string }>(applications: readonly T[]): {
+  contextApplication: T | undefined;
+  workableApplication: T | undefined;
+} {
+  const workableApplication = pickActiveLoanApplication(applications)
+    ?? pickWorkableLoanApplication(applications);
+  return {
+    workableApplication,
+    contextApplication: workableApplication
+      ?? applications.find((application) => application.status === "funded")
+      ?? applications[0],
+  };
+}
 
 /** The borrower-safe slice of stage state. Whitelist — see boundary 2 above. */
 export interface LoanStageSnapshot {

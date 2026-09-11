@@ -42,7 +42,8 @@ import type { IncomeSourceEntry } from "@shared/schema";
 import { toNum as toNumber } from "@shared/lib/number";
 import { COMPANY_CONFIG } from "../config/company";
 import { isAutopilotEnabled, canGenerateFollowUps } from "./autopilot/config";
-import { materializeFlagsToFollowUps } from "./autopilot/followUps";
+import { materializeFlagsToFollowUps, reconcileFlagFollowUp } from "./autopilot/followUps";
+import { assessLargeDepositSourcing } from "./largeDepositSourcing";
 import { monthlyPrincipalAndInterestFromFraction } from "@shared/lib/amortization";
 import {
   adjustLiabilities,
@@ -51,7 +52,6 @@ import {
   calculateSubjectPropertyRentalOffset,
   computeDti,
   computeWhatIfPayoff,
-  detectSignificantDeposits,
   SEASONING_FULL_MONTHS,
   STANDARD_DTI_CEILING,
   type DepositoryTransaction,
@@ -127,6 +127,8 @@ export interface PreUwFlag {
   reason: string;
   requiredDocs: PreUwRequiredDoc[];
   metrics?: Record<string, number>;
+  /** Exact condition identity when the underlying evidence set must be cleared. */
+  conditionSourceRule?: string;
 }
 
 export interface PreUwInput {
@@ -372,18 +374,20 @@ export function derivePreUnderwritingFlags(input: PreUwInput): PreUwFlag[] {
   // a single deposit exceeding 50% of total monthly qualifying income. B3-4.3-04
   // governs only the gift RESOLUTION path, not the sourcing rule itself. -------
   if (!isNaN(income) && income > 0) {
-    const deposits = detectSignificantDeposits(input.transactions, income / 12);
-    if (deposits.length > 0) {
-      const largest = deposits.sort((a, b) => b.amount - a.amount)[0];
+    const finding = assessLargeDepositSourcing(input.transactions, income / 12);
+    if (finding) {
       flags.push({
         code: "LARGE_DEPOSIT_SOURCING",
         severity: "warning",
-        reason: `We noticed a deposit of $${Math.round(largest.amount).toLocaleString()} on ${largest.date}. Deposits above 50% of monthly income ($${Math.round(largest.threshold).toLocaleString()}) must be sourced — a gift letter if it came from family, or documentation of the sale/transfer otherwise.`,
-        requiredDocs: [
-          { documentType: "gift_letter", description: "Signed gift letter + donor's transfer confirmation (if the funds were a gift)" },
-          { documentType: "other", description: "Sourcing documentation (e.g., vehicle sale settlement, transfer records) otherwise" },
-        ],
-        metrics: { depositAmount: largest.amount, threshold: largest.threshold, depositCount: deposits.length },
+        reason: finding.reason,
+        requiredDocs: finding.requiredDocs,
+        conditionSourceRule: finding.sourceRule,
+        metrics: {
+          depositAmount: finding.largest.amount,
+          threshold: finding.largest.threshold,
+          depositCount: finding.depositCount,
+          totalFlaggedAmount: finding.totalFlaggedAmount,
+        },
       });
     }
   }
@@ -787,6 +791,16 @@ export async function runPreUnderwriting(
   // live with it — and retired the moment the claim is withdrawn, so no one
   // is chasing cancelled checks for a payment that is back in the ratio.
   await reconcileThirdPartyPaidDebtConditions(applicationId, declaredLiabilities);
+
+  // An unexplained large deposit changes usable assets, so its condition is a
+  // decision control even when the optional Autopilot follow-up feature is
+  // disabled. A new deposit set gets a new fingerprinted condition; stale open
+  // versions are retired and a prior clearance cannot clear different funds.
+  await reconcileFlagFollowUp(
+    applicationId,
+    "LARGE_DEPOSIT_SOURCING",
+    flags.find(flag => flag.code === "LARGE_DEPOSIT_SOURCING") ?? null,
+  );
 
   // Autopilot: give the remaining flags teeth. runPreUnderwriting only
   // materializes LOW_RESERVES above; when Autopilot is active this converts the

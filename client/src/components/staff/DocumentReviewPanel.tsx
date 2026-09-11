@@ -45,6 +45,7 @@ import {
 } from "@/lib/documentReview";
 import { ExtractedFieldReview } from "@/components/staff/ExtractedFieldReview";
 import { DocumentPacketReview } from "@/components/staff/DocumentPacketReview";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
 
 const GROUP_ORDER: DocumentReviewGroup[] = ["needs_review", "other", "verified", "rejected"];
 const GROUP_LABELS: Record<DocumentReviewGroup, string> = {
@@ -80,6 +81,7 @@ interface DocumentReviewPanelProps {
   documents: Document[];
   application: LoanApplication;
   canReview: boolean;
+  taxDocumentUseAuthorized?: boolean;
   selectedDocumentId: string | null;
   onSelectDocument: (id: string) => void;
   onOpenSourcePage?: (pageNumber: number, boundingBox?: unknown, fieldLabel?: string) => void;
@@ -90,6 +92,7 @@ export function DocumentReviewPanel({
   documents,
   application,
   canReview,
+  taxDocumentUseAuthorized = true,
   selectedDocumentId,
   onSelectDocument,
   onOpenSourcePage,
@@ -156,6 +159,8 @@ export function DocumentReviewPanel({
       ? compareExtractedToStated(doc.documentType, run, application)
       : [];
     const isPending = doc.status !== "verified" && doc.status !== "rejected";
+    const taxAuthorizationBlocked = isTaxReturnDocumentType(doc.documentType)
+      && !taxDocumentUseAuthorized;
 
     return (
       <div className="space-y-3 border-t px-3 py-3" data-testid={`doc-review-detail-${doc.id}`}>
@@ -247,7 +252,7 @@ export function DocumentReviewPanel({
           <p className="text-xs text-muted-foreground">No extraction has run for this document yet.</p>
         )}
 
-        {canReview && isExtractableDocumentType(doc.documentType) && doc.documentType !== "tax_return" && (
+        {canReview && isExtractableDocumentType(doc.documentType) && !isTaxReturnDocumentType(doc.documentType) && (
           <div className="flex flex-wrap items-end gap-2">
             <Button
               size="sm" className="touch-target"
@@ -262,9 +267,11 @@ export function DocumentReviewPanel({
           </div>
         )}
 
-        {canReview && doc.documentType === "tax_return" && (
-          <p className="rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
-            Tax analysis runs only while the borrower’s authorization is active. Review the authorized results below.
+        {canReview && isTaxReturnDocumentType(doc.documentType) && (
+          <p className={`rounded-md px-2.5 py-2 text-xs ${taxAuthorizationBlocked ? "bg-warning-subtle text-warning-subtle-foreground" : "bg-muted text-muted-foreground"}`}>
+            {taxAuthorizationBlocked
+              ? "Borrower tax-document authorization is inactive. Preview, analysis, and final review remain locked until the borrower renews it."
+              : "Tax analysis runs only while the borrower’s authorization is active. Review the authorized results below."}
           </p>
         )}
 
@@ -303,7 +310,7 @@ export function DocumentReviewPanel({
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm" className="touch-target"
-              disabled={verifyMutation.isPending}
+              disabled={verifyMutation.isPending || taxAuthorizationBlocked}
               onClick={() => verifyMutation.mutate({ id: doc.id, status: "verified" })}
               data-testid={`button-verify-doc-${doc.id}`}
             >
@@ -313,7 +320,7 @@ export function DocumentReviewPanel({
             <Button
               size="sm" className="touch-target"
               variant="outline"
-              disabled={verifyMutation.isPending}
+              disabled={verifyMutation.isPending || taxAuthorizationBlocked}
               onClick={() => {
                 setRejectTarget(doc);
                 setRejectReason("");

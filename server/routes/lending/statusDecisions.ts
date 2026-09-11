@@ -17,6 +17,9 @@ import { evaluateTridTrigger, tridHardStopError } from "../../services/trid";
 import { routeParams } from "../../http/routeParams";
 import { incomeBreakdownExceedsHouseholdTotal } from "@shared/preApprovalForm";
 import { getCurrentDecisionGrade, isCurrentRealCreditPull } from "../../services/currentDecisionGrade";
+import { syncReportedBusinessEntities } from "../../services/reportedBusinessEntities";
+import { assessCreditPullDecisionData } from "../../services/decisionCredit";
+import { loadExpectedBorrowerSequences } from "../../services/borrowerSequences";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -29,6 +32,9 @@ export type FinancialVerificationEvidence = {
   creditPullId: string | null;
   creditPullIsSimulated: boolean;
   creditPullIsCurrent: boolean;
+  creditPullHasProviderReference: boolean;
+  creditPullScoreIsUsable: boolean;
+  creditPullLiabilitiesAreUsable: boolean;
 };
 
 /** The proof required before a staff attestation may become decision-grade. */
@@ -37,9 +43,13 @@ export function financialVerificationEvidenceError(
   evidence: FinancialVerificationEvidence,
 ): string | null {
   if (dimension === "credit") {
-    return !evidence.creditPullId || evidence.creditPullIsSimulated || !evidence.creditPullIsCurrent
-      ? "A current completed real bureau credit report is required; simulated, expired, or archived credit cannot be marked verified."
-      : null;
+    if (!evidence.creditPullId || evidence.creditPullIsSimulated || !evidence.creditPullIsCurrent) {
+      return "A current completed real bureau credit report is required; simulated, expired, or archived credit cannot be marked verified.";
+    }
+    if (!evidence.creditPullHasProviderReference) return "The bureau report needs its provider reference before credit can be marked verified.";
+    if (!evidence.creditPullScoreIsUsable) return "The bureau report needs a valid, reproducible representative score before credit can be marked verified.";
+    if (!evidence.creditPullLiabilitiesAreUsable) return "The bureau report needs a reconciled open-liability ledger and monthly-payment total before credit can be marked verified.";
+    return null;
   }
   if (!evidence.approvedMemoId) {
     return "Approve the current financial workpapers and credit memo before verifying income or assets.";
@@ -164,6 +174,14 @@ export function registerStatusDecisionRoutes(
       const updated = await storage.updateLoanApplication(id, updateData);
       if (!updated) {
         return res.status(404).json({ error: "Application not found" });
+      }
+
+      if (formData.incomeSources !== undefined) {
+        try {
+          await syncReportedBusinessEntities(userId, id, formData.incomeSources);
+        } catch (businessSyncErr) {
+          console.error("[Intake] Reported-business sync failed (recoverable):", businessSyncErr);
+        }
       }
 
       if (
@@ -486,10 +504,12 @@ export function registerStatusDecisionRoutes(
           import("../../services/creditService"),
           import("../../services/verification"),
         ]);
-        const [financialEvidence, creditPull] = await Promise.all([
+        const [financialEvidence, creditPull, expectedBorrowerSequenceNumbers] = await Promise.all([
           getCurrentApprovedFinancialVerificationEvidence(id),
           getLatestCreditPull(id),
+          loadExpectedBorrowerSequences(id),
         ]);
+        const creditAssessment = assessCreditPullDecisionData(creditPull, expectedBorrowerSequenceNumbers);
         const evidence: FinancialVerificationEvidence = {
           approvedMemoId: financialEvidence.memo?.id ?? null,
           approvedIncomeWorkpaperId: financialEvidence.incomeWorkpaperId,
@@ -497,6 +517,9 @@ export function registerStatusDecisionRoutes(
           creditPullId: creditPull?.id ?? null,
           creditPullIsSimulated: creditPull?.isSimulated ?? false,
           creditPullIsCurrent: isCurrentRealCreditPull(creditPull),
+          creditPullHasProviderReference: creditAssessment.hasProviderReference,
+          creditPullScoreIsUsable: creditAssessment.scoreIsUsable,
+          creditPullLiabilitiesAreUsable: creditAssessment.liabilitiesAreUsable,
         };
         const blockers = [
           financialVerificationEvidenceError("income", evidence),
@@ -557,7 +580,11 @@ export function registerStatusDecisionRoutes(
         let evidenceId: string;
         if (dimension === "credit") {
           const { getLatestCreditPull } = await import("../../services/creditService");
-          const creditPull = await getLatestCreditPull(id);
+          const [creditPull, expectedBorrowerSequenceNumbers] = await Promise.all([
+            getLatestCreditPull(id),
+            loadExpectedBorrowerSequences(id),
+          ]);
+          const creditAssessment = assessCreditPullDecisionData(creditPull, expectedBorrowerSequenceNumbers);
           const evidenceError = financialVerificationEvidenceError("credit", {
             approvedMemoId: null,
             approvedIncomeWorkpaperId: null,
@@ -565,6 +592,9 @@ export function registerStatusDecisionRoutes(
             creditPullId: creditPull?.id ?? null,
             creditPullIsSimulated: creditPull?.isSimulated ?? false,
             creditPullIsCurrent: isCurrentRealCreditPull(creditPull),
+            creditPullHasProviderReference: creditAssessment.hasProviderReference,
+            creditPullScoreIsUsable: creditAssessment.scoreIsUsable,
+            creditPullLiabilitiesAreUsable: creditAssessment.liabilitiesAreUsable,
           });
           if (evidenceError) {
             return res.status(422).json({ error: evidenceError });
@@ -580,6 +610,9 @@ export function registerStatusDecisionRoutes(
             creditPullId: null,
             creditPullIsSimulated: false,
             creditPullIsCurrent: false,
+            creditPullHasProviderReference: false,
+            creditPullScoreIsUsable: false,
+            creditPullLiabilitiesAreUsable: false,
           });
           if (evidenceError) {
             return res.status(422).json({ error: evidenceError });

@@ -3,14 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
-import { coachConversationKeys } from "@/lib/queryClient";
+import { coachContextKeys, coachConversationKeys } from "@/lib/queryClient";
 import { Icons, iconSize } from "@/lib/icons";
 import { companyNmlsDisplay, COMPANY_IDENTITY } from "@shared/companyIdentity";
 import { ASSISTANT_NAME } from "@shared/assistant/identity";
 import { useCoachStream } from "@/components/coach/useCoachStream";
 import { MessageList } from "@/components/coach/MessageList";
 import { Composer } from "@/components/coach/Composer";
+import { DocumentChecklistInline, DocumentEvidencePanel } from "@/components/coach/panels";
 import type { CoachConversation, CoachMessage, CoachUsage } from "@/components/coach/types";
+import type { ChecklistItemView } from "@/lib/documentChecklist";
 
 /**
  * The chat itself, behind `lazy()` in HomiLauncher — never on the entry chunk.
@@ -33,6 +35,13 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
     enabled: !!conversationId,
   });
   const { data: usage } = useQuery<CoachUsage>({ queryKey: ["/api/coach/usage"] });
+  const { data: fileContext } = useQuery<{
+    applicationId: string | null;
+    documentChecklist: ChecklistItemView[];
+  }>({
+    queryKey: coachContextKeys.root(),
+    enabled: open,
+  });
 
   const { turn, send, retry, dismissError, isBusy } = useCoachStream({
     conversationId,
@@ -46,6 +55,9 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
   }, [open]);
 
   const messages = data?.messages ?? [];
+  const capturedApplicationId = [...turn.captured].reverse().find(event => event.applicationId)?.applicationId ?? null;
+  const applicationId = capturedApplicationId ?? fileContext?.applicationId ?? null;
+  const documentChecklist = turn.panel.documentChecklist as ChecklistItemView[] | undefined;
 
   return (
     <div
@@ -65,7 +77,7 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
         <span className="text-sm font-semibold text-foreground">{ASSISTANT_NAME}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button asChild size="icon" variant="ghost" className="touch-target h-11 w-11" data-testid="link-homi-full-page">
-            <Link href="/ai-coach" aria-label={`Open ${ASSISTANT_NAME} full page`}>
+            <Link href={conversationId ? `/ai-coach?conversation=${encodeURIComponent(conversationId)}` : "/ai-coach"} aria-label={`Open ${ASSISTANT_NAME} full page`}>
               <Icons.externalLink className="h-4 w-4" />
             </Link>
           </Button>
@@ -121,6 +133,16 @@ export default function HomiDock({ open, onClose }: { open: boolean; onClose: ()
           <MessageList messages={messages} turn={turn} onRetry={retry} onDismissError={dismissError} />
         )}
       </div>
+
+      {turn.panel.documentEvidence ? (
+        <div className="max-h-56 overflow-y-auto border-t p-3" data-testid="homi-dock-document-evidence">
+          <DocumentEvidencePanel evidence={turn.panel.documentEvidence} />
+        </div>
+      ) : documentChecklist?.length ? (
+        <div className="max-h-56 overflow-y-auto border-t p-3" data-testid="homi-dock-document-checklist">
+          <DocumentChecklistInline docs={documentChecklist} applicationId={applicationId} />
+        </div>
+      ) : null}
 
       <Composer
         onSend={(m) => send(m)}

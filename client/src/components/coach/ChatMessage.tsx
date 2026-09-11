@@ -1,13 +1,10 @@
 import { User } from "lucide-react";
-import BorrowerPackageView from "@/components/BorrowerPackageView";
 import { Logo } from "@/components/brand/Logo";
 import { MessageContent } from "./MessageContent";
 import type { CoachMessage } from "./types";
 
 export function ChatMessage({ message }: { message: CoachMessage }) {
   const isUser = message.role === "user";
-  const borrowerPackage = message.structuredData?.borrowerPackage;
-
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`} data-testid={`chat-message-${message.id}`}>
       <div className={`shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${
@@ -23,11 +20,6 @@ export function ChatMessage({ message }: { message: CoachMessage }) {
         }`}>
           <MessageContent content={message.content} />
         </div>
-        {borrowerPackage && (
-          <div className="mt-3 text-left" data-testid="inline-borrower-package">
-            <BorrowerPackageView data={borrowerPackage} />
-          </div>
-        )}
         <p className="text-[10px] text-muted-foreground mt-1 px-1">
           {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </p>

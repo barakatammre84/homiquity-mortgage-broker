@@ -6,6 +6,7 @@ import {
   scenarioRuns,
   type LoanApplication,
   type IncomePathEvaluation,
+  type RealEstateOwned,
 } from "@shared/schema";
 import {
   computeOffers,
@@ -26,12 +27,26 @@ import { computeClosingCosts } from "./loanCosts";
 import { offerUpfrontMI } from "./mortgageInsurance";
 import { activeFeeSchedule } from "./platformFeeSchedule";
 import { resolveCompensation, type CompensationModel } from "@shared/compliance/loCompensation";
-import { classifyAsset, sumOpenMonthlyLiabilities } from "./decisionEngine";
+import { classifyAsset } from "./decisionEngine";
+import { assessLiabilities } from "../underwriting";
+import {
+  assessMultipleFinancedProperties,
+  reoQualificationPicture,
+} from "@shared/realEstateFinancing";
 import {
   deriveAntiSteeringOptions,
   pointsAndFeesDollars,
   type AntiSteeringOptionSet,
 } from "./antiSteeringOptions";
+import { getCurrentDecisionGrade } from "./currentDecisionGrade";
+import {
+  adjustedBureauDebtAfterReviewedTreatments,
+  liabilitiesWithCurrentReviewedTreatments,
+} from "./liabilityTreatments";
+import {
+  assessSubjectPropertyFinancing,
+  type SubjectPropertyFinancingAssessment,
+} from "@shared/subjectPropertyFinancing";
 
 // =============================================================================
 // LO-2 — Deterministic What-If Scenario Simulator (LO Advisor Program).
@@ -232,6 +247,20 @@ export interface ScenarioFacts {
    * module's own MI comments exist to prevent.
    */
   urlaMonthlyAssociationDues: number | null;
+  /** Present only after the borrower has started the full property section.
+   * The fast estimate remains lightweight; a lender-ready what-if refuses to
+   * turn an unanswered housing cost into zero. */
+  urlaSubjectPropertyCosts?: {
+    monthlyAssociationDues: string | number | null;
+    monthlyFloodInsurance: string | number | null;
+    monthlyGroundRent: string | number | null;
+    monthlySpecialAssessments: string | number | null;
+    subordinateFinancingExists: boolean | null;
+    closedEndSubordinateBalance: string | number | null;
+    helocDrawnBalance: string | number | null;
+    helocCreditLimit: string | number | null;
+    monthlySubordinateFinancingPayment: string | number | null;
+  } | null;
   income: {
     evaluationId: string;
     primaryMonthlyQualifyingIncome: number;
@@ -242,7 +271,15 @@ export interface ScenarioFacts {
     evaluatedAt: string;
   };
   monthlyDebts: number;
+  /** Full balance of open 30-day charge accounts. It is excluded from DTI,
+   * but must be covered by verified funds in addition to cash to close and
+   * reserves. Keeping it beside monthlyDebts prevents the scenario path from
+   * silently dropping the asset requirement. */
+  openThirtyDayChargeBalance?: number;
   assets: AssetProfile[];
+  ownsOtherRealEstate?: boolean | null;
+  realEstateOwned?: RealEstateOwned[];
+  realEstateQualificationMissingItems?: string[];
   /** Priced from THIS scenario's profile — what-if FICO and the scenario's
    * loan amount / purchase price (see runScenario's BorrowerPricingProfile).
    * composeScenario consumes each offer's product-aware estimatedMonthlyMI as
@@ -429,6 +466,32 @@ export async function composeScenario(
       rateSheetVersions: facts.rateSheetVersions,
     };
   }
+  if (facts.realEstateOwned) {
+    const assessment = assessMultipleFinancedProperties({
+      ownsOtherRealEstate: facts.ownsOtherRealEstate,
+      properties: facts.realEstateOwned,
+      subjectOccupancyType: scenario.occupancyType,
+    });
+    const realEstateMissing = [
+      ...assessment.missingItems,
+      ...(facts.realEstateQualificationMissingItems ?? []),
+    ];
+    if (realEstateMissing.length > 0) {
+      return {
+        status: "NEEDS_MORE_INFO",
+        simulated: SIMULATED_RATE_DATA,
+        scenario,
+        missingItems: [...new Set(realEstateMissing)],
+        income: facts.income,
+        monthlyDebts: facts.monthlyDebts,
+        offers: [],
+        excludedProducts: facts.excludedProducts,
+        antiSteering: null,
+        engineVersions: null,
+        rateSheetVersions: facts.rateSheetVersions,
+      };
+    }
+  }
 
   if (facts.offers.length === 0) {
     return {
@@ -453,6 +516,46 @@ export async function composeScenario(
 
   const app = facts.application;
   const loanAmount = cents(scenario.purchasePrice - scenario.downPayment);
+  const subjectFinancing: SubjectPropertyFinancingAssessment = facts.urlaSubjectPropertyCosts === undefined
+    ? {
+        captured: false,
+        complete: true,
+        missingItems: [],
+        monthlyAssociationDues: facts.urlaMonthlyAssociationDues ?? 0,
+        monthlyFloodInsurance: 0,
+        monthlyGroundRent: 0,
+        monthlySpecialAssessments: 0,
+        monthlySubordinateFinancingPayment: 0,
+        monthlyHousingExpenseAdditions: facts.urlaMonthlyAssociationDues ?? 0,
+        subordinateFinancingExists: null,
+        closedEndSubordinateBalance: 0,
+        helocDrawnBalance: 0,
+        helocCreditLimit: 0,
+        cltv: null,
+        hcltv: null,
+      }
+    : assessSubjectPropertyFinancing({
+        propertyInfo: facts.urlaSubjectPropertyCosts,
+        firstMortgageAmount: loanAmount,
+        salesPrice: scenario.purchasePrice,
+        appraisedValue: scenario.propertyValue,
+        associationDuesRequired: ["condo", "townhouse"].includes(scenario.propertyType),
+      });
+  if (subjectFinancing.missingItems.length > 0) {
+    return {
+      status: "NEEDS_MORE_INFO",
+      simulated: SIMULATED_RATE_DATA,
+      scenario,
+      missingItems: subjectFinancing.missingItems,
+      income: facts.income,
+      monthlyDebts: facts.monthlyDebts,
+      offers: [],
+      excludedProducts: facts.excludedProducts,
+      antiSteering: null,
+      engineVersions: null,
+      rateSheetVersions: facts.rateSheetVersions,
+    };
+  }
   // Non-null past normalizeScenario, which lists a missing election as a gap.
   const compensation = resolveCompensation(app.loCompensationModel, app.loCompensationBps)!;
 
@@ -505,8 +608,7 @@ export async function composeScenario(
     // B3-6-03: association/co-op dues belong in the qualifying housing expense.
     // This is the same figure the instant decision now qualifies on, so a
     // what-if and a decision cannot disagree about a condo borrower's PITI.
-    const associationDues = facts.urlaMonthlyAssociationDues ?? 0;
-    const piti = cents(offer.estimatedMonthlyPI + monthlyPMI + costs.monthlyEscrow + associationDues);
+    const piti = cents(offer.estimatedMonthlyPI + monthlyPMI + costs.monthlyEscrow + subjectFinancing.monthlyHousingExpenseAdditions);
 
     const requestedLoanProgram = underwritingProgramForProduct(
       offer.productType,
@@ -516,7 +618,7 @@ export async function composeScenario(
     let qualification = qualCache.get(cacheKey);
     if (!qualification) {
       qualification = await qualifyAtPiti(
-        { app, scenario, loanAmount, piti, facts, requestedLoanProgram },
+        { app, scenario, loanAmount, piti, facts, requestedLoanProgram, subjectFinancing },
         evaluate,
       );
       qualCache.set(cacheKey, qualification);
@@ -616,10 +718,11 @@ async function qualifyAtPiti(
     piti: number;
     facts: ScenarioFacts;
     requestedLoanProgram: UnderwritingLoanProgram;
+    subjectFinancing: SubjectPropertyFinancingAssessment;
   },
   evaluate: EngineEvaluator,
 ): Promise<OfferQualification> {
-  const { app, scenario, loanAmount, piti, facts, requestedLoanProgram } = ctx;
+  const { app, scenario, loanAmount, piti, facts, requestedLoanProgram, subjectFinancing } = ctx;
   const input: UnderwritingInput = {
     requestedLoanProgram,
     isVeteran: app.isVeteran,
@@ -629,9 +732,20 @@ async function qualifyAtPiti(
     originalLoanAmount: loanAmount,
     contractSalesPrice: scenario.purchasePrice,
     appraisalValue: scenario.propertyValue,
+    subordinateFinancingExists: subjectFinancing.subordinateFinancingExists,
+    combinedLoanToValue: subjectFinancing.cltv,
+    homeEquityCombinedLoanToValue: subjectFinancing.hcltv,
     representativeFico: scenario.fico,
     proposedPiti: piti,
     assets: facts.assets,
+    openThirtyDayChargeBalance: facts.openThirtyDayChargeBalance ?? 0,
+    multipleFinancedProperties: facts.realEstateOwned
+      ? assessMultipleFinancedProperties({
+          ownsOtherRealEstate: facts.ownsOtherRealEstate,
+          properties: facts.realEstateOwned,
+          subjectOccupancyType: scenario.occupancyType,
+        })
+      : undefined,
     subjectPropertyState: scenario.propertyState ?? undefined,
     occupancyType: scenario.occupancyType,
     numberOfUnits: scenario.numberOfUnits ?? undefined,
@@ -728,14 +842,52 @@ export async function runScenario(
     };
   }
 
-  const [liabilities, urlaAssets, propertyInfo, activeSheets] = await Promise.all([
+  const [liabilities, urlaAssets, propertyInfo, activeSheets, realEstateOwned, currentGrade] = await Promise.all([
     storage.getUrlaLiabilities(application.id),
     storage.getUrlaAssets(application.id),
     storage.getUrlaPropertyInfo(application.id),
     storage.getActiveRateSheets(),
+    storage.getRealEstateOwnedByApplication(application.id),
+    getCurrentDecisionGrade(application),
   ]);
 
-  const monthlyDebts = sumOpenMonthlyLiabilities(liabilities, application.monthlyDebts);
+  const reoQualification = reoQualificationPicture(realEstateOwned);
+  const reviewedCredit = currentGrade.isDecisionGrade ? currentGrade.decisionCredit : null;
+  const currentTreatmentDocumentIds = currentGrade.isDecisionGrade
+    ? new Set(liabilities.flatMap(liability => liability.treatmentSourceDocumentId
+        ? [liability.treatmentSourceDocumentId]
+        : []))
+    : new Set<string>();
+  const effectiveLiabilities = liabilitiesWithCurrentReviewedTreatments(
+    liabilities,
+    reviewedCredit,
+    currentTreatmentDocumentIds,
+  );
+  const liabilityAssessment = liabilities.length > 0
+    ? assessLiabilities(effectiveLiabilities, { allowReviewedTreatments: currentGrade.isDecisionGrade })
+    : null;
+  const nonMortgageLiabilityAssessment = liabilities.length > 0
+    ? assessLiabilities(
+        effectiveLiabilities.filter(liability => !/mortgage|heloc|home[\s_-]?equity/i.test(liability.liabilityType ?? "")),
+        { allowReviewedTreatments: currentGrade.isDecisionGrade },
+      )
+    : null;
+  const disclosedMonthlyDebts = application.ownsOtherRealEstate == null
+    ? liabilityAssessment
+      ? liabilityAssessment.totalMonthlyPayment
+      : Number(String(application.monthlyDebts || 0).replace(/[,$\s]/g, "")) || 0
+    : nonMortgageLiabilityAssessment
+      ? nonMortgageLiabilityAssessment.totalMonthlyPayment + reoQualification.nonRentalMonthlyObligation
+      : Math.max(
+          Number(String(application.monthlyDebts || 0).replace(/[,$\s]/g, "")) || 0,
+          reoQualification.nonRentalMonthlyObligation,
+        );
+  const bureauMonthlyDebts = adjustedBureauDebtAfterReviewedTreatments(
+    reviewedCredit,
+    liabilities,
+    currentTreatmentDocumentIds,
+  );
+  const monthlyDebts = Math.max(disclosedMonthlyDebts, bureauMonthlyDebts ?? 0);
   const assets: AssetProfile[] = urlaAssets
     .map((a) => ({ type: classifyAsset(a.accountType), balance: Number(a.cashOrMarketValue) || 0 }))
     .filter((a) => a.balance > 0);
@@ -826,6 +978,17 @@ export async function runScenario(
     urlaOccupancyType: propertyInfo?.occupancyType ?? null,
     urlaMonthlyAssociationDues:
       propertyInfo?.monthlyAssociationDues == null ? null : Number(propertyInfo.monthlyAssociationDues),
+    urlaSubjectPropertyCosts: propertyInfo ? {
+      monthlyAssociationDues: propertyInfo.monthlyAssociationDues,
+      monthlyFloodInsurance: propertyInfo.monthlyFloodInsurance,
+      monthlyGroundRent: propertyInfo.monthlyGroundRent,
+      monthlySpecialAssessments: propertyInfo.monthlySpecialAssessments,
+      subordinateFinancingExists: propertyInfo.subordinateFinancingExists,
+      closedEndSubordinateBalance: propertyInfo.closedEndSubordinateBalance,
+      helocDrawnBalance: propertyInfo.helocDrawnBalance,
+      helocCreditLimit: propertyInfo.helocCreditLimit,
+      monthlySubordinateFinancingPayment: propertyInfo.monthlySubordinateFinancingPayment,
+    } : null,
     urlaNumberOfUnits: propertyInfo?.numberOfUnits ?? null,
     income: {
       evaluationId: incomeRow.id,
@@ -837,7 +1000,13 @@ export async function runScenario(
       evaluatedAt: incomeRow.createdAt.toISOString(),
     },
     monthlyDebts,
+    openThirtyDayChargeBalance: application.ownsOtherRealEstate == null
+      ? liabilityAssessment?.openThirtyDayBalance ?? 0
+      : nonMortgageLiabilityAssessment?.openThirtyDayBalance ?? 0,
     assets,
+    ownsOtherRealEstate: application.ownsOtherRealEstate,
+    realEstateOwned,
+    realEstateQualificationMissingItems: reoQualification.missingItems,
     offers,
     excludedProducts,
     fthbLenderCredits,

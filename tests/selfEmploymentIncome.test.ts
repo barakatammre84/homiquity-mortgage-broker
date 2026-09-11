@@ -302,7 +302,7 @@ describe("structure dispatch and determinism", () => {
 
 describe("qualifyIncome integrates the self-employment calculator", () => {
   const seEmp = (wk: SelfEmploymentWorksheet) =>
-    ({ isSelfEmployed: true, selfEmploymentIncome: wk } as unknown as EmploymentHistory);
+    ({ isSelfEmployed: true, paidInVirtualCurrency: false, selfEmploymentIncome: wk } as unknown as EmploymentHistory);
 
   it("flows worksheet income into selfEmploymentMonthlyIncome, details, and the total", () => {
     const wk = scheduleCWorksheet(

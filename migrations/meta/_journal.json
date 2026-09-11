@@ -526,6 +526,62 @@
       "when": 1789074000000,
       "tag": "0074_decision_product_lineage",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789156800000,
+      "tag": "0075_borrower_reported_business_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789243200000,
+      "tag": "0076_joint_borrower_credit_scores",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789329600000,
+      "tag": "0077_reo_financing_obligation",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789416000000,
+      "tag": "0078_liability_documented_treatments",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789502400000,
+      "tag": "0079_subject_housing_expense_and_financing",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789588800000,
+      "tag": "0080_other_income_qualification_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789675200000,
+      "tag": "0081_virtual_currency_income",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789761600000,
+      "tag": "0082_other_income_borrower_sequence",
+      "breakpoints": true
     }
   ]
 }

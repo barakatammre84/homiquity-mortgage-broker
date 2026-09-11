@@ -28,6 +28,7 @@ import {
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractProfitLossData,
   extractTaxFormInstanceFields,
   extractW2Data,
   type TaxFormInstanceExtraction,
@@ -46,7 +47,7 @@ import {
 } from "./taxPacketExcerpt";
 
 export const EXTRACTION_EVALUATION_SCHEMA_VERSION = "1";
-export const EXTRACTION_EVALUATION_RUNNER_VERSION = "2026-09-v1";
+export const EXTRACTION_EVALUATION_RUNNER_VERSION = "2026-09-v2";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const PRIVATE_PERMISSION_MASK = 0o077;
@@ -63,6 +64,7 @@ export const EXTRACTION_EVALUATOR_TYPES = [
   "w2",
   "bank_statement",
   "lease_agreement",
+  "profit_loss",
   "tax_package",
 ] as const;
 
@@ -804,6 +806,10 @@ const SIMPLE_FIELD_PATHS: Record<Exclude<ExtractionEvaluatorType, "tax_package">
     "monthlyRent", "tenantName", "landlordName", "propertyAddress",
     "leaseStartDate", "leaseEndDate", "securityDeposit",
   ],
+  profit_loss: [
+    "businessName", "periodStartDate", "periodEndDate", "revenue",
+    "costOfGoodsSold", "grossProfit", "totalExpenses", "netProfitLoss",
+  ],
 };
 
 function valueAtPath(value: object, fieldPath: string): unknown {
@@ -1001,7 +1007,9 @@ async function executeSimpleEvaluationCase(
       ? await extractW2Data(source, item.mimeType)
       : item.extractor === "bank_statement"
         ? await extractBankStatementData(source, item.mimeType)
-        : await extractLeaseData(source, item.mimeType);
+        : item.extractor === "lease_agreement"
+          ? await extractLeaseData(source, item.mimeType)
+          : await extractProfitLossData(source, item.mimeType);
   const lineage = collectLineage([extracted]);
   const prediction = simpleExtractionToBenchmarkCase({
     caseId: item.caseId,

@@ -11,6 +11,10 @@ import { firstQueryValue } from "../queryParams";
 import { routeParams } from "../../http/routeParams";
 import { revokeTaxDocumentConsentAndPurge } from "../../services/taxConsentWorkflow";
 import { clientIpForRecord } from "../../clientIp";
+import {
+  enqueueUnprocessedTaxDocumentsAfterConsent,
+  kickDocumentExtractionWorker,
+} from "../../services/documentExtractionJobs";
 
 // Verify that an internal staff user is actually assigned to the given application.
 // Returns true for admin (unrestricted), checks LO assignment for lo/loa, and
@@ -125,7 +129,28 @@ export function registerConsentRoutes(
         });
       }
 
-      res.status(201).json(consent);
+      // A tax return may already be sitting securely in the mortgage file.
+      // Authorization is the missing action, so accepting it should start the
+      // durable analysis without asking the borrower to find and upload the
+      // same file again. Queue failures do not turn a recorded consent into a
+      // false error response; startup/polling recovery and a later explicit
+      // retry can still recover the document.
+      let taxDocumentsQueued = 0;
+      if (result.data.consentType === "tax_document_use" && result.data.consentGiven) {
+        try {
+          const currentDocuments = await storage.getDocumentsByUser(user.id);
+          taxDocumentsQueued = await enqueueUnprocessedTaxDocumentsAfterConsent(
+            currentDocuments,
+            user.id,
+            result.data.applicationId ?? null,
+          );
+          if (taxDocumentsQueued > 0) kickDocumentExtractionWorker();
+        } catch (queueError) {
+          console.error("Queue tax documents after consent error (non-fatal):", queueError);
+        }
+      }
+
+      res.status(201).json({ ...consent, taxDocumentsQueued });
     } catch (error) {
       console.error("Record consent error:", error);
       res.status(500).json({ error: "Failed to record consent" });

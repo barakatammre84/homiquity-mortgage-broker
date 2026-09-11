@@ -17,9 +17,16 @@ import { CoreTaxPacketCanaryError } from "../server/services/coreTaxPacketCanary
 describe("durable document extraction job policy", () => {
   it("queues the borrower document types with a supported extractor", () => {
     expect(standardDocumentNeedsExtraction("pay_stub")).toBe(true);
+    expect(standardDocumentNeedsExtraction("paystub")).toBe(true);
     expect(standardDocumentNeedsExtraction("w2")).toBe(true);
     expect(standardDocumentNeedsExtraction("bank_statement")).toBe(true);
+    expect(standardDocumentNeedsExtraction("bank_statement_checking")).toBe(true);
+    expect(standardDocumentNeedsExtraction("bank_statement_savings")).toBe(true);
+    expect(standardDocumentNeedsExtraction("bank_statement_business")).toBe(true);
+    expect(standardDocumentNeedsExtraction("business_bank_statement")).toBe(true);
     expect(standardDocumentNeedsExtraction("lease_agreement")).toBe(true);
+    expect(standardDocumentNeedsExtraction("profit_loss")).toBe(true);
+    expect(standardDocumentNeedsExtraction("profit_loss_statement")).toBe(true);
     expect(standardDocumentNeedsExtraction("government_id")).toBe(false);
   });
 

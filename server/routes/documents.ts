@@ -10,6 +10,7 @@ import {
   extractW2Data,
   extractBankStatementData,
   extractLeaseData,
+  extractProfitLossData,
 } from "../extractionService";
 import type { ExtractedDocumentData, ExtractedTaxReturnData } from "../extractionCore";
 import { markHumanReviewCompleted } from "../services/documentConfidence";
@@ -58,6 +59,10 @@ import {
 } from "../services/documentFieldReview";
 import { withActiveTaxDocumentConsent } from "../services/taxConsentWorkflow";
 import { hasActionableExtractionWarning } from "../services/documentExtractionOutcome";
+import {
+  extractionDocumentType,
+  isTaxReturnDocumentType,
+} from "@shared/documentTypes";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -295,7 +300,7 @@ export function registerDocumentRoutes(
       const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
       const isOwner = borrowerUserId === user.id;
       if (
-        document.documentType === "tax_return" &&
+        isTaxReturnDocumentType(document.documentType) &&
         !isOwner &&
         !(await hasUserConsent("tax_document_use", borrowerUserId))
       ) {
@@ -368,7 +373,7 @@ export function registerDocumentRoutes(
         !(await hasActiveDocumentTeamAccess(user, document, storage))
       ) return res.status(403).json({ error: "Unauthorized" });
       if (
-        document.documentType === "tax_return" &&
+        isTaxReturnDocumentType(document.documentType) &&
         borrowerUserId !== user.id &&
         !(await hasUserConsent("tax_document_use", borrowerUserId))
       ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
@@ -394,7 +399,7 @@ export function registerDocumentRoutes(
         !(await hasActiveDocumentTeamAccess(user, document, storage))
       ) return res.status(403).json({ error: "Unauthorized" });
       if (
-        document.documentType === "tax_return" &&
+        isTaxReturnDocumentType(document.documentType) &&
         borrowerUserId !== user.id &&
         !(await hasUserConsent("tax_document_use", borrowerUserId))
       ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
@@ -447,7 +452,7 @@ export function registerDocumentRoutes(
         }
         const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
         if (
-          document.documentType === "tax_return" &&
+          isTaxReturnDocumentType(document.documentType) &&
           !(await hasUserConsent("tax_document_use", borrowerUserId))
         ) return res.status(403).json({ error: "Tax document authorization is no longer active" });
 
@@ -488,7 +493,7 @@ export function registerDocumentRoutes(
       }
 
       const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
-      if (document.documentType === "tax_return" && borrowerUserId !== user.id) {
+      if (isTaxReturnDocumentType(document.documentType) && borrowerUserId !== user.id) {
         return res.status(403).json({
           error: "Only the borrower can authorize tax-return processing",
         });
@@ -512,7 +517,7 @@ export function registerDocumentRoutes(
       }
 
       if (
-        document.documentType === "tax_return" &&
+        isTaxReturnDocumentType(document.documentType) &&
         !(await hasUserConsent("tax_document_use", borrowerUserId))
       ) {
         return res.status(403).json({
@@ -542,7 +547,8 @@ export function registerDocumentRoutes(
       // indexed by field names that exist on none of these interfaces.
       let extractedData: ExtractedDocumentData;
 
-      switch (document.documentType) {
+      const extractorType = extractionDocumentType(document.documentType);
+      switch (extractorType) {
         case "tax_return":
           extractedData = await extractTaxReturnData(
             document.storagePath,
@@ -562,10 +568,13 @@ export function registerDocumentRoutes(
         case "lease_agreement":
           extractedData = await extractLeaseData(document.storagePath, document.mimeType ?? undefined);
           break;
+        case "profit_loss":
+          extractedData = await extractProfitLossData(document.storagePath, document.mimeType ?? undefined);
+          break;
         default:
           return res.status(400).json({ 
             error: "Document type not supported for extraction",
-            supportedTypes: ["tax_return", "pay_stub", "w2", "bank_statement", "lease_agreement"]
+            supportedTypes: ["tax_return", "pay_stub", "w2", "bank_statement", "lease_agreement", "profit_loss"]
           });
       }
 
@@ -593,9 +602,9 @@ export function registerDocumentRoutes(
         fileSize: document.fileSize ?? undefined,
         extracted: extractedData,
         taxConsentUserId:
-          document.documentType === "tax_return" ? borrowerUserId : undefined,
+          isTaxReturnDocumentType(document.documentType) ? borrowerUserId : undefined,
         afterAuthorizedPersist:
-          document.documentType === "tax_return"
+          isTaxReturnDocumentType(document.documentType)
             ? (transaction) => saveTaxInsightForDocumentInTransaction(
                 transaction,
                 borrowerUserId,
@@ -701,7 +710,7 @@ export function registerDocumentRoutes(
       }
       const borrowerUserId = await resolveDocumentBorrowerUserId(document, storage);
       if (
-        document.documentType === "tax_return" &&
+        isTaxReturnDocumentType(document.documentType) &&
         !(await hasUserConsent("tax_document_use", borrowerUserId))
       ) {
         return res.status(403).json({ error: "Tax document authorization is no longer active" });
@@ -753,7 +762,7 @@ export function registerDocumentRoutes(
             decisions: parsed.data.decisions,
             missingFields: parsed.data.missingFields,
           }, transaction);
-          if (document.documentType !== "tax_return") return write();
+          if (!isTaxReturnDocumentType(document.documentType)) return write();
           const authorized = await withActiveTaxDocumentConsent(
             borrowerUserId,
             write,

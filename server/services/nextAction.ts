@@ -285,7 +285,7 @@ export function computeNextAction(input: NextActionInput): NextAction {
 
   return {
     kind: "in_review",
-    title: "Your application is being reviewed",
+    title: "Your file is ready for loan-team review",
     description: getLoanAppStatusMeta(status).description,
     href: "/messages",
     buttonLabel: "View Status",

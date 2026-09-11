@@ -40,6 +40,8 @@ describe("liabilityKind — one classifier for what the picker writes AND what i
   it("maps every URLA picker label (the strings the column actually stores)", () => {
     const expected: Record<string, string> = {
       "Revolving (Credit Card)": "revolving",
+      "Open 30-day charge account": "open_30_day",
+      "Lease": "lease",
       "Installment (Auto Loan)": "installment",
       "Student Loan": "student_loan",
       "Mortgage": "mortgage",

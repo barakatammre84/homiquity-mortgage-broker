@@ -42,6 +42,106 @@ const OPEN_CONDITION_CLOSED_STATUSES: ReadonlySet<string> = new Set(SETTLED_COND
 const RECENT_MESSAGE_LIMIT = 6;
 const MESSAGE_SNIPPET_CHARS = 140;
 
+function reportedAmount(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const amount = Number(String(value).replace(/[,$]/g, ""));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+export interface ReportedIncomeStory {
+  householdAnnualTotal: number | null;
+  employmentType: string | null;
+  detailedAnnualTotal: number;
+  unitemizedAnnualAmount: number | null;
+  breakdownExceedsHouseholdTotal: boolean;
+  sources: Array<{
+    type: string;
+    annualAmount: number | null;
+    name: string | null;
+    yearsInRole: string | null;
+    businessStructure: string | null;
+    ownershipPercent: string | null;
+    rentalPropertyCount: number;
+  }>;
+  rental: {
+    propertyCount: number;
+    grossMonthlyRent: number;
+    planningMonthlyRent: number;
+    monthlyPropertyPayments: number;
+    preliminaryMonthlyOffset: number;
+  } | null;
+}
+
+/**
+ * Reconciles the fast-intake household total with its additional-source
+ * breakdown. This is presentation truth, not qualifying-income math: every
+ * value remains borrower-reported and the rental factor remains preliminary.
+ */
+export function buildReportedIncomeStory(
+  application: Pick<LoanApplication, "annualIncome" | "employmentType" | "incomeSources">,
+): ReportedIncomeStory {
+  const householdAnnualTotal = reportedAmount(application.annualIncome);
+  const rawSources = Array.isArray(application.incomeSources)
+    ? application.incomeSources as Array<Record<string, unknown>>
+    : [];
+  const sources = rawSources.map((source) => {
+    const rentals = Array.isArray(source.rentalProperties)
+      ? source.rentalProperties as Array<Record<string, unknown>>
+      : [];
+    return {
+      type: String(source.type ?? "other"),
+      annualAmount: reportedAmount(source.annualAmount),
+      name: source.employerName ? String(source.employerName) : null,
+      yearsInRole: source.yearsInRole ? String(source.yearsInRole) : null,
+      businessStructure: source.businessStructure ? String(source.businessStructure) : null,
+      ownershipPercent: source.ownershipPercent ? String(source.ownershipPercent) : null,
+      rentalPropertyCount: rentals.length,
+    };
+  });
+  const detailedAnnualTotal = sources.reduce(
+    (sum, source) => sum + (source.annualAmount ?? 0),
+    0,
+  );
+  const breakdownExceedsHouseholdTotal = householdAnnualTotal !== null
+    && detailedAnnualTotal > householdAnnualTotal;
+  const unitemizedAnnualAmount = householdAnnualTotal === null
+    ? null
+    : Math.max(0, householdAnnualTotal - detailedAnnualTotal);
+
+  const rentals = rawSources
+    .filter((source) => source.type === "rental")
+    .flatMap((source) => Array.isArray(source.rentalProperties)
+      ? source.rentalProperties as Array<Record<string, unknown>>
+      : []);
+  const grossMonthlyRent = rentals.reduce(
+    (sum, property) => sum + (reportedAmount(property.monthlyRentalIncome) ?? 0),
+    0,
+  );
+  const monthlyPropertyPayments = rentals.reduce(
+    (sum, property) => sum + (reportedAmount(property.monthlyDebtPayment) ?? 0),
+    0,
+  );
+  const planningMonthlyRent = Math.round(grossMonthlyRent * 0.75 * 100) / 100;
+
+  return {
+    householdAnnualTotal,
+    employmentType: application.employmentType,
+    detailedAnnualTotal,
+    unitemizedAnnualAmount,
+    breakdownExceedsHouseholdTotal,
+    sources,
+    rental: rentals.length > 0
+      ? {
+          propertyCount: rentals.length,
+          grossMonthlyRent,
+          planningMonthlyRent,
+          monthlyPropertyPayments,
+          preliminaryMonthlyOffset: Math.round((planningMonthlyRent - monthlyPropertyPayments) * 100) / 100,
+        }
+      : null,
+  };
+}
+
 /**
  * Statuses excluded from the "active" cockpit book: nothing submitted yet
  * (draft) or the file has ended (every terminal status). "suspended" stays in
@@ -253,6 +353,7 @@ export function registerCockpitRoutes(app: Express, storage: IStorage) {
             closingDate: application.closingDate ?? null,
             createdAt: application.createdAt,
           },
+          reportedIncome: buildReportedIncomeStory(application),
           income: incomeRow
             ? {
                 evaluationId: incomeRow.id,

@@ -30,6 +30,8 @@ import {
   kickDocumentExtractionWorker,
   standardDocumentNeedsExtraction,
 } from "../../services/documentExtractionJobs";
+import { isTaxReturnDocumentType } from "@shared/documentTypes";
+import { hasUserConsent } from "../../consentGate";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
   applicationId: z.string().optional(),
@@ -241,14 +243,25 @@ export function registerDocumentRoutes(
           autopilotEnabled = await isAutopilotEnabled(appForGate?.loanOfficerId);
         }
       }
-      // Tax packages enter the richer, consent-gated multi-form queue from
-      // /api/tax-insights/process. Do not spend a second model pass through
-      // generic Autopilot when that explicit borrower action follows upload.
-      const extractionMode = autopilotEnabled && documentType !== "tax_return"
-        ? "autopilot" as const
-        : standardDocumentNeedsExtraction(documentType)
-          ? "standard" as const
-          : null;
+      // A mortgage borrower uploads tax returns from the ordinary Documents
+      // page, not the renter-only TaxReturnInsightCard. Once the borrower has
+      // authorized tax-document use, register the durable tax job in the same
+      // transaction as the document so there is no acknowledged-but-idle file.
+      // Without consent, keep the source file and report the exact next step;
+      // granting consent backfills the current unprocessed return(s).
+      const isTaxReturn = isTaxReturnDocumentType(documentType);
+      const taxAnalysisAuthorized = isTaxReturn
+        ? await hasUserConsent("tax_document_use", userId)
+        : false;
+      const extractionMode = isTaxReturn
+        ? taxAnalysisAuthorized
+          ? "tax_package" as const
+          : null
+        : autopilotEnabled
+          ? "autopilot" as const
+          : standardDocumentNeedsExtraction(documentType)
+            ? "standard" as const
+            : null;
 
       // Soft duplicate detection (same name + size for this borrower). Never
       // blocks — the response carries the hint so the UI can surface it.
@@ -382,6 +395,9 @@ export function registerDocumentRoutes(
 
       res.status(201).json({
         ...toDocumentViewForRole(document, user.role),
+        taxAnalysis: isTaxReturn
+          ? { status: taxAnalysisAuthorized ? "queued" : "authorization_required" }
+          : undefined,
         similarDocument: similar
           ? { id: similar.id, fileName: similar.fileName, uploadedAt: similar.createdAt }
           : null,

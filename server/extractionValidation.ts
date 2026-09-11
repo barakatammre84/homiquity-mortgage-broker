@@ -18,7 +18,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { computeHash, encryptSensitiveData } from "./services/encryptionService";
-import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedW2Data, type ExtractedBankStatementData, type ExtractedLeaseData, type DocumentClassification, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
+import { type ExtractionLineage, type ExtractedTaxReturnData, type ExtractedPayStubData, type ExtractedW2Data, type ExtractedBankStatementData, type ExtractedLeaseData, type ExtractedProfitLossData, type DocumentClassification, EXTRACTION_PROMPT_VERSION } from "./extractionCore";
 import { DOCUMENT_TYPE_TAXONOMY, type DocumentTypeTaxonomy } from "@shared/schema/documents";
 
 // Model lineage, persisted with every extraction so a past result can be traced
@@ -284,6 +284,31 @@ export const leaseSchema = requireSourceEvidence(z.object({
   "securityDeposit",
 ]);
 
+export const profitLossSchema = requireSourceEvidence(z.object({
+  businessName: shortText,
+  periodStartDate: isoDate,
+  periodEndDate: isoDate,
+  revenue: money,
+  costOfGoodsSold: money,
+  grossProfit: signedMoney,
+  totalExpenses: money,
+  netProfitLoss: signedMoney,
+  confidence: confidenceLevel,
+  extractedFields: extractedFieldsList,
+  warnings: warningsList,
+  fieldEvidence: fieldEvidenceSchema,
+  pageCount,
+  documentClassification: documentClassificationSchema,
+}), [
+  "businessName", "periodStartDate", "periodEndDate", "revenue", "costOfGoodsSold",
+  "grossProfit", "totalExpenses", "netProfitLoss",
+]);
+
+/** Test and calibration seam for the untrusted P&L response path. */
+export function validateProfitLossResponse(rawText: string) {
+  return validateExtraction(profitLossSchema, rawText, "Profit and loss statement");
+}
+
 /** Test seam for the page-classification boundary on simple documents. */
 export function validateDocumentClassification(value: unknown) {
   const result = documentClassificationSchema.safeParse(value);
@@ -409,6 +434,36 @@ export function checkLeaseConsistency(data: ExtractedLeaseData): void {
   }
   if (data.securityDeposit !== undefined && data.monthlyRent !== undefined && data.securityDeposit > 12 * data.monthlyRent) {
     capConfidence(data, "medium", "Consistency check: security deposit exceeds 12x monthly rent");
+  }
+}
+
+/** Reconcile the two arithmetic identities a conventional P&L must support. */
+export function checkProfitLossConsistency(data: ExtractedProfitLossData): void {
+  const materiallyDifferent = (actual: number, expected: number) =>
+    Math.abs(actual - expected) > Math.max(5, Math.abs(expected) * 0.01);
+
+  if (
+    data.revenue !== undefined &&
+    data.costOfGoodsSold !== undefined &&
+    data.grossProfit !== undefined &&
+    materiallyDifferent(data.grossProfit, data.revenue - data.costOfGoodsSold)
+  ) {
+    capConfidence(data, "medium", "Consistency check: gross profit does not equal revenue minus cost of goods sold");
+  }
+  if (
+    data.grossProfit !== undefined &&
+    data.totalExpenses !== undefined &&
+    data.netProfitLoss !== undefined &&
+    materiallyDifferent(data.netProfitLoss, data.grossProfit - data.totalExpenses)
+  ) {
+    capConfidence(data, "medium", "Consistency check: net profit or loss does not equal gross profit minus total expenses");
+  }
+  if (
+    data.periodStartDate &&
+    data.periodEndDate &&
+    data.periodStartDate > data.periodEndDate
+  ) {
+    capConfidence(data, "medium", "Consistency check: P&L period ends before it starts");
   }
 }
 

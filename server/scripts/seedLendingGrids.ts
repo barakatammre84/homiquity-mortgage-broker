@@ -157,21 +157,19 @@ export async function seed() {
   }
 
   // ==========================================
-  // SEED: Conventional max LTV by occupancy x units — PLATFORM-CONSERVATIVE
-  // CEILINGS, not transcribed agency figures. B2-1.2-01 defines how the LTV
-  // ratio is CALCULATED and then says "Refer to the Eligibility Matrix for
-  // maximum allowable LTV ratios" (verified on PDF sheet 180, 2026-08-23 — the
-  // section's own two tables are calculation methods, and it publishes no
-  // maximum anywhere). We do not hold the Eligibility Matrix (gap G-14), so
-  // these are our own ceilings until it is procured; a matrix miss routes to
-  // manual review rather than inventing a limit.
+  // SEED: Conventional max LTV by occupancy x units. Verified 2026-09-11
+  // against Fannie Mae's current Eligibility Matrix. The 2-4 unit primary rows
+  // are the MANUAL-underwriting ceilings; Desktop Underwriter permits eligible
+  // purchase/limited-cash-out files to 95%. The engine therefore routes a
+  // purchase above these manual rows but at or below 95% to review for a current
+  // DU finding. Investment rows are absolute standard-product ceilings.
   // ==========================================
   const maxLtvId = await createMatrix(
     "CONVENTIONAL_MAX_LTV",
     "Maximum LTV for purchase, fixed-rate conventional loans by unit count and occupancy",
   );
 
-  // [units, occupancy] -> max LTV. Standard purchase/fixed-rate limits.
+  // [units, occupancy] -> manual/standard max LTV for the local review path.
   // Second homes are 1-unit only; other combinations are intentionally unseeded
   // (a matrix miss routes to manual review as out-of-band).
   const maxLtvDefs: Array<{ units: number; occupancy: string; maxLtv: number }> = [

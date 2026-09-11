@@ -6,6 +6,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { encryptSensitiveData, computeHash } from "./encryptionService";
 import { logCreditAction } from "./creditAuditChain";
 import { getActiveConsent, consentCoversPullType } from "./creditConsents";
+import { normalizeBorrowerCreditScores, type BureauScoreSet } from "./decisionCredit";
 
 /**
  * Per-pull vendor cost, in dollars, by pull type.
@@ -361,6 +362,8 @@ export async function recordLiveCreditPullCompletion(input: {
   /** The bureau's own reference for this inquiry. Required — this is the provenance. */
   vendorRequestId: string;
   scores: { experian?: number; equifax?: number; transunion?: number };
+  /** One score set per borrower for a joint report. Omit only for a single-borrower report. */
+  borrowerScores?: Array<{ borrowerSequenceNumber: number; scores: BureauScoreSet }>;
   /** Verbatim vendor payload, if you have it. Encrypted at rest like any other. */
   rawResponse?: string;
   tradelines?: { total?: number; open?: number };
@@ -385,18 +388,26 @@ export async function recordLiveCreditPullCompletion(input: {
     );
   }
 
-  const present = (["experian", "equifax", "transunion"] as const)
-    .map((b) => input.scores[b])
-    .filter((v): v is number => typeof v === "number");
-
-  if (present.length === 0) {
+  const requestedBorrowerScores = input.borrowerScores?.length
+    ? input.borrowerScores
+    : [{ borrowerSequenceNumber: 1, scores: input.scores }];
+  const presentScores = requestedBorrowerScores.flatMap(row => [
+    row.scores.experian,
+    row.scores.equifax,
+    row.scores.transunion,
+  ]).filter((score): score is number => score !== null && score !== undefined);
+  if (presentScores.length === 0) {
     throw new Error("At least one bureau score is required to complete a credit pull.");
   }
-  for (const score of present) {
+  for (const score of presentScores) {
     if (!Number.isInteger(score) || score < 300 || score > 850) {
       throw new Error(`Credit score ${score} is outside the valid 300-850 range.`);
     }
   }
+  const borrowerScores = normalizeBorrowerCreditScores(requestedBorrowerScores);
+  const controllingBorrower = borrowerScores.reduce(
+    (lowest, borrower) => borrower.representativeScore < lowest.representativeScore ? borrower : lowest,
+  );
 
   const [pull] = await db.select().from(creditPulls).where(eq(creditPulls.id, creditPullId));
   if (!pull) throw new Error("Credit pull not found");
@@ -406,11 +417,9 @@ export async function recordLiveCreditPullCompletion(input: {
     );
   }
 
-  // Representative = MIDDLE of three, or the LOWER of two, matching the
-  // tri-merge convention the underwriting layer already assumes.
-  const sorted = [...present].sort((a, b) => a - b);
-  const representativeScore =
-    sorted.length >= 3 ? sorted[1] : sorted.length === 2 ? sorted[0] : sorted[0];
+  // A borrower's representative is the middle of three or lower of two. On a
+  // joint file the controlling score is the lowest borrower representative.
+  const representativeScore = controllingBorrower.representativeScore;
 
   const encrypted = input.rawResponse ? encryptSensitiveData(input.rawResponse) : null;
 
@@ -418,10 +427,11 @@ export async function recordLiveCreditPullCompletion(input: {
     .update(creditPulls)
     .set({
       status: "completed",
-      experianScore: input.scores.experian ?? null,
-      equifaxScore: input.scores.equifax ?? null,
-      transunionScore: input.scores.transunion ?? null,
+      experianScore: controllingBorrower.experianScore,
+      equifaxScore: controllingBorrower.equifaxScore,
+      transunionScore: controllingBorrower.transunionScore,
       representativeScore,
+      borrowerScores,
       totalTradelines: input.tradelines?.total ?? null,
       openTradelines: input.tradelines?.open ?? null,
       totalDebt: input.debt?.total?.toString() ?? null,
@@ -449,6 +459,7 @@ export async function recordLiveCreditPullCompletion(input: {
     action: "pull_completed",
     actionDetails: {
       representativeScore,
+      borrowerCount: borrowerScores.length,
       bureausReturned: pull.bureaus,
       responseHashStored: Boolean(input.rawResponse),
       // Recorded explicitly: this pull was completed from data entered outside
@@ -500,4 +511,3 @@ export async function getLatestCreditPull(applicationId: string): Promise<Credit
 
   return pull || null;
 }
-

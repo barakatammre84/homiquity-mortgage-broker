@@ -32,6 +32,26 @@ function renderRow(row: DocRow) {
 }
 
 describe("DocumentItemRow — year + instructions context", () => {
+  it("reserves Complete for verified evidence", () => {
+    const { rerender } = renderRow({ ...baseRow, status: "verifying", fileName: "return.pdf" });
+    expect(screen.getByText("Submitted")).toBeTruthy();
+    expect(screen.queryByText("Complete")).toBeNull();
+
+    rerender(
+      <DocumentItemRow
+        row={{ ...baseRow, status: "verified", fileName: "return.pdf" }}
+        uploading={false}
+        uploadingFile={null}
+        progress={0}
+        anyUploadBusy={false}
+        onFile={vi.fn()}
+        onBrowse={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Complete")).toBeTruthy();
+  });
+
   it("shows the document year beside the name when the request names one", () => {
     renderRow({ ...baseRow, year: "2023" });
     const year = screen.getByTestId("text-doc-year-tax_return");

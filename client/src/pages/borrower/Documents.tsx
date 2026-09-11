@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { useSearch } from "wouter";
+import { useState, useRef } from "react";
+import { Link, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
@@ -8,16 +8,15 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, loanApplicationKeys, dashboardKeys, applicationResourceKeys, taskKeys } from "@/lib/queryClient";
 import { useActiveApplication } from "@/hooks/useActiveApplication";
 import type { Document, LoanApplication, LoanCondition } from "@shared/schema";
-import { canonicalDocumentType } from "@shared/documentTypes";
 import { validateUploadFile } from "@shared/uploads";
 import { PageShell } from "@/components/PageShell";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/patterns/EmptyState";
 import { QueryErrorState } from "@/components/ui/query-boundary";
 import type { DocRow } from "@/components/DocumentItemRow";
 import { DocumentRequestReasons } from "@/components/borrower/DocumentRequestReasons";
-import { DOCUMENT_CATEGORIES, getUploadNextStep } from "./documentCategories";
+import { getUploadNextStep } from "./documentCategories";
 import {
-  groupDocumentsByType,
-  countPendingCatalogDocs,
   countPendingChecklistItems,
   buildPersonalizedGroups,
   rowFromChecklistItem,
@@ -27,7 +26,6 @@ import {
 import { ConditionFocusBanner, ConditionGoneNotice } from "./documents/ConditionFocusBanner";
 import { ChecklistStatusSummary } from "./documents/ChecklistStatusSummary";
 import { PersonalizedCategoryCard } from "./documents/PersonalizedCategoryCard";
-import { CatalogCategoryCard } from "./documents/CatalogCategoryCard";
 import { UploadedDocumentsTable } from "./documents/UploadedDocumentsTable";
 import type { UploadControls } from "./documents/types";
 
@@ -38,7 +36,6 @@ interface DashboardData {
 export default function Documents() {
   const queryClient = useQueryClient();
   const { isLoading: authLoading } = useAuth();
-  const [expandedCategories, setExpandedCategories] = useState<string[]>(["income", "assets"]);
   const [activeDocType, setActiveDocType] = useState<{ type: string; rowKey: string; replacesDocumentId?: string } | null>(null);
   // The row whose file is in flight — it swaps its dropzone for the live
   // progress card. One upload at a time keeps the page state honest.
@@ -78,7 +75,13 @@ export default function Documents() {
   // This MUST skip closed files — the list is newest-created-first, so taking
   // [0] attached uploads to a denied/withdrawn/funded loan whenever the
   // borrower's most recent file was the closed one.
-  const { data: myApps } = useQuery<LoanApplication[]>({
+  const {
+    data: myApps,
+    isLoading: appsLoading,
+    isError: appsError,
+    error: appsErrorObj,
+    refetch: refetchApps,
+  } = useQuery<LoanApplication[]>({
     queryKey: loanApplicationKeys.all(),
     enabled: !authLoading,
   });
@@ -93,8 +96,15 @@ export default function Documents() {
   // Personalized checklist: same endpoint the messaging surface uses, now
   // built from the pipeline engine's loan_conditions (self-employed borrowers
   // see P&L/business items). Falls back to the static catalog below when the
-  // application has no document-bearing conditions or there's no application.
-  const { data: checklistData } = useQuery<{
+  // application has no document-bearing conditions, the page shows an honest
+  // scoped empty state instead of inventing a generic required list.
+  const {
+    data: checklistData,
+    isLoading: checklistLoading,
+    isError: checklistError,
+    error: checklistErrorObj,
+    refetch: refetchChecklist,
+  } = useQuery<{
     documents: ChecklistItemView[];
     personalized: boolean;
   }>({
@@ -121,24 +131,6 @@ export default function Documents() {
           item.conditionIds?.includes(conditionId) || item.conditionId === conditionId,
       )
     : undefined;
-  // Canonical set so catalog types ("paystub") match condition requirements
-  // ("pay_stub") — same bridge the server-side auto-matcher uses.
-  const focusTypes = new Set(
-    (focusedCondition?.requiredDocumentTypes ?? []).map(canonicalDocumentType),
-  );
-
-  // Open the categories that contain the spotlighted document types.
-  useEffect(() => {
-    if (!focusedCondition) return;
-    const types = new Set(focusedCondition.requiredDocumentTypes ?? []);
-    const cats = DOCUMENT_CATEGORIES.filter((c) => c.documents.some((d) => types.has(d.type))).map(
-      (c) => c.id,
-    );
-    if (cats.length) {
-      setExpandedCategories((prev) => Array.from(new Set([...prev, ...cats])));
-    }
-  }, [focusedCondition?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleUploadClick = (docType: string, rowKey: string = docType, replacesDocumentId?: string) => {
     setActiveDocType({ type: docType, rowKey, replacesDocumentId });
     fileInputRef.current?.click();
@@ -180,8 +172,9 @@ export default function Documents() {
         }
         return;
       }
+      let taxAnalysisStatus: "queued" | "authorization_required" | undefined;
       try {
-        await apiRequest("POST", "/api/documents/upload", {
+        const registeredResponse = await apiRequest("POST", "/api/documents/upload", {
           objectPath: response.objectPath,
           fileName: file.name,
           fileSize: file.size,
@@ -190,6 +183,10 @@ export default function Documents() {
           ...(focusAppId ? { applicationId: focusAppId } : {}),
           ...(replacesDocumentId ? { replacesDocumentId } : {}),
         });
+        const registered = await registeredResponse.json() as {
+          taxAnalysis?: { status?: "queued" | "authorization_required" };
+        };
+        taxAnalysisStatus = registered.taxAnalysis?.status;
       } catch {
         // Never claim success on a failed registration — that's how files get lost.
         toast({
@@ -211,7 +208,14 @@ export default function Documents() {
           queryKey: applicationResourceKeys.documentChecklist(focusAppId),
         });
       }
-      toast({ title: "Document uploaded", description: getUploadNextStep(docType) });
+      toast({
+        title: "Document uploaded",
+        description: taxAnalysisStatus === "queued"
+          ? "Secure tax analysis has started. Your loan team will review every figure before it can support a decision."
+          : taxAnalysisStatus === "authorization_required"
+            ? "Your return is secure. Complete the Tax Document Use Authorization in To-do so we can analyze it; you won't need to upload it again."
+            : getUploadNextStep(docType),
+      });
     } finally {
       setActiveUpload(null);
     }
@@ -228,15 +232,7 @@ export default function Documents() {
     await startUpload(picked.type, file, picked.rowKey, picked.replacesDocumentId);
   };
 
-  const toggleCategory = (categoryId: string) => {
-    setExpandedCategories(prev =>
-      prev.includes(categoryId)
-        ? prev.filter(id => id !== categoryId)
-        : [...prev, categoryId]
-    );
-  };
-
-  if (authLoading || isLoading) {
+  if (authLoading || isLoading || appsLoading || (!!focusAppId && checklistLoading)) {
     return (
       <div className="p-8">
         <Skeleton className="mb-8 h-8 w-48" />
@@ -251,13 +247,17 @@ export default function Documents() {
 
   // A server failure on the dashboard query used to render the checklist as if
   // nothing was submitted (all "pending") — show an honest error + retry (ux-01).
-  if (docsError) {
+  if (docsError || appsError || checklistError) {
     return (
       <PageShell width="wide" title="Document Checklist" subtitle="Submit required documents as requested — we may ask for more as your application progresses">
         <QueryErrorState
-          error={docsErrorObj}
-          onRetry={() => refetchDocs()}
-          title="We couldn't load your documents"
+          error={docsErrorObj ?? appsErrorObj ?? checklistErrorObj}
+          onRetry={() => {
+            void refetchDocs();
+            void refetchApps();
+            if (focusAppId) void refetchChecklist();
+          }}
+          title="We couldn't load your document plan"
           data-testid="documents-error"
         />
       </PageShell>
@@ -266,20 +266,73 @@ export default function Documents() {
 
   const documents = data?.documents || [];
 
-  const documentsByType = groupDocumentsByType(documents);
+  if (!activeApplication) {
+    return (
+      <PageShell
+        width="wide"
+        title="Documents"
+        subtitle="Keep planning records secure before you begin a mortgage application"
+      >
+        <EmptyState
+          scope="mortgage document checklist"
+          description="Start an application and we'll build a focused checklist from your income, assets, property, and loan goal. You'll only see requests that apply to you."
+          action={(
+            <Button asChild>
+              <Link href="/apply">Start Application</Link>
+            </Button>
+          )}
+          data-testid="documents-no-active-application"
+        />
+        {documents.length > 0 && (
+          <UploadedDocumentsTable
+            documents={documents}
+            title="Planning Documents"
+            scopeLabel="saved to your account"
+          />
+        )}
+      </PageShell>
+    );
+  }
+
+  if (!personalized) {
+    const isDraft = activeApplication.status === "draft";
+    return (
+      <PageShell
+        width="wide"
+        title="Document Checklist"
+        subtitle="Document requests based on this application"
+      >
+        <EmptyState
+          scope="document requests for this application"
+          description={isDraft
+            ? "Finish the application questions first. We'll use your answers to request only the documents that apply to this loan."
+            : "You have no open document requests on this application. If your loan team needs something, it will appear here with the reason."}
+          action={isDraft ? (
+            <Button asChild>
+              <Link href="/apply">Continue Application</Link>
+            </Button>
+          ) : undefined}
+          data-testid="documents-no-personalized-requests"
+        />
+        {documents.length > 0 && <UploadedDocumentsTable documents={documents} />}
+      </PageShell>
+    );
+  }
 
   // Calculate current status - count pending required items. Personalized
-  // mode counts the pipeline's own items instead of the static catalog.
-  const pendingCount = personalized
-    ? countPendingChecklistItems(personalizedItems)
-    : countPendingCatalogDocs(DOCUMENT_CATEGORIES.flatMap((cat) => cat.documents), documentsByType);
-  const isAllCaughtUp = pendingCount === 0;
+  // mode counts the pipeline's own items. The retired generic fallback marked
+  // irrelevant tax, asset, and property documents as required.
+  const pendingCount = countPendingChecklistItems(personalizedItems);
+  const isAllSubmitted = pendingCount === 0;
+  const isAllVerified = personalizedItems.length > 0 && personalizedItems.every(
+    (item) => item.status === "verified",
+  );
 
-  const personalizedGroups = personalized ? buildPersonalizedGroups(personalizedItems) : new Map<string, ChecklistItemView[]>();
+  const personalizedGroups = buildPersonalizedGroups(personalizedItems);
 
   const rowFromItem = (item: ChecklistItemView): DocRow => rowFromChecklistItem(item, conditionId);
 
-  const statusInfo = getChecklistStatusInfo(isAllCaughtUp, pendingCount);
+  const statusInfo = getChecklistStatusInfo(isAllSubmitted, pendingCount, isAllVerified);
 
   const uploadControls: UploadControls = {
     activeUpload,
@@ -330,24 +383,12 @@ export default function Documents() {
         </div>
 
         <div className="space-y-4">
-        {personalized
-          ? [...personalizedGroups.entries()].map(([catId, items]) => (
+        {[...personalizedGroups.entries()].map(([catId, items]) => (
               <PersonalizedCategoryCard
                 key={catId}
                 categoryId={catId}
                 items={items}
                 rowFromItem={rowFromItem}
-                upload={uploadControls}
-              />
-            ))
-          : DOCUMENT_CATEGORIES.map((category) => (
-              <CatalogCategoryCard
-                key={category.id}
-                category={category}
-                documentsByType={documentsByType}
-                focusTypes={focusTypes}
-                isExpanded={expandedCategories.includes(category.id)}
-                onToggle={() => toggleCategory(category.id)}
                 upload={uploadControls}
               />
             ))}

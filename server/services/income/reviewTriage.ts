@@ -262,6 +262,7 @@ export function triageIncomePaths(paths: IncomePathResult[]): CandidateReviewIte
   for (const p of paths) {
     if (!p.requiresManualReview) continue;
     if (p.pathId === "self_employment" && p.kind === "dti_income") {
+      if (p.missingItems?.length) continue;
       items.push({
         naturalKey: `sei:${keyHash([p.monthlyQualifyingIncome, p.notes])}`,
         itemType: "se_income_review",

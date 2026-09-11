@@ -256,22 +256,50 @@ export async function resolveAndPersistEntities(
     .from(borrowerBusinessEntities)
     .where(eq(borrowerBusinessEntities.userId, userId));
   const existingByKey = new Map(existing.map((e) => [e.identityKey, e]));
+  const reportedByName = new Map(existing.flatMap((entity) => {
+    const name = entity.reportedByBorrower && entity.name ? normalizeEntityName(entity.name) : "";
+    return name ? [[name, entity] as const] : [];
+  }));
 
   const persisted: BorrowerBusinessEntity[] = [];
   let linkedForms = 0;
 
   const persist = async (tx: DatabaseTransaction) => {
     for (const entity of resolved) {
-      const prior = existingByKey.get(entity.identityKey);
+      // Intake usually knows a business name before tax extraction reveals an
+      // EIN. Reuse that stable row so P&L lineage and tax forms converge.
+      const prior = existingByKey.get(entity.identityKey)
+        ?? (entity.name ? reportedByName.get(normalizeEntityName(entity.name)) : undefined);
       let row: BorrowerBusinessEntity;
       if (prior && !prior.autoResolved) {
         // Human-confirmed: keep their values, still refresh coverage counters.
         [row] = await tx
           .update(borrowerBusinessEntities)
           .set({
+            applicationId: applicationId ?? prior.applicationId,
+            einLast4: entity.einLast4,
             firstTaxYear: entity.firstTaxYear,
             lastTaxYear: entity.lastTaxYear,
             sourceFormCount: entity.sourceForms.length,
+            updatedAt: new Date(),
+          })
+          .where(eq(borrowerBusinessEntities.id, prior.id))
+          .returning();
+      } else if (prior) {
+        [row] = await tx
+          .update(borrowerBusinessEntities)
+          .set({
+            applicationId: applicationId ?? prior.applicationId,
+            entityType: prior.reportedByBorrower ? prior.entityType : entity.entityType,
+            name: prior.reportedByBorrower ? prior.name : entity.name,
+            einLast4: entity.einLast4,
+            ownershipPercent: prior.reportedByBorrower
+              ? prior.ownershipPercent
+              : entity.ownershipPercent !== null ? entity.ownershipPercent.toFixed(2) : null,
+            firstTaxYear: entity.firstTaxYear,
+            lastTaxYear: entity.lastTaxYear,
+            sourceFormCount: entity.sourceForms.length,
+            resolutionNotes: entity.notes.length ? entity.notes.join("; ") : null,
             updatedAt: new Date(),
           })
           .where(eq(borrowerBusinessEntities.id, prior.id))
@@ -281,6 +309,7 @@ export async function resolveAndPersistEntities(
           .insert(borrowerBusinessEntities)
           .values({
             userId,
+            applicationId: applicationId ?? null,
             identityKey: entity.identityKey,
             entityType: entity.entityType,
             name: entity.name,
@@ -296,6 +325,7 @@ export async function resolveAndPersistEntities(
           .onConflictDoUpdate({
             target: [borrowerBusinessEntities.userId, borrowerBusinessEntities.identityKey],
             set: {
+              applicationId: applicationId ?? null,
               entityType: entity.entityType,
               name: entity.name,
               einLast4: entity.einLast4,

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDocumentChecklist,
-  STANDARD_DOCS,
   type ChecklistCondition,
   type ChecklistDocument,
   type ChecklistTask,
@@ -161,26 +160,23 @@ describe("buildDocumentChecklist — personalized (condition-driven) path", () =
   });
 });
 
-describe("buildDocumentChecklist — standard fallback path", () => {
-  it("falls back to the 5 standard items when no condition carries document types", () => {
+describe("buildDocumentChecklist — exact request path", () => {
+  it("does not invent requirements when no condition or task requests a document", () => {
     const { documents } = buildDocumentChecklist({
       conditions: [condition({ id: "c-narrative", requiredDocumentTypes: [] })],
       documents: [],
       tasks: [],
     });
-    expect(documents.map((d) => d.documentType)).toEqual(STANDARD_DOCS.map((s) => s.type));
-    expect(documents.every((d) => d.source === "standard")).toBe(true);
+    expect(documents).toEqual([]);
   });
 
-  it("standard items match uploads through the bridge", () => {
+  it("keeps uploaded history from turning itself into a document request", () => {
     const { documents } = buildDocumentChecklist({
       conditions: [],
       documents: [doc({ id: "d1", documentType: "tax_return_1040", status: "verified" })],
       tasks: [],
     });
-    const byType = Object.fromEntries(documents.map((d) => [d.documentType, d]));
-    expect(byType["tax_return"].status).toBe("verified");
-    expect(byType["w2"].status).toBe("needed");
+    expect(documents).toEqual([]);
   });
 
   it("uses one exact task checklist instead of mixing in five generic asks", () => {
@@ -222,7 +218,7 @@ describe("buildDocumentChecklist — custom document-request tasks", () => {
       documents: [],
       tasks: [task({ id: "t1", taskType: "call_borrower", documentCategory: "w2" })],
     });
-    expect(documents.every((d) => d.source === "standard")).toBe(true);
+    expect(documents).toEqual([]);
   });
 
   it("does not turn a staff document-review task into a borrower upload request", () => {
@@ -287,14 +283,14 @@ describe("buildDocumentChecklist — borrower-facing context (year + instruction
     expect(item?.documentYear).toBe("2023");
   });
 
-  it("standard items inherit documentYear from their matching task", () => {
+  it("task items carry the requested document year", () => {
     const { documents } = buildDocumentChecklist({
       conditions: [],
       documents: [],
       tasks: [task({ id: "t-tax", documentCategory: "tax_return", documentYear: "2024" })],
     });
-    const std = documents.find((d) => d.documentType === "tax_return");
-    expect(std?.documentYear).toBe("2024");
+    const requested = documents.find((d) => d.documentType === "tax_return");
+    expect(requested?.documentYear).toBe("2024");
   });
 
   it("condition items stay yearless — conditions carry no year field", () => {
@@ -323,8 +319,8 @@ describe("buildDocumentChecklist — borrower-facing context (year + instruction
     });
     const serialized = JSON.stringify(documents);
     expect(serialized).not.toContain("internal: borrower disputed AGI");
-    const std = documents.find((d) => d.documentType === "tax_return");
-    expect(std?.notes).toBe("Please upload all pages of your 2023 federal return.");
-    expect(std?.instructions).toBe("Please upload all pages of your 2023 federal return.");
+    const requested = documents.find((d) => d.documentType === "tax_return");
+    expect(requested?.notes).toBe("Please upload all pages of your 2023 federal return.");
+    expect(requested?.instructions).toBe("Please upload all pages of your 2023 federal return.");
   });
 });

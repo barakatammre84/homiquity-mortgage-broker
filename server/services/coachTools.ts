@@ -22,6 +22,7 @@ import {
   loadCoachDocumentEvidence,
   type CoachDocumentEvidenceSnapshot,
 } from "./coachDocumentEvidence";
+import { lintOutboundText } from "@shared/compliance/loCommsLint";
 
 // ---------------------------------------------------------------------------
 // Homi tool surface — Claude Sonnet 5 tool-use replaces the old
@@ -301,6 +302,7 @@ export type CoachStreamEvent =
       actionPlan?: ActionPlanItem[];
       documentChecklist?: DocumentRequirement[] | ChecklistItemDto[];
       borrowerPackage?: BorrowerPackage;
+      documentEvidence?: CoachDocumentEvidenceSnapshot;
       suggestions?: string[];
       // Server-truth payloads. These are read from the borrower's file, not
       // authored by the model — the client renders them as fact.
@@ -330,6 +332,8 @@ export interface CoachToolTurnState {
   actionPlan?: ActionPlanItem[];
   documentChecklist?: DocumentRequirement[];
   borrowerPackage?: BorrowerPackage;
+  /** Current, borrower-safe OCR facts. Never persisted as conversation memory. */
+  documentEvidence?: CoachDocumentEvidenceSnapshot;
   suggestions?: string[];
   humanHelpRequest?: { taskId: string; alreadyOpen: boolean };
   /** Redacted persistence result used by Homi's operational outcome metrics. */
@@ -422,149 +426,6 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["items"],
-    },
-  },
-  {
-    name: "generate_borrower_package",
-    description:
-      "Generate the lender-ready borrower intake summary. Call ONLY when the borrower's readiness tier is ready_now, or when the user explicitly asks for their borrower summary/package. Every field with no data MUST be the string \"Not Provided\", \"Pending\", or \"Insufficient Data\" — never invent, infer, or estimate values. Never include approval odds, qualitative assessments, or product recommendations anywhere in it.",
-    input_schema: {
-      type: "object" as const,
-      additionalProperties: false,
-      properties: {
-        generatedDate: { type: "string", description: "YYYY-MM-DD" },
-        borrowerOverview: {
-          type: "object",
-          properties: {
-            borrowerNames: { type: "string" },
-            householdComposition: { type: "string", description: "Single Borrower | Co-Borrowers (Married) | Co-Borrowers (Non-Married) | Not Provided" },
-            primaryResidenceState: { type: "string", description: "Two-letter state code or Not Provided" },
-            incomeProfileType: { type: "string", description: "W-2 | Self-Employed | Mixed | Investor | Not Provided" },
-          },
-          required: ["borrowerNames", "householdComposition", "primaryResidenceState", "incomeProfileType"],
-        },
-        householdOverview: {
-          type: "object",
-          properties: {
-            firstTimeBuyer: { type: "string", description: "Yes | No | Not Provided" },
-            veteranStatus: { type: "string", description: "Yes | No | Not Provided" },
-          },
-          required: ["firstTimeBuyer", "veteranStatus"],
-        },
-        transactionIntent: {
-          type: "object",
-          properties: {
-            transactionType: { type: "string", description: "Purchase | Refinance | Cash-Out Refinance | Not Provided" },
-            propertyIntent: { type: "string", description: "Primary Residence | Second Home | Investment | Not Provided" },
-            targetTimeframe: { type: "string", description: "Borrower-stated timeframe or Not Provided — never infer." },
-          },
-          required: ["transactionType", "propertyIntent", "targetTimeframe"],
-        },
-        incomeSources: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              source: { type: "string" },
-              type: { type: "string", description: "W-2 | Self-Employed | Rental | 1099 | Retirement | Other" },
-              frequency: { type: "string", description: "Monthly | Bi-Weekly | Annual | Not Provided" },
-              documentationStatus: { type: "string", description: "Uploaded | Pending | Not Provided" },
-            },
-            required: ["source", "type", "frequency", "documentationStatus"],
-          },
-        },
-        assetSummary: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              assetType: { type: "string" },
-              accountCategory: { type: "string", description: "Liquid | Non-Liquid | Retirement | Gift | Other" },
-              ownershipType: { type: "string", description: "Individual | Joint | Trust | Custodial | Not Specified" },
-              documentationStatus: { type: "string", description: "Uploaded | Pending | Not Provided" },
-              lastStatementDate: { type: "string", description: "YYYY-MM-DD or Not Provided" },
-              validationNotes: { type: "string", description: "Factual procedural note or empty string — never assess sufficiency." },
-              accessLink: { type: "string", description: "Always send an empty string — links are generated server-side." },
-            },
-            required: ["assetType", "accountCategory", "ownershipType", "documentationStatus", "lastStatementDate", "validationNotes", "accessLink"],
-          },
-        },
-        creditAndDebt: {
-          type: "object",
-          properties: {
-            creditScore: { type: "string" },
-            creditScoreVerification: { type: "string", description: "Tier 1 | Tier 2 | Tier 3 | Not Provided" },
-            monthlyDebts: { type: "string" },
-            monthlyDebtsVerification: { type: "string", description: "Tier 1 | Tier 2 | Tier 3 | Not Provided" },
-            dtiRatio: { type: "string", description: 'e.g. "35%" or "Insufficient Data"' },
-            dtiNote: { type: "string" },
-          },
-          required: ["creditScore", "creditScoreVerification", "monthlyDebts", "monthlyDebtsVerification", "dtiRatio", "dtiNote"],
-        },
-        propertyContext: {
-          type: "object",
-          properties: {
-            propertyAddress: { type: "string", description: "Address if identified or Not Provided — never fabricate." },
-            estimatedValueOrPrice: { type: "string" },
-            occupancyIntent: { type: "string", description: "Primary Residence | Second Home | Investment | Not Provided" },
-          },
-          required: ["propertyAddress", "estimatedValueOrPrice", "occupancyIntent"],
-        },
-        documentInventory: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              docType: { type: "string" },
-              label: { type: "string" },
-              status: { type: "string", description: "Received — Verified | Received — Pending Review | Not Yet Received | Not Required" },
-              flags: { type: "array", items: { type: "string", enum: ["recency", "legibility", "consistency", "completeness"] } },
-            },
-            required: ["docType", "label", "status", "flags"],
-          },
-        },
-        readinessStatus: {
-          type: "object",
-          properties: {
-            intakeStatus: { type: "string", description: "Started | Complete" },
-            documentStatus: { type: "string", description: "Complete | Partial | Not Started" },
-            packageStatus: { type: "string", description: "Ready for Underwriting Review | Pending Items" },
-            pendingItems: { type: "array", items: { type: "string" } },
-          },
-          required: ["intakeStatus", "documentStatus", "packageStatus", "pendingItems"],
-        },
-        auditTrail: {
-          type: "object",
-          properties: {
-            intakeStartDate: { type: "string" },
-            lastUpdateDate: { type: "string" },
-            events: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { date: { type: "string" }, activity: { type: "string" } },
-                required: ["date", "activity"],
-              },
-            },
-          },
-          required: ["intakeStartDate", "lastUpdateDate", "events"],
-        },
-        validationNotes: {
-          type: "object",
-          properties: {
-            recencyChecks: { type: "array", items: { type: "string" } },
-            completenessChecks: { type: "array", items: { type: "string" } },
-            consistencyObservations: { type: "array", items: { type: "string" } },
-          },
-          required: ["recencyChecks", "completenessChecks", "consistencyObservations"],
-        },
-        complianceFooter: { type: "string", description: "The standard informational-purposes compliance footer." },
-      },
-      required: [
-        "generatedDate", "borrowerOverview", "householdOverview", "transactionIntent", "incomeSources",
-        "assetSummary", "creditAndDebt", "propertyContext", "documentInventory", "readinessStatus",
-        "auditTrail", "validationNotes", "complianceFooter",
-      ],
     },
   },
   {
@@ -746,6 +607,10 @@ export async function executeCoachTool(
       try {
         const sync = await syncCoachIntakeToApplication(ctx.req, ctx.userId, parsed.data, ctx.conversationId);
         ctx.state.syncedApplicationId = sync.applicationId;
+        // A first turn may create the draft that later tools in this same turn
+        // need to read. This id is returned by the server write, never by the
+        // model, so it preserves the tool authorization boundary.
+        if (sync.applicationId) ctx.workableApplicationId = sync.applicationId;
         // The write can change readiness and invalidate approved analysis.
         ctx.fileTruthCache = undefined;
         ctx.documentEvidenceCache = undefined;
@@ -789,27 +654,24 @@ export async function executeCoachTool(
       if (!parsed.success) {
         return { content: `Invalid action plan — ${zodIssueSummary(parsed.error)}.`, isError: true };
       }
+      if (parsed.data.flatMap((item) => [item.title, item.description])
+        .some((text) => lintOutboundText(text).hardBlockMatches.length > 0)) {
+        return {
+          content: "The suggested plan contained prohibited outcome language. Rewrite it as neutral preparation steps.",
+          isError: true,
+        };
+      }
       ctx.state.actionPlan = parsed.data;
       ctx.emit({ type: "panel", actionPlan: parsed.data, source: "assistant" });
       return { content: `Action plan set (${parsed.data.length} items).` };
     }
 
     case "generate_borrower_package": {
-      const pkg = (input && typeof input === "object" ? { ...(input as Record<string, unknown>) } : {}) as Record<string, unknown>;
-      if (Array.isArray(pkg.assetSummary)) {
-        // Document access links are generated server-side; never trust
-        // model-authored URLs (same rule as the old parser).
-        pkg.assetSummary = pkg.assetSummary.map((a) =>
-          a && typeof a === "object" ? { ...(a as Record<string, unknown>), accessLink: "" } : a,
-        );
-      }
-      const parsed = borrowerPackageSchema.safeParse(pkg);
-      if (!parsed.success) {
-        return { content: `Invalid borrower package — ${zodIssueSummary(parsed.error)}.`, isError: true };
-      }
-      ctx.state.borrowerPackage = parsed.data;
-      ctx.emit({ type: "panel", borrowerPackage: parsed.data });
-      return { content: "Borrower package generated and shown to the user." };
+      return {
+        content:
+          "This legacy model-authored package tool is retired. Read current file facts with the server-truth tools and explain that a lender package exists only after the recorded financial and underwriting reviews.",
+        isError: true,
+      };
     }
 
     case "suggest_next_steps": {
@@ -817,6 +679,9 @@ export async function executeCoachTool(
       const parsed = z.array(z.string().min(1).max(80)).min(1).max(3).safeParse(suggestions);
       if (!parsed.success) {
         return { content: `Invalid suggestions — ${zodIssueSummary(parsed.error)}.`, isError: true };
+      }
+      if (parsed.data.some((text) => lintOutboundText(text).hardBlockMatches.length > 0)) {
+        return { content: "Suggested replies contained prohibited outcome language. Rewrite them neutrally.", isError: true };
       }
       ctx.state.suggestions = parsed.data;
       ctx.emit({ type: "panel", suggestions: parsed.data });
@@ -1118,6 +983,9 @@ export async function executeCoachTool(
         };
       }
       if (evidence === "unavailable") return FILE_TRUTH_UNAVAILABLE;
+
+      ctx.state.documentEvidence = evidence;
+      ctx.emit({ type: "panel", documentEvidence: evidence, source: "file" });
       if (evidence.documents.length === 0) {
         return {
           content:
@@ -1143,7 +1011,7 @@ export async function executeCoachTool(
         return `- ${document.label} [document ${document.documentReviewStatus}; evidence ${document.evidenceStatus}]: ${facts}${omitted}`;
       });
       const packageLine = evidence.financialReview.status === "approved_for_lender_package"
-        ? `Financial review: approved for lender presentation (income ${evidence.financialReview.income}; assets ${evidence.financialReview.assets}).`
+        ? `Financial review: approved for lender presentation (income ${evidence.financialReview.income}; assets ${evidence.financialReview.assets}; liabilities ${evidence.financialReview.liabilities}).`
         : "Financial review: no current fully approved lender-package memo. Extracted figures remain evidence for review, not qualifying income or an approval decision.";
       const documentScope = evidence.summary.omittedDocumentCount > 0
         ? `${evidence.summary.documentCount} current document(s) shown; ${evidence.summary.omittedDocumentCount} additional current document(s) omitted from this bounded view`

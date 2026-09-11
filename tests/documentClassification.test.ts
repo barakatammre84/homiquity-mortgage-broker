@@ -62,6 +62,18 @@ describe("simple document page classification", () => {
       compatible: false,
       mixedPacket: false,
     });
+    expect(assessDocumentClassification("bank_statement_business", {
+      pageCount: 1,
+      pages: [{ pageNumber: 1, documentType: "business_bank_statement", confidence: 0.96 }],
+    })).toMatchObject({ compatible: true, mixedPacket: false });
+    expect(assessDocumentClassification("bank_statement_business", {
+      pageCount: 1,
+      pages: [{ pageNumber: 1, documentType: "bank_statement_checking", confidence: 0.96 }],
+    })).toMatchObject({ compatible: false, mixedPacket: false });
+    expect(assessDocumentClassification("profit_loss", {
+      pageCount: 1,
+      pages: [{ pageNumber: 1, documentType: "profit_loss_statement", confidence: 0.98 }],
+    })).toMatchObject({ compatible: true, mixedPacket: false });
     expect(assessDocumentClassification("pay_stub", {
       pageCount: 2,
       pages: [

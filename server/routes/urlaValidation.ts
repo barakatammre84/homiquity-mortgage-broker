@@ -30,6 +30,15 @@ const SERVER_MANAGED_KEYS = new Set([
   "collectionMethod",
   "createdAt",
   "updatedAt",
+  // A borrower may supply the underlying liability facts, but only the
+  // financial-review route may apply a borrower-favorable underwriting
+  // treatment and bind it to accepted evidence/current bureau data.
+  "underwritingTreatment",
+  "treatmentSourceDocumentId",
+  "treatmentCreditPullId",
+  "treatmentTradelineIndex",
+  "treatmentReviewedBy",
+  "treatmentReviewedAt",
 ]);
 
 /** Sanity cap for any single string value; varchar columns are far shorter. */

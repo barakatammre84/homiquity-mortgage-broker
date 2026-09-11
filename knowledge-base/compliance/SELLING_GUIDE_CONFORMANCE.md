@@ -594,27 +594,23 @@ platform asserting agency facts with no citation and no test:
 Related, fixed the same day: the rent-to-own readiness card hard-coded "a 3% down payment" while
 selecting the tier from live data; it now prints the tier's own figure.
 
-## Open gaps — recorded, not silently assumed
+## Gap register — open and recently resolved
 
-These are places where the Guide states a rule our stored data cannot evidence. Each is
-currently resolved in the **conservative** direction. None is a violation; each is a reason a
-borrower may be qualified more strictly than Fannie requires.
+Open items name the remaining authority, capture or operating proof. Resolved entries stay here
+briefly so the current conformance state is reviewable without relying on stale audit prose.
 
-### G-1 — No remaining-term column on liabilities (B3-6-05, B3-6-07)
+### G-1 — Resolved 2026-09-11: short-term installment treatment (B3-6-05, B3-6-07)
 
-Installment debt counts only where **more than ten monthly payments remain**, and a loan paid
-down to ten or fewer drops out of long-term debt. `urla_liabilities` has no remaining-term
-column, so every installment debt is counted. Conservative, but it overstates DTI for
-borrowers near the end of a car loan. Closing this needs a schema migration plus intake
-capture — not undertaken here.
+URLA now captures remaining term. A payment with ten or fewer installments remaining is excluded
+only after a financial reviewer links the current accepted statement and the exact current bureau
+tradeline. The treatment, reviewer, time and source identifiers are retained; a replaced document
+or bureau report removes the favorable treatment from the current workpaper.
 
-### G-2 — Documented $0 income-driven student loan payments (B3-6-05)
+### G-2 — Resolved 2026-09-11: documented $0 income-driven student-loan payments (B3-6-05)
 
-The Guide permits qualifying at **$0** where an income-driven plan is documented at $0, and
-permits a fully amortizing payment from documented terms. Neither the plan type nor the
-repayment terms are representable on `urla_liabilities`, so a $0-payment student loan is
-imputed at 1% of balance. That is the conservative branch, and it denies borrowers a path the
-Guide grants them.
+URLA now captures the repayment-plan type. A documented $0 income-driven payment can be applied
+only through the same accepted-document and current-bureau-tradeline review control used for the
+short-term installment treatment. Without that evidence, the conservative imputed payment remains.
 
 ### G-3 — Debt secured by virtual currency (B3-6-05, B3-4.1-04)
 
@@ -624,14 +620,12 @@ debt-to-income ratio." The codebase has no representation of virtual currency at
 asset or as collateral, so the exception cannot currently be triggered — and equally cannot be
 violated. Becomes live the moment crypto assets are accepted.
 
-### G-4 — Open 30-day charge accounts (B3-6-05, B3-6-07)
+### G-4 — Resolved 2026-09-11: open 30-day charge accounts (B3-6-05, B3-6-07)
 
-Fannie does **not** require open 30-day charge accounts in the DTI, but where such an account
-shows no monthly payment (or a payment identical to the balance) the lender must verify
-borrower funds covering the balance, **in addition to** closing costs and reserves. The
-liability vocabulary cannot express "open 30-day", so such an account is entered as
-`credit_card` and now attracts the 5% revolving floor — stricter than Fannie on the DTI side,
-while the reserves-verification requirement is unimplemented.
+The shared liability vocabulary and borrower form now distinguish open 30-day accounts. Their
+balance is excluded from monthly DTI and added to the funds-needed calculation alongside down
+payment and reserves. The asset workpaper cannot be approved when verified eligible assets are
+insufficient to cover the combined requirement.
 
 ### G-5 — `half_percent_balance` is an FHA figure in a product-agnostic vocabulary
 
@@ -727,165 +721,63 @@ figure.
 Procurement item, same shape as `docs/reg-z/`: the fix is obtaining the document, not more
 analysis.
 
-### G-15 — Representative credit score ignores co-borrowers, while their income counts
+### G-15 — Resolved 2026-09-11: joint-borrower representative credit score (B3-5.1-02)
 
-**B3-5.1-02, Representative Credit Score.** Step 2: one score per borrower — the **lower** of
-two, the **middle** of three. Step 3: with multiple borrowers, take the **lowest** applicable
-score across the group; a borrower with no score is excluded, not treated as zero.
+Current bureau records retain the three scores and representative score for each borrower. The
+decision-credit adapter requires coverage for every borrower represented in the URLA file and uses
+the lowest borrower representative score for eligibility, pricing and the financial workpaper.
+A missing co-borrower score blocks decision-grade credit rather than inheriting the primary score.
 
-Step 2 is satisfied where scores are produced (the credit adapter sorts three and takes the
-middle, which also gets the Guide's tie examples right: 700/680/680 → 680, 700/700/680 → 700).
+### G-16 — Resolved 2026-09-11: borrower Real Estate Owned capture
 
-**Step 3 cannot be satisfied at all.** `credit_score` is a single integer on
-`loan_applications`; no per-borrower score exists anywhere in the schema. Meanwhile
-`decisionEngine` aggregates **income across every `borrowerSequenceNumber`**, and sums
-liabilities across them too.
+The URLA journey now asks whether other real estate is owned and captures each property once,
+including value, mortgage and HELOC balances and payments, taxes, insurance, association dues,
+rent, occupancy, disposition and whether the borrower is personally obligated. Section 2c remains
+incomplete when ownership is unanswered or declared properties are missing; an empty list is no
+longer presented as reviewed.
 
-So a co-borrower's income helps the DTI and their debts hurt it, but **their credit is
-invisible**. A 760 primary with a 600 co-borrower is priced and gated at 760 where Fannie
-requires 600 — clearing the 620 floor it should fail, and pricing several LLPA and PMI bands
-too cheaply. The asymmetry runs in the forbidden direction: we take the co-borrower's benefit
-without their risk.
+### G-17 — Resolved 2026-09-11: multiple-financed-property and REO obligations (B2-2-03, B3-4.1-01, B3-6-06)
 
-Closing it needs a per-borrower score column plus capture, and then `min()` across borrowers —
-the same shape as C-6. Not undertaken unilaterally; it is a schema and intake change, and the
-founder should choose when.
+The current financial review derives the financed-property count from the detailed REO records,
+calculates the 2%/4%/6% additional-reserve tiers over eligible aggregate UPB, adds the subject
+property reserve, and blocks approval when required property facts or funds are missing. Retained
+rental properties feed one per-property rent/PITIA calculation and their obligations are not
+silently double counted. Product or lender overlays outside the captured conventional authority
+still route to review.
 
-*(Checked and sound while here: `CREDIT_SCORE_UNKNOWN_DEFAULT = 680` for a borrower who selects
-"not sure" is explicitly named, documented as a midpoint rather than a silent clamp, and stays
-`self_reported` provenance until a real pull replaces it — the decision carries `isVerified`
-off that provenance. That is a placeholder the system knows is a placeholder, not a fabricated
-score.)*
+### G-18 — Resolved 2026-09-11: evidence-gated non-taxable adjustment (B3-3.1-01)
 
-### G-16 — 🚨 Real Estate Owned cannot be captured, yet is scored as "reviewed"
+Other-income capture now separates taxable and non-taxable monthly amounts. The deterministic
+calculation can show the 25% non-taxable adjustment, but it is applied to decision-grade income only
+through a current approved income workpaper whose reviewed evidence supports the source. Self-
+reported intake and an unapproved worksheet never receive the favorable adjustment.
 
-The URLA form has **no Real Estate Owned section**. `SectionsPayload` / `UrlaSavePayload`
-(`client/src/pages/borrower/urla/types.ts`) carry personal info, employment, assets,
-liabilities, declarations, demographics, other income, subject property and loan details — and
-nothing for the borrower's *other* properties. The `real_estate_owned` table exists, is fully
-shaped for the job (`mortgage_balance` = UPB, `occupancy_type`, `will_be_sold`, `status`), is
-read by storage and batch loaders — and is written **only** by an internal API route
-(`server/routes/intelligence.ts:96`). No borrower-facing path populates it.
+### G-19 — Partly resolved 2026-09-11: defined-expiration continuance (B3-3.1-01)
 
-Worse than merely absent: `scoreRealEstateOwned` (`server/services/mismoValidation.ts`) scores
-section 2c by asserting a single hardcoded field — **"Real estate ownership reviewed" = "yes"**
-— whenever `reo.length === 0`. A borrower who owns three rentals has no way to say so, and the
-completeness scorer then affirms the section was reviewed. **That is an unknown rendered as a
-pass**, the identical shape as the TRID `null → true` defect this codebase already fixed and
-documents at length in `services/loanEstimate.ts` (finding ux-30). An absence of data is not a
-clean review.
+Every Section 1e source now records whether it has a defined expiration and, when it does, the
+expiration date. The engine compares that date with the expected note date and excludes income that
+will not continue for at least three years; unknown expiration facts block approval of the income
+workpaper. Asset-depletion income and a disclosed future reduction in pay still need dedicated
+capture and calculation paths before those cases can be automated.
 
-### G-17 — Multiple-financed-property rules are unimplemented (B2-2-03, B3-4.1-01)
+### G-20 — Resolved for income 2026-09-11: virtual-currency income (B3-3.1-01)
 
-Downstream of G-16, and fully specified in the Guide — no Eligibility Matrix needed:
+Employment and Section 1e capture now ask whether income is paid or earned in virtual currency.
+The deterministic wage, other-income and self-employment paths exclude it, while an unanswered fact
+blocks approval of household income. G-3 remains open for the separate rule governing debts secured
+by virtual currency.
 
-- **B2-2-03, Limits on the Number of Financed Properties.** Principal residence: no limit
-  (HomeReady: 2). Second home or investment: **DU maximum 10**. The count includes every
-  one-to-four-unit property the borrower is personally obligated on — *even where the housing
-  expense is excluded from DTI under B3-6-05* — counting a multi-unit property as one.
-- **B3-4.1-01, Calculation of Reserves for Multiple Financed Properties.** Additional reserves
-  on second home / investment subjects, as a percentage of the aggregate UPB of mortgages and
-  HELOCs on the borrower's *other* financed properties: **2%** for 1–4 financed properties,
-  **4%** for 5–6, **6%** for 7–10 (DU only). The aggregate excludes the subject property, the
-  principal residence, properties sold or pending sale, and accounts paid by closing. Not
-  cumulative across simultaneous applications, and not applicable to HomeReady.
+### G-21 — Capture and calculation resolved 2026-09-11: CLTV, HCLTV and subject housing expense
 
-Neither is implemented: `decisionEngine`, `underwritingEngine` and `preUnderwriting` contain
-**zero references to `realEstateOwned`**. The reserve tiering added in C-4 is months-based and
-covers only occupancy and unit count; this is a separate dollar requirement stacked on top.
+URLA Section 4b now captures closed-end subordinate balance, HELOC drawn balance and full credit
+limit, the monthly subordinate payment, flood insurance, ground rent and special assessments. The
+shared subject-financing calculation uses the lesser of price or appraised value for LTV, CLTV and
+HCLTV and adds the monthly costs to qualifying housing expense. Loan estimates, scenarios,
+financial review and lender-package inputs use the same result.
 
-Both are computable from columns that already exist — the blocker is capture (G-16), not
-authority. That makes this the **highest-readiness gap on this page**: unlike G-7/G-8/G-14 it
-needs no document we do not hold, and unlike G-15 it needs no new schema.
-
-Also blocked behind G-16: **B3-6-06, Qualifying Impact of Other Real Estate Owned** (how an
-existing property's PITIA counts) and the B3-6-05 rule that a mortgage the borrower is
-obligated on must enter the financed-property count regardless of who pays it.
-
-### G-18 — Non-taxable gross-up is now *authorised* but deliberately not applied (B3-3.1-01)
-
-**B3-3.1-01, Nontaxable Income:** where income is verified non-taxable and its tax-exempt
-status is likely to continue, the lender "should develop an 'adjusted gross income' … by adding
-an amount equivalent to **25%** of the nontaxable income" — or the actual tax a wage earner in
-a similar bracket would pay, if that exceeds 25%.
-
-`shared/incomeTypes.ts` carries `qualifyingAuthority: null` for all twenty Section 1e types, and
-its docstring gave the reason as "there is no Selling Guide income chapter in-repo". **That
-reason expired on 2026-08-20.** The rule is in hand.
-
-It is still not applied, for a different and better reason: **gross-up raises qualifying
-income, which loosens the DTI gate.** The standing rail lets a reading tighten a gate or remove
-a borrower charge — never loosen one. Applying it is a founder decision, not an agent's. The
-module docstring and the agency-wage note now say exactly that, so the next session does not
-re-derive the citation and quietly wire it in.
-
-### G-19 — Three-year continuance is unimplementable: no expiration date is captured (B3-3.1-01)
-
-**B3-3.1-01, Continuance of Income:** income with a defined expiration date, or dependent on
-depletion of an asset account or other limited benefit, must be documented to continue **at
-least three years from the note date**. Where an asset account is the sole or majority source
-of qualifying income, the lender must additionally assess repayment ability once it depletes.
-And where the lender is told the borrower is moving to a lower pay structure — pending
-retirement, a new job — **the lower amount must be used**.
-
-This one moves in the permitted direction (it removes income), but `other_income_sources`
-carries only `income_source` and `monthly_amount`. There is no expiration date, no benefit
-term, and no pending-change flag to test against, so every Section 1e source is counted at face
-value for an unbounded horizon. Alimony ending in eighteen months and a lifetime pension are
-indistinguishable to the engine.
-
-Capture gap, same shape as C-6 before it was fixed.
-
-### G-20 — Income paid in virtual currency is ineligible, and unrepresentable (B3-3.1-01)
-
-"Any income paid to or earned by the borrower in the form of virtual currency, such as
-cryptocurrencies, **is not eligible to be used to qualify for the loan**." Unlike the gross-up
-and continuance rules this is absolute, and it pairs with G-3 (debt *secured by* virtual
-currency must be *included* in the DTI). Neither is representable: the Section 1e catalog has no
-crypto type and the codebase models virtual currency nowhere. Not currently violable — and not
-currently enforceable either.
-
-🚨 **A trap the public-repo decision created, recorded here because it will bite whoever closes
-G-18 or G-19.** `tests/incomeTypes.test.ts` enforces citations with `fs.existsSync`. The Guide
-text is now gitignored, so citing
-`docs/fannie-mae/selling-guide/selling-guide-text.txt` passes locally and **fails in CI**, where
-the fresh clone lacks it. Cite the tracked `section-index.tsv` (or this ledger) and name the
-section.
-
-### G-21 — 🚨 CLTV and HCLTV are never computed, and we actively market the thing that creates them
-
-**B2-1.2-02 (CLTV)** and **B2-1.2-03 (HCLTV)**. CLTV is the first mortgage plus the drawn
-portion of any HELOC plus the unpaid balance of all closed-end subordinate financing, over the
-**lesser of sales price or appraised value**. **B2-1.2-04, Subordinate Financing** governs when
-a subordinate lien is permitted at all.
-
-The engine gets the *basis* right — `Math.min(contractSalesPrice, appraisalValue)` — and then
-computes **only LTV**. `grep -i cltv` across `server/` and `shared/` returns nothing but the
-comments this pass added; there is no CLTV grid in `seedLendingGrids.ts` and no HCLTV anywhere.
-A file at 95% LTV and 105% CLTV clears the LTV ceiling and is never measured against a CLTV one.
-
-**What makes this live rather than theoretical: we promote the subordinate financing ourselves.**
-`server/seedData/illinoisDpa.ts` seeds four IHDA programs, surfaced to borrowers through
-articles and the assistant's `getDpaPrograms` tool, in the launch state:
-
-| Program | Assistance | Form |
-|---|---|---|
-| IHDAccess Home | 6% of price, to $15,000 | no-interest **second loan** |
-| IHDAccess Forgivable | 4% of price, to $6,000 | forgivable loan |
-| IHDAccess Deferred | 5% of price, to $7,500 | no-interest deferred loan |
-| IHDAccess Repayable | 10% of price, to $10,000 | zero-interest, **repaid monthly over 10 years** |
-
-Each is a subordinate lien on the subject property. `IHDAccess Repayable` additionally carries a
-**monthly payment**, which B3-6-03 puts inside PITIA (see G-10) and which no field records.
-
-`dpa_programs` is a marketing catalog: there is no link from an application to a program, no
-subordinate-lien amount, and no payment. So this is a **capture** gap rather than a
-miscalculation — we are not computing a known figure wrongly, we are blind to it. But we are
-blind to something we recommend, in the first state we are launching in.
-
-Note the sequencing trap: closing this needs the CLTV *ceiling*, and B2-1.3/B2-1.2 route
-maximum CLTV/HCLTV ratios to the **Eligibility Matrix** (G-14), which we do not hold. So the
-capture half is buildable now; the enforcement half is blocked on procurement, exactly like C-8.
+Maximum CLTV/HCLTV eligibility still requires the selected product and lender matrix. Until that
+authority is loaded, the system reports the ratios and routes the ceiling decision to human review;
+it does not invent a limit.
 
 ### G-7 — Jumbo routing uses the one-unit limit for 2–4 unit properties (B2-1.5-01)
 
@@ -964,49 +856,26 @@ tradelines into account in its risk assessment with no additional lender investi
 DU instructs otherwise. We do not model authorized-user status on tradelines; nothing in our
 code contradicts the section.
 
-### G-22 — ⛔ Seasoning is applied to three income families B3-3.5-01 does not govern
+### G-22 — Partly resolved 2026-09-11: seasoning scope (B3-3.5-01)
 
-`SEASONING_GOVERNED_TYPES` (`server/services/underwritingNuance.ts`) carries `self_employed`,
-`rental`, `investment` and `other`. **B3-3.5-01 governs self-employment only** — it defines a
-self-employed borrower as one holding a 25%-or-greater ownership interest in the business. It is
-not authority for `investment` or `other`, and `rental` has its own section, B3-3.8-01, which the
-same module cites correctly a few hundred lines later.
+Rental and investment income no longer inherit the self-employment seasoning rule. The preliminary
+intake classifier still applies the conservative warning to the generic `other` bucket because that
+answer can represent uncategorized contract or business income. This warning does not establish or
+remove decision-grade income; the detailed financial profile and reviewed workpaper control that
+result. A future intake revision should replace the generic bucket with an explicit income family so
+the warning can be scoped without guessing.
 
-So one authority is stretched across four income families, three of which it does not reach.
-Fixing the citation (C-3, extended 2026-08-23) does not fix that.
+### G-23 — Resolved conservatively 2026-09-11: large-deposit consequence (B3-4.2-02)
 
-**This is a founder decision, not an agent's, and it is the reason nothing was narrowed here.**
-Removing types from the set removes a flag: a borrower with 14 months of rental income stops
-being asked for anything. That is the loosening direction, and the standing rule above forbids
-taking it unilaterally even where the text supports it. The conservative state — flagging more
-income than the Guide requires — is where this is parked until the founder chooses.
+The large-deposit finding now uses current reviewed qualifying monthly income and fingerprints the
+actual VOA deposit set. The current asset workpaper cannot be approved while the matching sourcing
+condition is open, so funds that may contain an undocumented large deposit cannot support a
+verified asset conclusion, credit memo or outward verified decision. A new deposit set creates a
+new condition fingerprint and a prior clearance cannot silently carry forward.
 
-Related and still open: the borrower-facing copy said the 12–24-month tier needed "strong
-compensating factors". That is **B3-3.2-02's** test for employment-related income, not this
-section's; B3-3.5-01 states documentary conditions instead. The wording was corrected on
-2026-08-23 (see C-3), which is why the two sections are named together here.
-
-### G-23 — 🚨 A large deposit is flagged and never has its consequence applied (B3-4.2-02)
-
-**B3-4.2-02, Evaluating Large Deposits.** The rule does not end at documentation: "Verified funds
-must be reduced by the amount (or portion) of the undocumented large deposit… and that reduced
-amount must be used for underwriting purposes (whether the loan is underwritten manually or
-through DU)."
-
-We implement the **trigger** and not the **effect**. `detectSignificantDeposits` raises a warning
-flag; nothing anywhere reduces verified assets by an undocumented deposit — `grep -rn "reduce"`
-across the asset path finds no such haircut. A file with an unexplained $40,000 deposit is
-therefore qualified on reserves that include it.
-
-Compounding it, the denominator is wrong in the same direction. The Guide measures against "the
-total monthly **qualifying** income for the loan"; `preUnderwriting.ts` passes
-`toNumber(input.annualIncome) / 12` — self-reported gross intake income, which by construction
-includes income the seasoning rule has just declared unusable. Gross ≥ qualifying, so the
-threshold sits too high and fewer deposits trip it at all.
-
-Both legs run in the forbidden direction. Neither is fixed here because both are behaviour on the
-decision path rather than a citation, and the asset-reduction leg needs a decision about where
-the haircut lands (verified assets vs reserves) that outruns a scrub.
+The system blocks approval instead of automatically subtracting an amount because the acceptable
+sourced portion and funds-needed tests require reviewer and lender evidence. G-24 records the
+remaining false-positive scope and source-identification gaps.
 
 ### G-24 — The B3-4.2-02 conditions we do not model make us over-ask, not under-ask
 
@@ -1032,29 +901,18 @@ Recorded so the false asks are known to be false rather than mistaken for policy
   may be exchanged virtual currency, and the lender must verify it originated from the borrower's
   virtual-currency account. Our ask names no artifact for that path (pairs with G-3, G-20).
 
-Deliberate: `detectSignificantDeposits` is sign-agnostic and flags large **outflows** too, which
-the Guide does not require. Its own comment owns that tradeoff.
+Transaction direction is now normalized at the Plaid adapter boundary, and the rule only evaluates
+negative inflows. Large outflows no longer create false deposit-sourcing work.
 
-### G-25 — The seasoning tier measures a field the Guide does not (B3-3.5-01)
+### G-25 — Partly resolved 2026-09-11: self-employment history and ownership evidence (B3-3.5-01)
 
-The tier keys off `source.yearsInRole` — self-reported months in role. B3-3.5-01's gate is what
-the **most recent signed personal and business returns reflect**: a full 12 months of
-self-employment income from the current business. A borrower 18 months into a role whose returns
-reflect four months of the current business is `conditional` in our code and ineligible for that
-path under the Guide. **Looser.**
-
-Two further conditions are never captured or asked for:
-
-- the **separate prior-income documentation** — income at the same (or greater) level in the same
-  field, or an occupation with similar responsibilities. The 2026-08-23 pass corrected the copy
-  that claimed the borrower's own returns satisfied this, and extended the document ask to name
-  it, but nothing verifies it;
-- the **25% ownership test** that defines a self-employed borrower at all. The trigger is a
-  free-text income `type`, so the rule is simultaneously over- and under-inclusive.
-
-Closing this is a capture change (returns-derived months, ownership share), the same shape as C-6.
-Note the one leg that runs conservative and is fine: treating under-12-months as unusable. The
-Guide states a condition rather than a prohibition, so our floor is the stricter reading.
+Detailed URLA worksheets now capture years self-employed and ownership percentage, and tax
+intelligence can derive ownership and tax years from the reviewed business forms. The fast intake
+warning still uses self-reported `yearsInRole`; it is preliminary and cannot make a verified income
+decision. For a 12-to-24-month history, the licensed reviewer must still document that the current
+business appears for a full year on the returns and that prior income in the same field was at the
+required level. Those documentary conditions need a dedicated structured review before this path
+can be automated rather than handled through the evidence-backed workpaper.
 
 ---
 

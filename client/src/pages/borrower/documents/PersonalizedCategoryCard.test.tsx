@@ -29,6 +29,6 @@ describe("personalizedCategoryDescription", () => {
       personalizedCategoryDescription("assets", [
         { documentType: "bank_statement", acceptedTypes: ["bank_statement"] },
       ]),
-    ).toBe("Bank statements, gift funds, and reserves");
+    ).toBe("Bank statements and reserve documentation");
   });
 });

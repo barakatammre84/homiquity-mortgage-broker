@@ -16,10 +16,13 @@ import type {
   LoanOption,
   Document,
   BorrowerDeclarations,
+  OtherIncomeSource,
 } from "@shared/schema";
 import { isApprovedGradeLoanAppStatus } from "@shared/schema";
 import { isExcludedAsPaidByOtherParty } from "@shared/liabilityExclusions";
 import { liabilityKind, type LiabilityKind } from "@shared/liabilityTypes";
+import { assessSubjectPropertyFinancing } from "@shared/subjectPropertyFinancing";
+import { classifyOtherIncomeSource } from "@shared/incomeTypes";
 import { COMPANY_CONFIG } from "./config/company";
 import { mersOrgIdApplicable } from "@shared/businessChannel";
 import {
@@ -49,6 +52,8 @@ export interface MISMOLoanDTO {
    */
   allPersonalInfo?: MISMOPersonalInfo[];
   employment: EmploymentHistory[];
+  /** URLA Section 1e, attributed to the owning URLA borrower. */
+  otherIncome?: OtherIncomeSource[];
   // Asset/liability `accountNumber` is likewise a decrypted virtual field.
   assets: (UrlaAsset & { accountNumber?: string | null })[];
   liabilities: (UrlaLiability & { accountNumber?: string | null })[];
@@ -295,6 +300,11 @@ function mapAssetType(type: string | null | undefined): AssetType {
 function mapLiabilityType(type: string | null | undefined): LiabilityType {
   const byKind: Record<LiabilityKind, LiabilityType> = {
     revolving: "Revolving",
+    // MISMO 3.0 has no dedicated open-30-day enum. Revolving is the closest
+    // schema-valid open-account category; Homiquity retains the distinct
+    // borrower label and applies the separate asset-coverage rule before
+    // export.
+    open_30_day: "Revolving",
     installment: "Installment",
     student_loan: "Installment",
     mortgage: "MortgageLoan",
@@ -403,7 +413,7 @@ function buildAddressNode(
 }
 
 function buildBorrowerNode(dto: MISMOLoanDTO): XMLNode {
-  const { personalInfo, employment, declarations } = dto;
+  const { personalInfo, employment, declarations, otherIncome = [] } = dto;
   const borrowerChildren: XMLNode[] = [];
 
   const borrowerDetail: XMLNode[] = [];
@@ -432,6 +442,47 @@ function buildBorrowerNode(dto: MISMOLoanDTO): XMLNode {
 
   if (borrowerDetail.length > 0) {
     borrowerChildren.push({ tag: "BORROWER_DETAIL", children: borrowerDetail });
+  }
+
+  if (otherIncome.length > 0) {
+    const items = otherIncome
+      .filter((income) => Number(income.monthlyAmount) > 0)
+      .map((income, index): XMLNode => {
+        const mapped = mapOtherIncomeType(income.incomeSource);
+        const taxExempt = income.taxTreatment === "fully_non_taxable"
+          ? true
+          : income.taxTreatment === "taxable" ? false : null;
+        return {
+          tag: "CURRENT_INCOME_ITEM",
+          attributes: { SequenceNumber: String(index + 1) },
+          children: [{
+            tag: "CURRENT_INCOME_ITEM_DETAIL",
+            children: [
+              { tag: "CurrentIncomeMonthlyTotalAmount", text: formatCurrency(income.monthlyAmount) },
+              ...(taxExempt === null
+                ? []
+                : [{ tag: "IncomeFederalTaxExemptIndicator", text: String(taxExempt) }]),
+              { tag: "IncomeType", text: mapped.type },
+              ...(mapped.description
+                ? [{ tag: "IncomeTypeOtherDescription", text: mapped.description }]
+                : []),
+            ],
+          }],
+        };
+      });
+    if (items.length > 0) {
+      const total = otherIncome.reduce((sum, income) => sum + Math.max(Number(income.monthlyAmount) || 0, 0), 0);
+      borrowerChildren.push({
+        tag: "CURRENT_INCOME",
+        children: [
+          {
+            tag: "CURRENT_INCOME_DETAIL",
+            children: [{ tag: "URLABorrowerTotalOtherIncomeAmount", text: formatCurrency(total) }],
+          },
+          { tag: "CURRENT_INCOME_ITEMS", children: items },
+        ],
+      });
+    }
   }
 
   if (declarations) {
@@ -694,6 +745,30 @@ function buildBorrowerNode(dto: MISMOLoanDTO): XMLNode {
   return { tag: "BORROWER", children: borrowerChildren };
 }
 
+function mapOtherIncomeType(value: string | null | undefined): { type: string; description?: string } {
+  const normalized = classifyOtherIncomeSource(value);
+  const direct: Record<string, string> = {
+    alimony: "AlimonyChildSupport",
+    child_support: "AlimonyChildSupport",
+    separate_maintenance: "AlimonyChildSupport",
+    interest_and_dividends: "DividendsInterest",
+    notes_receivable: "NotesReceivableInstallment",
+    unemployment_benefits: "Unemployment",
+    mortgage_credit_certificate: "MortgageCreditCertificate",
+    public_assistance: "PublicAssistance",
+    retirement: "Pension",
+    social_security: "SocialSecurity",
+    boarder_income: "BoarderIncome",
+    foster_care: "FosterCare",
+    trust: "Trust",
+    va_compensation: "VABenefitsNonEducational",
+  };
+  const type = normalized ? direct[normalized] : undefined;
+  return type
+    ? { type }
+    : { type: "OtherTypesOfIncome", description: value?.trim() || "Other income" };
+}
+
 function buildPartyNode(dto: MISMOLoanDTO): XMLNode {
   const { personalInfo, user } = dto;
 
@@ -832,6 +907,9 @@ function borrowerPartyDtos(dto: MISMOLoanDTO): MISMOLoanDTO[] {
         personalInfo,
         employment: dto.employment.filter(
           (record) => (record.borrowerSequenceNumber ?? 1) === sequence,
+        ),
+        otherIncome: (dto.otherIncome ?? []).filter(
+          (income) => (income.borrowerSequenceNumber ?? 1) === sequence,
         ),
         declarations:
           dto.allDeclarations?.find(
@@ -1039,6 +1117,44 @@ function buildLoanNode(dto: MISMOLoanDTO, mersMin?: string, loanState?: LoanStat
     });
   }
 
+  // URLA proposed-housing expenses must travel with the underwriting file.
+  // These are the same captured amounts used by the payment projection and
+  // DTI engine; omitting them here would make the lender package tell a
+  // different story from the decision. Emit only completed, affirmative
+  // amounts. An explicit $0 remains represented by the URLA readiness gate
+  // without adding noise to the XML.
+  const subjectFinancing = subjectPropertyFinancingAssessment(dto);
+  if (subjectFinancing.complete && subjectFinancing.captured) {
+    const expenses: XMLNode[] = [];
+    const addExpense = (type: string, amount: number, description?: string) => {
+      if (amount <= 0) return;
+      expenses.push({
+        tag: "PROPOSED_HOUSING_EXPENSE",
+        children: [
+          { tag: "HousingExpenseType", text: type },
+          ...(description
+            ? [{ tag: "HousingExpenseTypeOtherDescription", text: description }]
+            : []),
+          { tag: "ProposedHousingExpensePaymentAmount", text: formatCurrency(amount) },
+        ],
+      });
+    };
+    addExpense(
+      "HomeownersAssociationDuesAndCondominiumFees",
+      subjectFinancing.monthlyAssociationDues,
+    );
+    addExpense("HazardInsurance", subjectFinancing.monthlyFloodInsurance);
+    addExpense("GroundRent", subjectFinancing.monthlyGroundRent);
+    addExpense("OtherHousingExpense", subjectFinancing.monthlySpecialAssessments, "Special assessments");
+    addExpense(
+      "OtherMortgageLoanPrincipalAndInterest",
+      subjectFinancing.monthlySubordinateFinancingPayment,
+    );
+    if (expenses.length > 0) {
+      loanChildren.push({ tag: "PROPOSED_HOUSING_EXPENSES", children: expenses });
+    }
+  }
+
   // F-018: emit LOAN children in the MISMO LOAN sequence order (the XSD is a <sequence>),
   // regardless of the order they were built above. Verified against MISMO_3_0.xsd LOAN complexType.
   const LOAN_CHILD_ORDER = [
@@ -1047,6 +1163,7 @@ function buildLoanNode(dto: MISMOLoanDTO, mersMin?: string, loanState?: LoanStat
     "LOAN_IDENTIFIERS",
     "LOAN_STATE",
     "MERS_REGISTRATION",
+    "PROPOSED_HOUSING_EXPENSES",
     "QUALIFICATION",
     "REFINANCE",
     "TERMS_OF_MORTGAGE",
@@ -1057,6 +1174,60 @@ function buildLoanNode(dto: MISMOLoanDTO, mersMin?: string, loanState?: LoanStat
   );
 
   return { tag: "LOAN", children: loanChildren };
+}
+
+function associationDuesRequired(propertyType: string | null | undefined): boolean {
+  const normalized = (propertyType ?? "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+  return new Set([
+    "condo",
+    "condominium",
+    "co_op",
+    "coop",
+    "planned_unit_development",
+    "townhouse",
+    "townhome",
+    "town_house",
+    "town_home",
+  ]).has(normalized);
+}
+
+function subjectPropertyFinancingAssessment(dto: MISMOLoanDTO) {
+  const selectedOption = dto.loanOptions.find((option) => option.isLocked) || dto.loanOptions[0];
+  const explicitLoanAmount = selectedOption?.loanAmount == null
+    ? null
+    : Number(selectedOption.loanAmount);
+  const price = Number(dto.application.purchasePrice ?? 0);
+  const downPayment = Number(dto.application.downPayment ?? 0);
+  const firstMortgageAmount = Number.isFinite(explicitLoanAmount)
+    ? explicitLoanAmount!
+    : Number.isFinite(price) && Number.isFinite(downPayment)
+      ? price - downPayment
+      : 0;
+  const appraisedValue = Number(dto.application.propertyValue ?? 0);
+  return assessSubjectPropertyFinancing({
+    propertyInfo: dto.propertyInfo,
+    firstMortgageAmount,
+    salesPrice: Number.isFinite(price) ? price : 0,
+    appraisedValue: Number.isFinite(appraisedValue) ? appraisedValue : 0,
+    associationDuesRequired: associationDuesRequired(dto.application.propertyType),
+  });
+}
+
+function buildCombinedLtvsNode(dto: MISMOLoanDTO): XMLNode | null {
+  const assessment = subjectPropertyFinancingAssessment(dto);
+  if (!assessment.complete || assessment.cltv === null || assessment.hcltv === null) return null;
+  return {
+    tag: "COMBINED_LTVS",
+    children: [
+      {
+        tag: "COMBINED_LTV",
+        children: [
+          { tag: "CombinedLTVRatioPercent", text: formatPercent(assessment.cltv) },
+          { tag: "HomeEquityCombinedLTVRatioPercent", text: formatPercent(assessment.hcltv) },
+        ],
+      },
+    ],
+  };
 }
 
 function buildCollateralNode(dto: MISMOLoanDTO): XMLNode | null {
@@ -1350,6 +1521,7 @@ export function generateMISMO34XML(
     dealChildren.push(liabilitiesNode);
   }
 
+  const combinedLtvsNode = buildCombinedLtvsNode(dto);
   if (purpose === "loanDelivery") {
     // ULDD Implementation Guide Table 5: every subject loan is delivered
     // with an AtClosing LOAN container (LoanStateDate = note date) and a
@@ -1357,6 +1529,7 @@ export function generateMISMO34XML(
     dealChildren.push({
       tag: "LOANS",
       children: [
+        ...(combinedLtvsNode ? [combinedLtvsNode] : []),
         buildLoanNode(dto, mersMin, { loanStateType: "AtClosing", loanStateDate: noteDate }),
         buildLoanNode(dto, mersMin, {
           loanStateType: "Current",
@@ -1367,7 +1540,7 @@ export function generateMISMO34XML(
   } else {
     dealChildren.push({
       tag: "LOANS",
-      children: [buildLoanNode(dto, mersMin)],
+      children: [...(combinedLtvsNode ? [combinedLtvsNode] : []), buildLoanNode(dto, mersMin)],
     });
   }
 

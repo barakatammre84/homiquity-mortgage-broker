@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-11
 
-**Code reviewed:** production base `5f3c086b61d5ad61f80f511367e888c13a9a2e5c` plus the current
+**Code reviewed:** production base `4bc1a880581a921b30ea951dbd788f089b9d705e` plus the current
 underwriting product-integrity release
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
@@ -71,7 +71,7 @@ for the borrowers that a standardized fast lane handles poorly.
 | Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Complete the 30-turn/10-eligible-borrower instrumentation pilot, decide the proactive-invitation treatment, then register and power the comparison study before enrollment; explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
-| Financial analysis | Self-employment worksheets, rental treatment, asset/liability review, append-only workpapers, cited memo and hashed lender package; human-reviewed pay, bank, lease, Schedule C and K-1 figures are frozen into the version and compared with the exact calculation input; mismatches require an officer explanation; bank-statement deposit screening is usable in the staff file; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement eligibility and DSCR rules still require the selected lender's matrices; measured review accuracy on real files is absent | Strong controlled analysis with visible judgment; not yet a measured hands-off result |
+| Financial analysis | Borrower-specific self-employment and other-income review, evidence-gated non-taxable and continuance treatment, rental analysis, asset/liability review, append-only workpapers, cited memo and hashed lender package; reviewed pay, bank, lease, Schedule C, K-1 and Schedule L figures are frozen into the version and compared with the exact calculation input; mismatches require an officer explanation; 12/24-month bank-statement work requires a complete consecutive dated evidence period; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, asset depletion and known future income reduction remain manual; bank-statement eligibility and DSCR rules still require the selected lender's matrices; measured review accuracy on real files is absent | Strong controlled analysis with visible judgment; not yet a measured hands-off result |
 | Underwriting | Deterministic rules, complete resolved-policy/input fingerprints, decision snapshots, tested DTI/pricing calculations, stale AUS/letter blocking, explicit program selection and manual-underwrite routing; fast intake uses a labeled preliminary conventional candidate while verified decisions require the URLA selection; conventional and VA paths are automated and product choice remains intact through options and letters | FHA, USDA and portfolio policy are not automated; external AUS and real credit are not live; no signed provider findings or lender acceptance has been received | Strong product-aware internal engine with current-evidence gates; incomplete program coverage and external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
 | External evidence | Plaid adapter and production guards exist; private object-storage read/write/delete and survival across a same-build process replacement are proven in production | Real credit, live AUS, current lender pricing and receiver acceptance are not proven | Blocks a real live lifecycle |
@@ -109,6 +109,12 @@ income, bank balances, lease rent and supported Schedule C/K-1 figures are recon
 structured value used by the calculation. A match is visible; a variance or unlinked document must
 be acknowledged and explained by the reviewer. The system never silently replaces an application
 or worksheet value with OCR output.
+
+The release candidate closes three additional evidence shortcuts. Business liquidity must match
+reviewed Schedule L assets, liabilities and inventory. Every current/prior self-employment year in
+the worksheet must match reviewed Schedule C net profit or K-1 ordinary income. Bank-statement
+analysis requires reviewed deposit totals and start/end dates covering the complete selected 12 or
+24 consecutive months before it can be saved or approved.
 
 Fannie Mae's current Income Calculator reinforces this direction: self-employment and rental
 analysis can be standardized, but user-entered data does not receive the same data-integrity relief
@@ -433,10 +439,12 @@ require the relevant onboarding path.[13]
 
 ### P1 — complex-income coverage has correctly blocked holes
 
-Capital gains are detected but do not produce qualifying income. Non-taxable gross-up, continuance
-tests and asset depletion are absent. DSCR and bank-statement paths refuse to qualify without the
-selected lender's matrices. These are real product gaps, but implementing the formulas from model
-memory or marketing pages would make the system less trustworthy.
+Capital gains are detected but do not produce qualifying income. Evidence-gated non-taxable
+treatment and continuance tests are implemented. Asset depletion and known future income reduction
+remain manual. DSCR and bank-statement eligibility still require the selected lender's matrices;
+the system can calculate a cited bank-statement method but always requires human review. These are
+real product gaps, and the remaining formulas must come from governing policy and the selected
+lender rather than model memory or marketing pages.
 
 **Build after authority arrives:** procure the current agency chapters and the pilot lender's
 program matrices; add a citation-ledger entry; capture any missing dates or history; implement one
@@ -722,6 +730,10 @@ missed escalation or time to a useful human response.
     officer acknowledgment and explanation, enforced by the server. Added the missing staff surface
     for append-only bank-statement deposit screening without treating OCR deposit totals as eligible
     income.
+54a. Required business liquidity to match reviewed Schedule L current assets, liabilities and
+    inventory; required every self-employment year to match reviewed Schedule C or K-1 income; and
+    required a complete reviewed, dated, consecutive 12/24-month statement period before bank
+    analysis can be saved or approved.
 55. Replaced sticky VERIFIED decisions with a current-evidence proof across underwriting, offers,
     borrower income, approval transitions, pipeline advancement, the borrower graph, loan options
     and loan-officer controls. The proof requires current approved financial artifacts and a

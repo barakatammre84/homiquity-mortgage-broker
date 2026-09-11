@@ -4,7 +4,9 @@ import { db } from "../db";
 import {
   auditLogs,
   bankStatementAnalyses,
+  borrowerDeclarations,
   borrowerBusinessEntities,
+  creditPulls,
   creditMemoReviews,
   creditMemoVersions,
   documentLineage,
@@ -14,16 +16,21 @@ import {
   financialWorkpaperReviews,
   financialWorkpaperVersions,
   loanApplications,
+  loanConditions,
   logicalDocuments,
   otherIncomeSources,
+  realEstateOwned,
   urlaAssets,
   urlaLiabilities,
+  urlaPersonalInfo,
   urlaPropertyInfo,
+  verificationReports,
   type Document,
   type DocumentLineage,
   type EmploymentHistory,
   type LoanApplication,
   type IncomeSourceEntry,
+  type OtherIncomeSource,
   type RentalPropertyEntry,
   type SelfEmploymentWorksheet,
 } from "@shared/schema";
@@ -41,9 +48,10 @@ import {
   type FinancialWorkpaperKind,
   type FinancialWorkpaperOutput,
   type FinancialWorkpaperView,
+  type LiabilityUnderwritingTreatment,
 } from "@shared/financialReview";
 import { FINANCIAL_VERIFICATION_ROLES, isTerminalLoanAppStatus } from "@shared/loanApplicationStatus";
-import { canonicalDocumentType } from "@shared/documentTypes";
+import { canonicalDocumentType, extractionDocumentType } from "@shared/documentTypes";
 import { currentDocumentVersions, assertDocumentLineageAccess, type DatabaseTransaction } from "./documentLineage";
 import {
   computeIncomePaths,
@@ -63,7 +71,31 @@ import {
 } from "./selfEmploymentIncome";
 import { assessLiabilities, verifyAssets } from "../underwriting";
 import { withPostgresTransactionRetry } from "./transactionRetry";
-import { reconcileFinancialEvidence, reconcileSelfEmploymentEvidence } from "./financialEvidenceReconciliation";
+import {
+  financialSourceReviewBlockers,
+  reconcileBusinessLiquidityEvidence,
+  reconcileFinancialEvidence,
+  reconcileSelfEmploymentEvidence,
+} from "./financialEvidenceReconciliation";
+import { analyzeProfitLossActivity } from "./profitLossActivity";
+import { assessCreditPullDecisionData } from "./decisionCredit";
+import { expectedBorrowerSequences } from "./borrowerSequences";
+import { assessLargeDepositSourcing } from "./largeDepositSourcing";
+import {
+  adjustedBureauDebtAfterReviewedTreatments,
+  liabilityTreatmentLinkIsCurrent,
+  liabilitiesWithCurrentReviewedTreatments,
+  recommendedLiabilityTreatment,
+  storedLiabilityTreatment,
+} from "./liabilityTreatments";
+import type { DepositoryTransaction } from "./underwritingNuance";
+import {
+  assessMultipleFinancedProperties,
+  reoQualificationPicture,
+  subjectMinimumReserveMonths,
+} from "@shared/realEstateFinancing";
+import { assessSubjectPropertyFinancing } from "@shared/subjectPropertyFinancing";
+import { isAssociationBearingPropertyType } from "./loanEstimate";
 
 export type FinancialReviewActor = { id: string; role: string };
 
@@ -122,26 +154,67 @@ function relevantDocument(kind: FinancialWorkpaperKind, documentType: string) {
   return /credit_report|mortgage_statement|heloc|auto_loan|student_loan|credit_card|liabilit/.test(type);
 }
 
-function sourceBlockers(
-  sources: FinancialSourceReference[],
-  relevantCurrentDocuments: Document[],
-): FinancialReviewBlocker[] {
-  const blockers: FinancialReviewBlocker[] = [];
-  if (!sources.length) {
-    blockers.push({
-      code: relevantCurrentDocuments.length ? "unverified_evidence" : "missing_evidence",
-      message: relevantCurrentDocuments.length
-        ? "Review and accept at least one relevant source document."
-        : "Add a relevant source document before approving this workpaper.",
-    });
+function reviewedString(fact: typeof extractedFields.$inferSelect | undefined) {
+  if (!fact?.humanVerified) return null;
+  return (fact.humanCorrectedValue ?? fact.valueString)?.trim() || null;
+}
+
+function monthOrdinal(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  if (!Number.isInteger(year) || month < 1 || month > 12) return null;
+  return year * 12 + month - 1;
+}
+
+function bankStatementEvidenceSummary(
+  currentDocuments: Document[],
+  factsByDocument: Map<string, Array<typeof extractedFields.$inferSelect>>,
+): FinancialReviewWorkspace["bankStatementEvidence"] {
+  const statementDocuments = currentDocuments.filter(document =>
+    document.status === "verified" && extractionDocumentType(document.documentType) === "bank_statement",
+  );
+  const reviewedDepositFacts = statementDocuments.flatMap(document =>
+    (factsByDocument.get(document.id) ?? []).filter(fact =>
+      fact.humanVerified && fact.fieldName === "total_deposits",
+    ),
+  );
+  const datedStatements = statementDocuments.flatMap(document => {
+    const facts = factsByDocument.get(document.id) ?? [];
+    const deposit = facts.find(fact => fact.humanVerified && fact.fieldName === "total_deposits");
+    const start = reviewedString(facts.find(fact => fact.fieldName === "statement_period_start"));
+    const end = reviewedString(facts.find(fact => fact.fieldName === "statement_period_end"));
+    const ordinal = monthOrdinal(end);
+    return deposit && start && end && ordinal !== null ? [{ start, end, ordinal }] : [];
+  });
+  const months = [...new Set(datedStatements.map(statement => statement.ordinal))].sort((a, b) => a - b);
+  let longestRun = 0;
+  let currentRun = 0;
+  let previous: number | null = null;
+  for (const month of months) {
+    currentRun = previous !== null && month === previous + 1 ? currentRun + 1 : 1;
+    longestRun = Math.max(longestRun, currentRun);
+    previous = month;
   }
-  if (sources.some(source => !source.contentFingerprint)) {
-    blockers.push({
-      code: "missing_byte_fingerprint",
-      message: "Replace legacy source evidence with a fingerprinted version before approval.",
-    });
-  }
-  return blockers;
+  const observedTotalDeposits = round2(reviewedDepositFacts.reduce((sum, fact) => {
+    const value = Number(fact.humanCorrectedValue ?? fact.valueNumeric);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0));
+  const periodStart = datedStatements.length
+    ? [...datedStatements].sort((a, b) => a.start.localeCompare(b.start))[0].start
+    : null;
+  const periodEnd = datedStatements.length
+    ? [...datedStatements].sort((a, b) => b.end.localeCompare(a.end))[0].end
+    : null;
+  return {
+    documentCount: statementDocuments.length,
+    reviewedDepositFactCount: reviewedDepositFacts.length,
+    observedTotalDeposits,
+    datedStatementCount: datedStatements.length,
+    consecutiveMonthCoverage: longestRun,
+    periodStart,
+    periodEnd,
+  };
 }
 
 function documentSources(
@@ -150,9 +223,14 @@ function documentSources(
   lineageByDocument: Map<string, DocumentLineage>,
   factsByDocument: Map<string, Loaded["facts"]>,
   subjectMatcher?: (documentId: string) => boolean,
+  requireReviewedNumericFact = true,
+  logicalDocumentTypesByDocument: Map<string, string[]> = new Map(),
+  typeMatcher: (documentType: string) => boolean = documentType => relevantDocument(kind, documentType),
 ) {
   const relevant = currentDocuments.filter(document =>
-    relevantDocument(kind, document.documentType) && (!subjectMatcher || subjectMatcher(document.id)),
+    [document.documentType, ...(logicalDocumentTypesByDocument.get(document.id) ?? [])]
+      .some(typeMatcher)
+    && (!subjectMatcher || subjectMatcher(document.id)),
   );
   const verified = relevant.filter(document => document.status === "verified");
   const sources = verified.map((document): FinancialSourceReference => {
@@ -198,7 +276,11 @@ function documentSources(
       verifiedFacts,
     };
   }).sort((a, b) => a.documentId.localeCompare(b.documentId));
-  return { sources, relevant, blockers: sourceBlockers(sources, relevant) };
+  return {
+    sources,
+    relevant,
+    blockers: financialSourceReviewBlockers(sources, relevant.length, requireReviewedNumericFact),
+  };
 }
 
 function safeEmployment(employment: EmploymentHistory) {
@@ -209,6 +291,7 @@ function safeEmployment(employment: EmploymentHistory) {
     employmentType: employment.employmentType,
     employerName: employment.employerName,
     isSelfEmployed: employment.isSelfEmployed,
+    paidInVirtualCurrency: employment.paidInVirtualCurrency,
     baseIncome: employment.baseIncome,
     overtimeIncome: employment.overtimeIncome,
     bonusIncome: employment.bonusIncome,
@@ -283,29 +366,69 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
     factsByDocument,
     bankStatementAnalysis,
     propertyInfo,
+    logicalDocumentTypesByDocument,
+    decisionCredit,
+    loanConditions: currentLoanConditions,
+    latestVoaTransactions,
   } = loaded;
-  const rentalProperties = ((application.incomeSources as IncomeSourceEntry[] | null) ?? [])
+  const reportedIncomeSources = (application.incomeSources as IncomeSourceEntry[] | null) ?? [];
+  const intakeRentalProperties = reportedIncomeSources
     .filter(source => source.type === "rental")
     .flatMap(source => source.rentalProperties ?? []);
+  const reoQualification = reoQualificationPicture(loaded.realEstateOwned);
+  const rentalProperties = application.ownsOtherRealEstate == null
+    ? intakeRentalProperties
+    : reoQualification.rentalProperties;
+  const multipleFinancedProperties = assessMultipleFinancedProperties({
+    ownsOtherRealEstate: application.ownsOtherRealEstate,
+    properties: loaded.realEstateOwned,
+    subjectOccupancyType: propertyInfo?.occupancyType ?? application.occupancyType,
+  });
+  const purchasePrice = Number(application.purchasePrice ?? 0);
+  const downPayment = Number(application.downPayment ?? 0);
+  const appraisedValue = Number(application.propertyValue ?? purchasePrice);
+  const subjectPropertyFinancing = assessSubjectPropertyFinancing({
+    propertyInfo,
+    firstMortgageAmount: Math.max(purchasePrice - downPayment, 0),
+    salesPrice: purchasePrice,
+    appraisedValue: Number.isFinite(appraisedValue) && appraisedValue > 0 ? appraisedValue : purchasePrice,
+    associationDuesRequired: isAssociationBearingPropertyType(application.propertyType),
+  });
   const evidenceComparisons = reconcileFinancialEvidence({
     documents: currentDocuments,
+    logicalDocuments: loaded.forms,
     factsByDocument,
     employment,
     assets,
     rentalProperties,
+  });
+  const profitLossActivity = analyzeProfitLossActivity({
+    documents: currentDocuments,
+    lineageByDocument,
+    factsByDocument,
+    businesses: loaded.businesses,
+    employment,
+    logicalDocuments: loaded.forms,
   });
   const incomeInput: IncomePathsCoreInput = {
     employment,
     otherIncome: loaded.otherIncome,
     rentalProperties,
     fallbackAnnualIncome: application.annualIncome,
+    expectedNoteDate: application.closingDate,
+    // This is the candidate calculation the reviewer approves. The resulting
+    // workpaper fingerprint is the authorization boundary that later permits
+    // the same favorable adjustment in an outward decision.
+    applyVerifiedOtherIncomeAdjustments: true,
     bankStatementAnalysis,
+    profitLossActivity: profitLossActivity.signals,
+    profitLossActivityIssues: profitLossActivity.issues,
     // This workspace is the review that establishes decision-grade income.
     // Calculate the candidate rental treatment that the reviewer is being
     // asked to approve; keying it off the pre-review application provenance
     // made final verification change the math and instantly stale its own memo.
     applyRentalToDti: true,
-    hasMortgageLiabilityRows: hasMortgageTypeLiability(liabilities),
+    hasMortgageLiabilityRows: application.ownsOtherRealEstate == null && hasMortgageTypeLiability(liabilities),
     subjectProperty: propertyInfo
       ? {
           numberOfUnits: propertyInfo.numberOfUnits,
@@ -314,7 +437,7 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
           estimatedPitia: estimateSubjectPitia(application.purchasePrice, application.downPayment),
         }
       : null,
-    departingResidence: departingResidenceInput(application),
+    departingResidence: application.ownsOtherRealEstate == null ? departingResidenceInput(application) : null,
   };
   const incomeResult = computeIncomePaths(incomeInput);
   const evaluated = {
@@ -322,6 +445,10 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
     inputsFingerprint: incomeInputsFingerprint(incomeInput),
     evaluationFingerprint: incomeEvaluationFingerprint(incomeResult),
   };
+  const largeDepositSourcing = assessLargeDepositSourcing(
+    latestVoaTransactions,
+    evaluated.result.primaryMonthlyQualifyingIncome,
+  );
   const candidates: Candidate[] = [];
   const detailedKeys: string[] = [];
 
@@ -348,12 +475,35 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
     };
     let liquidityKey: string | null = null;
     if (worksheet.businessStructure === "partnership" || worksheet.businessStructure === "s_corporation") {
-      const evidence = documentSources("business_liquidity", currentDocuments, lineageByDocument, factsByDocument, businessEvidenceMatcher);
+      const evidence = documentSources("business_liquidity", currentDocuments, lineageByDocument, factsByDocument, businessEvidenceMatcher, true, logicalDocumentTypesByDocument);
       const liquidity = assessBusinessLiquidity(worksheet.k1?.liquidity);
+      const liquidityComparisons = matchedBusiness ? reconcileBusinessLiquidityEvidence({
+        documents: currentDocuments,
+        forms: loaded.forms,
+        factsByDocument,
+        employment: row,
+        businessEntityId: matchedBusiness.id,
+      }) : [];
       liquidityKey = `business_liquidity:${row.id}`;
       const blockers: FinancialReviewBlocker[] = [];
       if (!worksheet.confirmedByBorrowerAt) blockers.push({ code: "unconfirmed_worksheet", message: "The borrower must confirm the self-employment worksheet before review." });
       if (liquidity.method === "unavailable") blockers.push({ code: "missing_evidence", message: "Capture current assets and liabilities from the business balance sheet." });
+      if (liquidity.method !== "unavailable") {
+        const reconciledLabels = new Set(liquidityComparisons.map(item => item.label));
+        if (![...reconciledLabels].some(label => label.endsWith("current assets"))
+          || ![...reconciledLabels].some(label => label.endsWith("current liabilities"))) {
+          blockers.push({
+            code: "unverified_evidence",
+            message: "Tie current assets and current liabilities to human-reviewed Schedule L fields before approving business liquidity.",
+          });
+        }
+        if ((liquidity.inventory ?? 0) > 0 && ![...reconciledLabels].some(label => label.endsWith("inventory"))) {
+          blockers.push({
+            code: "unverified_evidence",
+            message: "Tie the inventory used by the quick ratio to a human-reviewed Schedule L field before approval.",
+          });
+        }
+      }
       candidates.push(candidate(
         "business_liquidity",
         row.id,
@@ -363,12 +513,17 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
         evidence,
         [],
         blockers,
+        liquidityComparisons,
       ));
       detailedKeys.push(liquidityKey);
     }
-    const evidence = documentSources("self_employment", currentDocuments, lineageByDocument, factsByDocument, businessEvidenceMatcher);
+    const evidence = documentSources("self_employment", currentDocuments, lineageByDocument, factsByDocument, businessEvidenceMatcher, true, logicalDocumentTypesByDocument);
     const blockers: FinancialReviewBlocker[] = [];
     if (!worksheet.confirmedByBorrowerAt) blockers.push({ code: "unconfirmed_worksheet", message: "The borrower must confirm the self-employment worksheet before review." });
+    blockers.push(...profitLossActivity.issues
+      .filter(issue => issue.employmentId === row.id)
+      .map(issue => ({ code: "unverified_evidence" as const, message: issue.message })));
+    const currentActivity = profitLossActivity.signals.find(signal => signal.employmentId === row.id);
     const selfKey = `self_employment:${row.id}`;
     const selfEmploymentComparisons = matchedBusiness ? reconcileSelfEmploymentEvidence({
       documents: currentDocuments,
@@ -377,6 +532,21 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
       employment: row,
       businessEntityId: matchedBusiness.id,
     }) : [];
+    const coreWorksheetField = worksheet.scheduleC
+      ? "Net profit or loss"
+      : worksheet.k1 ? "Ordinary business income or loss" : null;
+    const expectedIncomeYears = worksheet.scheduleC
+      ? 1 + (worksheet.scheduleC.priorYear ? 1 : 0)
+      : worksheet.k1 ? 1 + (worksheet.k1.priorYear ? 1 : 0) : 0;
+    const reconciledCoreYears = coreWorksheetField
+      ? selfEmploymentComparisons.filter(item => item.label.endsWith(coreWorksheetField)).length
+      : 0;
+    if (expectedIncomeYears > 0 && reconciledCoreYears < expectedIncomeYears) {
+      blockers.push({
+        code: "unverified_evidence",
+        message: `Tie each ${worksheet.scheduleC ? "Schedule C net-profit" : "Schedule K-1 ordinary-income"} year used by this calculation to a human-reviewed tax-return field before approval.`,
+      });
+    }
     candidates.push(candidate(
       "self_employment",
       row.id,
@@ -388,6 +558,16 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
         borrowerSequenceNumber: row.borrowerSequenceNumber ?? 1,
         businessStructure: worksheet.businessStructure,
         ownershipPercent: worksheet.ownershipPercent ?? null,
+        currentActivity: currentActivity ? {
+          documentId: currentActivity.documentId,
+          periodStart: currentActivity.periodStart,
+          periodEnd: currentActivity.periodEnd,
+          periodMonths: currentActivity.periodMonths,
+          businessNetProfitLoss: currentActivity.businessNetProfitLoss,
+          borrowerMonthlyNet: currentActivity.borrowerMonthlyNet,
+          taxBasedMonthlyIncome: currentActivity.taxBasedMonthlyIncome,
+          direction: currentActivity.direction,
+        } : null,
       },
       evidence,
       liquidityKey ? [liquidityKey] : [],
@@ -399,7 +579,7 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
 
   const rental = evaluated.result.paths.find(path => path.pathId === "rental");
   if (rental?.status === "applicable") {
-    const evidence = documentSources("rental_cash_flow", currentDocuments, lineageByDocument, factsByDocument);
+    const evidence = documentSources("rental_cash_flow", currentDocuments, lineageByDocument, factsByDocument, undefined, true, logicalDocumentTypesByDocument);
     const key = `rental_cash_flow:${application.id}`;
     candidates.push(candidate(
       "rental_cash_flow",
@@ -422,10 +602,55 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
     detailedKeys.push(key);
   }
 
-  if (assets.length) {
-    const evidence = documentSources("asset_reconciliation", currentDocuments, lineageByDocument, factsByDocument);
+  if (assets.length || application.ownsOtherRealEstate !== null) {
+    const evidence = documentSources("asset_reconciliation", currentDocuments, lineageByDocument, factsByDocument, undefined, true, logicalDocumentTypesByDocument);
     const key = `asset_reconciliation:${application.id}`;
+    const downPayment = Number(application.downPayment || 0);
     const result = await verifyAssets(assets);
+    const policyAdjustedBeforeClosing = result.liquidAssets;
+    result.liquidAssets = Math.max(0, result.liquidAssets - Math.max(downPayment, 0));
+    const baseReserveMonths = subjectMinimumReserveMonths(
+      propertyInfo?.occupancyType ?? application.occupancyType,
+      propertyInfo?.numberOfUnits ?? application.numberOfUnits,
+    );
+    const estimatedSubjectPitia = estimateSubjectPitia(application.purchasePrice, application.downPayment) ?? 0;
+    const baseReserveRequirement = Math.round(baseReserveMonths * estimatedSubjectPitia * 100) / 100;
+    const totalReserveRequirement = multipleFinancedProperties.additionalReserveRequirement == null
+      ? null
+      : Math.round((baseReserveRequirement + multipleFinancedProperties.additionalReserveRequirement) * 100) / 100;
+    const openThirtyDayChargeBalance = assessLiabilities(liabilities).openThirtyDayBalance;
+    const combinedPostClosingRequirement = totalReserveRequirement == null
+      ? null
+      : Math.round((totalReserveRequirement + openThirtyDayChargeBalance) * 100) / 100;
+    const largeDepositCondition = largeDepositSourcing
+      ? currentLoanConditions.find(condition => condition.sourceRule === largeDepositSourcing.sourceRule)
+      : null;
+    const largeDepositResolved = !!largeDepositCondition
+      && (largeDepositCondition.status === "cleared" || largeDepositCondition.status === "waived");
+    const assetBlockers: FinancialReviewBlocker[] = largeDepositSourcing && !largeDepositResolved ? [{
+      code: "missing_evidence",
+      message: `Source and clear the ${money(largeDepositSourcing.totalFlaggedAmount)} in large deposits before approving usable assets. The trigger uses the reviewed ${money(evaluated.result.primaryMonthlyQualifyingIncome)} monthly qualifying income.`,
+    }] : [];
+    assetBlockers.push(...multipleFinancedProperties.missingItems.map(message => ({
+      code: "missing_evidence" as const,
+      message,
+    })));
+    assetBlockers.push(...reoQualification.missingItems.map(message => ({
+      code: "missing_evidence" as const,
+      message,
+    })));
+    if (policyAdjustedBeforeClosing + 0.01 < downPayment + openThirtyDayChargeBalance) {
+      assetBlockers.push({
+        code: "missing_evidence",
+        message: `Policy-adjusted eligible assets are ${money(policyAdjustedBeforeClosing)}, below the ${money(downPayment + openThirtyDayChargeBalance)} needed for the down payment and open 30-day charge balances before closing costs. Add and verify the missing source of funds.`,
+      });
+    }
+    if (combinedPostClosingRequirement !== null && result.liquidAssets + 0.01 < combinedPostClosingRequirement) {
+      assetBlockers.push({
+        code: "missing_evidence",
+        message: `Post-closing policy-adjusted liquid assets are ${money(result.liquidAssets)}, below the estimated ${money(combinedPostClosingRequirement)} combined reserve and open 30-day charge requirement. Add eligible assets or route the file for program review.`,
+      });
+    }
     candidates.push(candidate(
       "asset_reconciliation",
       application.id,
@@ -438,20 +663,147 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
           financialInstitution: asset.financialInstitution,
           cashOrMarketValue: asset.cashOrMarketValue,
         })),
+        largeDepositSourcing: largeDepositSourcing ? {
+          sourceRule: largeDepositSourcing.sourceRule,
+          depositCount: largeDepositSourcing.depositCount,
+          totalFlaggedAmount: largeDepositSourcing.totalFlaggedAmount,
+          largestDepositAmount: largeDepositSourcing.largest.amount,
+          largestDepositDate: largeDepositSourcing.largest.date,
+          qualifyingMonthlyIncome: evaluated.result.primaryMonthlyQualifyingIncome,
+          conditionId: largeDepositCondition?.id ?? null,
+          conditionStatus: largeDepositCondition?.status ?? "missing",
+        } : null,
+        realEstateOwned: loaded.realEstateOwned.map(property => ({
+          id: property.id,
+          propertyAddress: property.propertyAddress,
+          propertyType: property.propertyType,
+          occupancyType: property.occupancyType,
+          status: property.status,
+          mortgageBalance: property.mortgageBalance,
+          helocBalance: property.helocBalance,
+          mortgagePayment: property.mortgagePayment,
+          helocPayment: property.helocPayment,
+          monthlyTaxes: property.monthlyTaxes,
+          monthlyInsurance: property.monthlyInsurance,
+          monthlyHoa: property.monthlyHoa,
+          monthlyRentalIncome: property.monthlyRentalIncome,
+          personallyObligated: property.personallyObligated,
+        })),
+        openThirtyDayChargeBalance,
       },
-      { kind: "asset_reconciliation", result, borrowerSequences: [...new Set(assets.map(asset => asset.borrowerSequenceNumber ?? 1))].sort() },
+      {
+        kind: "asset_reconciliation",
+        result,
+        borrowerSequences: [...new Set(assets.map(asset => asset.borrowerSequenceNumber ?? 1))].sort(),
+        realEstateReserves: {
+          financedPropertiesCount: multipleFinancedProperties.financedPropertiesCount,
+          aggregateReserveUpb: multipleFinancedProperties.aggregateReserveUpb,
+          reserveFactor: multipleFinancedProperties.reserveFactor,
+          baseReserveMonths,
+          baseReserveRequirement,
+          additionalReserveRequirement: multipleFinancedProperties.additionalReserveRequirement,
+          totalReserveRequirement,
+          postClosingLiquidAssets: result.liquidAssets,
+          openThirtyDayChargeBalance,
+          combinedPostClosingRequirement,
+        },
+      },
       evidence,
       [],
-      [],
+      assetBlockers,
       evidenceComparisons.filter(item => item.kind === "asset"),
     ));
     detailedKeys.push(key);
   }
 
-  if (liabilities.length) {
-    const evidence = documentSources("liability_reconciliation", currentDocuments, lineageByDocument, factsByDocument);
+  if (liabilities.length || decisionCredit) {
+    // Real bureau credit is verified by the separate current-credit evidence
+    // gate. Credit-report numeric OCR is not yet a supported extraction path,
+    // so this workpaper may cite the accepted report without pretending that a
+    // non-existent extracted liability field was reviewed.
+    const evidence = documentSources("liability_reconciliation", currentDocuments, lineageByDocument, factsByDocument, undefined, false, logicalDocumentTypesByDocument);
     const key = `liability_reconciliation:${application.id}`;
-    const result = assessLiabilities(liabilities);
+    const currentVerifiedDocumentIds = new Set(
+      currentDocuments.filter(document => document.status === "verified").map(document => document.id),
+    );
+    const effectiveLiabilities = liabilitiesWithCurrentReviewedTreatments(
+      liabilities,
+      decisionCredit,
+      currentVerifiedDocumentIds,
+    );
+    const result = assessLiabilities(effectiveLiabilities, { allowReviewedTreatments: true });
+    const reviewedBureauMonthlyDebt = adjustedBureauDebtAfterReviewedTreatments(
+      decisionCredit,
+      liabilities,
+      currentVerifiedDocumentIds,
+    );
+    const decisionMonthlyPayment = Math.max(
+      result.totalMonthlyPayment,
+      reviewedBureauMonthlyDebt ?? 0,
+    );
+    const treatmentCandidates = liabilities.flatMap(liability => {
+      const recommendedTreatment = recommendedLiabilityTreatment(liability);
+      if (!recommendedTreatment) return [];
+      const currentTreatment = storedLiabilityTreatment(liability);
+      return [{
+        liabilityId: liability.id,
+        borrowerSequenceNumber: liability.borrowerSequenceNumber ?? 1,
+        creditorName: liability.creditorName,
+        liabilityType: liability.liabilityType,
+        remainingTermMonths: liability.remainingTermMonths ?? null,
+        studentLoanRepaymentPlan: liability.studentLoanRepaymentPlan ?? null,
+        recommendedTreatment,
+        currentTreatment,
+        sourceDocumentId: liability.treatmentSourceDocumentId ?? null,
+        creditPullId: liability.treatmentCreditPullId ?? null,
+        tradelineIndex: liability.treatmentTradelineIndex ?? null,
+        evidenceCurrent: !!liability.treatmentSourceDocumentId
+          && currentVerifiedDocumentIds.has(liability.treatmentSourceDocumentId),
+        bureauLinkCurrent: !!decisionCredit
+          && liability.treatmentCreditPullId === decisionCredit.pullId
+          && liability.treatmentTradelineIndex !== null
+          && liability.treatmentTradelineIndex !== undefined
+          && !!decisionCredit.tradelines[liability.treatmentTradelineIndex],
+      }];
+    });
+    const liabilityBlockers: FinancialReviewBlocker[] = liabilities
+      .filter(liability => storedLiabilityTreatment(liability) !== null)
+      .filter(liability => !liabilityTreatmentLinkIsCurrent(
+        liability,
+        decisionCredit,
+        currentVerifiedDocumentIds,
+      ))
+      .map(liability => ({
+        code: "unverified_evidence" as const,
+        message: `${liability.creditorName || liability.liabilityType}: the favorable debt treatment is stale. Re-link a current accepted statement and current bureau tradeline, or clear the treatment.`,
+      }));
+    liabilityBlockers.push(...subjectPropertyFinancing.missingItems.map(message => ({
+      code: "missing_evidence" as const,
+      message,
+    })));
+    const liabilityComparisons = decisionCredit ? [{
+      id: `liability:${decisionCredit.pullId}:${decisionCredit.fingerprint}`,
+      kind: "liability" as const,
+      status: liabilities.length === 0
+        ? "unlinked" as const
+        : Math.abs((reviewedBureauMonthlyDebt ?? decisionCredit.adjustedMonthlyDebt) - result.totalMonthlyPayment) <= 1
+          ? "match" as const
+          : "variance" as const,
+      // This stable artifact id anchors the acknowledgement to the exact
+      // bureau report; the comparison panel does not treat it as a document.
+      documentId: decisionCredit.pullId,
+      verifiedFactIds: [],
+      label: "Bureau report vs application monthly debt",
+      evidenceValue: reviewedBureauMonthlyDebt ?? decisionCredit.adjustedMonthlyDebt,
+      calculationValue: liabilities.length ? result.totalMonthlyPayment : null,
+      variance: liabilities.length
+        ? round2((reviewedBureauMonthlyDebt ?? decisionCredit.adjustedMonthlyDebt) - result.totalMonthlyPayment)
+        : null,
+      tolerance: 1,
+      detail: liabilities.length
+        ? "The bureau-adjusted recurring payment is compared with the reviewed application liability schedule. The higher supported amount drives the decision until the difference is resolved."
+        : "The bureau contains open liabilities that are not yet represented in the application liability schedule. The bureau-adjusted amount drives the decision until the schedule is reconciled.",
+    }] : [];
     candidates.push(candidate(
       "liability_reconciliation",
       application.id,
@@ -465,27 +817,110 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
           unpaidBalance: liability.unpaidBalance,
           monthlyPayment: liability.monthlyPayment,
           toBePaidOff: liability.toBePaidOff,
+          remainingTermMonths: liability.remainingTermMonths,
+          studentLoanRepaymentPlan: liability.studentLoanRepaymentPlan,
+          underwritingTreatment: liability.underwritingTreatment,
+          treatmentSourceDocumentId: liability.treatmentSourceDocumentId,
+          treatmentCreditPullId: liability.treatmentCreditPullId,
+          treatmentTradelineIndex: liability.treatmentTradelineIndex,
+          treatmentReviewedBy: liability.treatmentReviewedBy,
+          treatmentReviewedAt: liability.treatmentReviewedAt,
           paidByOtherParty: liability.paidByOtherParty,
           otherPartyRelationship: liability.otherPartyRelationship,
           otherPartyObligated: liability.otherPartyObligated,
           otherPartyInterestedParty: liability.otherPartyInterestedParty,
           usesRentalIncomeFromProperty: liability.usesRentalIncomeFromProperty,
         })),
+        subjectPropertyFinancing,
       },
-      { kind: "liability_reconciliation", result, borrowerSequences: [...new Set(liabilities.map(liability => liability.borrowerSequenceNumber ?? 1))].sort() },
+      {
+        kind: "liability_reconciliation",
+        result,
+        borrowerSequences: loaded.expectedBorrowerSequenceNumbers,
+        bureau: decisionCredit ? {
+          pullId: decisionCredit.pullId,
+          representativeScore: decisionCredit.representativeScore,
+          borrowerScores: decisionCredit.borrowerScores,
+          reportedMonthlyPayments: decisionCredit.reportedMonthlyPayments,
+          adjustedMonthlyDebt: decisionCredit.adjustedMonthlyDebt,
+          tradelineCount: decisionCredit.tradelines.length,
+          fingerprint: decisionCredit.fingerprint,
+          tradelines: decisionCredit.tradelines.map(line => ({
+            creditor: line.creditor,
+            type: line.type,
+            balance: line.balance,
+            monthlyPayment: line.monthlyPayment,
+            deferred: line.deferred === true,
+            openedDaysAgo: line.openedDaysAgo ?? null,
+          })),
+        } : null,
+        decisionMonthlyPayment,
+        openThirtyDayBalance: result.openThirtyDayBalance,
+        treatmentCandidates,
+        subjectPropertyFinancing,
+      },
       evidence,
+      [],
+      liabilityBlockers,
+      liabilityComparisons,
     ));
     detailedKeys.push(key);
   }
 
-  const borrowerSequences = [...new Set(employment.map(row => row.borrowerSequenceNumber ?? 1))].sort();
+  const borrowerSequences = [...new Set([
+    ...employment.map(row => row.borrowerSequenceNumber ?? 1),
+    ...loaded.otherIncome.map(row => row.borrowerSequenceNumber ?? 1),
+  ])].sort((a, b) => a - b);
   const borrowerBreakdown = borrowerSequences.map(sequence => {
     const rows = employment.filter(row => (row.borrowerSequenceNumber ?? 1) === sequence);
-    const wage = computeAgencyWageIncome({ employment: rows, otherIncome: [], fallbackAnnualIncome: null });
-    const self = computeSelfEmploymentPath(rows);
+    const otherRows = loaded.otherIncome.filter(
+      row => (row.borrowerSequenceNumber ?? 1) === sequence,
+    );
+    const employmentIds = new Set(rows.map(row => row.id));
+    const wage = computeAgencyWageIncome({
+      employment: rows,
+      otherIncome: otherRows,
+      fallbackAnnualIncome: null,
+      expectedNoteDate: application.closingDate,
+      applyVerifiedOtherIncomeAdjustments: true,
+    });
+    const self = computeSelfEmploymentPath(
+      rows,
+      profitLossActivity.signals.filter(signal => employmentIds.has(signal.employmentId)),
+      profitLossActivity.issues.filter(issue => employmentIds.has(issue.employmentId)),
+    );
     return { borrowerSequenceNumber: sequence, monthlyIncome: round2(wage.path.monthlyQualifyingIncome + self.path.monthlyQualifyingIncome) };
   });
-  const incomeEvidence = documentSources("income_summary", currentDocuments, lineageByDocument, factsByDocument);
+  const incomeEvidence = documentSources("income_summary", currentDocuments, lineageByDocument, factsByDocument, undefined, true, logicalDocumentTypesByDocument);
+  const incomeDetailBlockers = reportedIncomeDetailBlockers({
+    primaryEmploymentType: application.employmentType,
+    incomeSources: reportedIncomeSources,
+    employment,
+    otherIncome: loaded.otherIncome,
+  });
+  const bankEvidence = bankStatementEvidenceSummary(currentDocuments, factsByDocument);
+  const completeIncomeEvidence = bankStatementAnalysis
+    ? documentSources(
+        "income_summary",
+        currentDocuments,
+        lineageByDocument,
+        factsByDocument,
+        undefined,
+        true,
+        logicalDocumentTypesByDocument,
+        documentType => relevantDocument("income_summary", documentType)
+          || extractionDocumentType(documentType) === "bank_statement",
+      )
+    : incomeEvidence;
+  if (bankStatementAnalysis) {
+    if (bankEvidence.reviewedDepositFactCount < bankStatementAnalysis.months
+      || bankEvidence.consecutiveMonthCoverage < bankStatementAnalysis.months) {
+      incomeDetailBlockers.push({
+        code: "unverified_evidence",
+        message: `Review deposit totals and statement dates for ${bankStatementAnalysis.months} consecutive months before approving bank-statement income. Current evidence covers ${bankEvidence.consecutiveMonthCoverage} consecutive month${bankEvidence.consecutiveMonthCoverage === 1 ? "" : "s"}.`,
+      });
+    }
+  }
   candidates.push(candidate(
     "income_summary",
     application.id,
@@ -494,14 +929,37 @@ async function buildCandidates(loaded: Loaded): Promise<Candidate[]> {
       annualIncome: application.annualIncome,
       calculationBasis: "decision_grade_review_candidate",
       employment: employment.map(safeEmployment),
-      otherIncome: loaded.otherIncome.map(row => ({ id: row.id, incomeSource: row.incomeSource, monthlyAmount: row.monthlyAmount })),
+      otherIncome: loaded.otherIncome.map(row => ({
+        id: row.id,
+        borrowerSequenceNumber: row.borrowerSequenceNumber ?? 1,
+        incomeSource: row.incomeSource,
+        monthlyAmount: row.monthlyAmount,
+        taxTreatment: row.taxTreatment,
+        nonTaxableMonthlyAmount: row.nonTaxableMonthlyAmount,
+        hasDefinedExpiration: row.hasDefinedExpiration,
+        expirationDate: row.expirationDate,
+        paidInVirtualCurrency: row.paidInVirtualCurrency,
+      })),
+      reportedIncomeSources: reportedIncomeSources.map(source => ({
+        type: source.type,
+        annualAmount: source.annualAmount,
+        employerName: source.employerName ?? null,
+        yearsInRole: source.yearsInRole ?? null,
+        businessStructure: source.businessStructure ?? null,
+        ownershipPercent: source.ownershipPercent ?? null,
+        rentalProperties: (source.rentalProperties ?? []).map(property => ({
+          address: property.address,
+          monthlyRentalIncome: property.monthlyRentalIncome,
+          monthlyDebtPayment: property.monthlyDebtPayment ?? null,
+        })),
+      })),
       evaluationFingerprint: evaluated.evaluationFingerprint,
       inputsFingerprint: evaluated.inputsFingerprint,
     },
     { kind: "income_summary", evaluation: evaluated.result, borrowerBreakdown },
-    incomeEvidence,
+    completeIncomeEvidence,
     detailedKeys,
-    [],
+    incomeDetailBlockers,
     evidenceComparisons.filter(item => item.kind === "income"),
   ));
 
@@ -515,16 +973,52 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
     ? (await assertDocumentLineageAccess(tx, applicationId, actor)).application
     : (await tx.select().from(loanApplications).where(eq(loanApplications.id, applicationId)).limit(1))[0];
   if (!application) throw new FinancialReviewError("Application not found", 404);
-  const [allDocuments, lineageRows, employment, otherIncome, assets, liabilities, latestBankStatements, propertyRows] = await Promise.all([
+  const [allDocuments, lineageRows, employment, otherIncome, assets, liabilities, personalInfo, declarations, latestBankStatements, propertyRows, latestCreditPulls, latestVoaReports, currentLoanConditions, realEstateOwnedRows] = await Promise.all([
     tx.select().from(documents).where(eq(documents.applicationId, applicationId)),
     tx.select().from(documentLineage).where(eq(documentLineage.applicationId, applicationId)),
     tx.select().from(employmentHistory).where(eq(employmentHistory.applicationId, applicationId)).orderBy(desc(employmentHistory.createdAt), asc(employmentHistory.id)),
     tx.select().from(otherIncomeSources).where(eq(otherIncomeSources.applicationId, applicationId)).orderBy(desc(otherIncomeSources.createdAt), asc(otherIncomeSources.id)),
     tx.select().from(urlaAssets).where(eq(urlaAssets.applicationId, applicationId)).orderBy(desc(urlaAssets.createdAt), asc(urlaAssets.id)),
     tx.select().from(urlaLiabilities).where(eq(urlaLiabilities.applicationId, applicationId)).orderBy(desc(urlaLiabilities.createdAt), asc(urlaLiabilities.id)),
+    tx.select({
+      borrowerSequenceNumber: urlaPersonalInfo.borrowerSequenceNumber,
+      totalBorrowers: urlaPersonalInfo.totalBorrowers,
+    }).from(urlaPersonalInfo).where(eq(urlaPersonalInfo.applicationId, applicationId)),
+    tx.select({ borrowerSequenceNumber: borrowerDeclarations.borrowerSequenceNumber })
+      .from(borrowerDeclarations).where(eq(borrowerDeclarations.applicationId, applicationId)),
     tx.select().from(bankStatementAnalyses).where(eq(bankStatementAnalyses.applicationId, applicationId)).orderBy(desc(bankStatementAnalyses.createdAt), desc(bankStatementAnalyses.id)).limit(1),
     tx.select().from(urlaPropertyInfo).where(eq(urlaPropertyInfo.applicationId, applicationId)).orderBy(desc(urlaPropertyInfo.createdAt), desc(urlaPropertyInfo.id)).limit(1),
+    tx.select().from(creditPulls).where(and(
+      eq(creditPulls.applicationId, applicationId),
+      eq(creditPulls.status, "completed"),
+    )).orderBy(desc(creditPulls.completedAt)).limit(1),
+    tx.select({ rawPayload: verificationReports.rawPayload }).from(verificationReports).where(and(
+      eq(verificationReports.applicationId, applicationId),
+      eq(verificationReports.reportType, "voa"),
+      eq(verificationReports.status, "completed"),
+    )).orderBy(desc(verificationReports.completedAt)).limit(1),
+    tx.select().from(loanConditions).where(eq(loanConditions.applicationId, applicationId)),
+    tx.select().from(realEstateOwned).where(eq(realEstateOwned.applicationId, applicationId)).orderBy(desc(realEstateOwned.createdAt), asc(realEstateOwned.id)),
   ]);
+  const expectedBorrowerSequenceNumbers = expectedBorrowerSequences([
+    ...personalInfo,
+    ...employment,
+    ...assets,
+    ...liabilities,
+    ...declarations,
+  ]);
+  const latestCreditPull = latestCreditPulls[0] ?? null;
+  const latestVoaTransactions = (
+    latestVoaReports[0]?.rawPayload as { transactions?: DepositoryTransaction[] } | null | undefined
+  )?.transactions ?? null;
+  const creditIsCurrent = !!latestCreditPull
+    && !latestCreditPull.isSimulated
+    && !latestCreditPull.archivedAt
+    && !!latestCreditPull.expiresAt
+    && latestCreditPull.expiresAt.getTime() > Date.now();
+  const decisionCredit = creditIsCurrent
+    ? assessCreditPullDecisionData(latestCreditPull, expectedBorrowerSequenceNumbers).picture
+    : null;
   const groups = currentDocumentVersions(allDocuments, lineageRows);
   const currentDocuments = groups.map(group => group.current.document);
   const currentIds = currentDocuments.map(document => document.id);
@@ -532,6 +1026,7 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
   const forms = currentIds.length ? await tx.select().from(logicalDocuments).where(and(
     or(eq(logicalDocuments.loanId, applicationId), and(isNull(logicalDocuments.loanId), sourceScope)),
     or(isNull(logicalDocuments.sourceDocumentId), sourceScope),
+    ne(logicalDocuments.status, "rejected"),
     ne(logicalDocuments.status, "revoked"),
   )) : [];
   const formIds = forms.map(form => form.id);
@@ -559,7 +1054,13 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
   )) : [];
   const formDocument = new Map(forms.map(form => [form.id, form.sourceDocumentId]));
   const businessEntityIdsByDocument = new Map<string, Set<string>>();
+  const logicalDocumentTypesByDocument = new Map<string, string[]>();
   for (const form of forms) {
+    if (form.sourceDocumentId) {
+      const types = logicalDocumentTypesByDocument.get(form.sourceDocumentId) ?? [];
+      if (!types.includes(form.documentType)) types.push(form.documentType);
+      logicalDocumentTypesByDocument.set(form.sourceDocumentId, types);
+    }
     if (!form.sourceDocumentId || !form.businessEntityId) continue;
     const ids = businessEntityIdsByDocument.get(form.sourceDocumentId) ?? new Set<string>();
     ids.add(form.businessEntityId);
@@ -595,19 +1096,186 @@ async function loadCurrentAnalysis(tx: DatabaseTransaction, applicationId: strin
     factsByDocument,
     forms,
     businessEntityIdsByDocument,
+    logicalDocumentTypesByDocument,
     businesses,
     employment,
     otherIncome,
     assets,
     liabilities,
+    expectedBorrowerSequenceNumbers,
+    decisionCredit,
+    latestVoaTransactions,
+    loanConditions: currentLoanConditions,
     bankStatementAnalysis,
     bankStatementAnalysisRecord: latestBankStatement ?? null,
     propertyInfo: propertyRows[0] ?? null,
+    realEstateOwned: realEstateOwnedRows,
   };
 }
 
 function normalizeBusinessName(value: string | null | undefined) {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+type ReportedIncomeCoverageInput = {
+  primaryEmploymentType?: string | null;
+  incomeSources: IncomeSourceEntry[];
+  employment: Array<Pick<EmploymentHistory, "id" | "employerName" | "isSelfEmployed" | "selfEmploymentIncome" | "paidInVirtualCurrency">>;
+  otherIncome: Array<Pick<OtherIncomeSource,
+    "id"
+    | "incomeSource"
+    | "monthlyAmount"
+    | "taxTreatment"
+    | "nonTaxableMonthlyAmount"
+    | "hasDefinedExpiration"
+    | "expirationDate"
+    | "paidInVirtualCurrency"
+  >>;
+};
+
+/**
+ * Fast intake records a useful income story, but the household total is still
+ * self-reported. Before an officer can approve that total, every reported
+ * component must exist in the detailed financial profile that drives the
+ * deterministic workpapers. Otherwise one reviewed W-2 or tax return could be
+ * mistaken for support for an unrelated side business hidden inside the same
+ * annual figure.
+ */
+export function reportedIncomeDetailBlockers(
+  input: ReportedIncomeCoverageInput,
+): FinancialReviewBlocker[] {
+  const blockers: FinancialReviewBlocker[] = [];
+  const unusedEmployment = new Set(input.employment.map(row => row.id));
+  const unusedOtherIncome = new Set(input.otherIncome.map(row => row.id));
+  const takeEmployment = (
+    source: IncomeSourceEntry,
+    selfEmployed: boolean,
+  ): ReportedIncomeCoverageInput["employment"][number] | undefined => {
+    const candidates = input.employment.filter(row =>
+      unusedEmployment.has(row.id) && !!row.isSelfEmployed === selfEmployed,
+    );
+    const sourceName = normalizeBusinessName(source.employerName);
+    const match = sourceName
+      ? candidates.find(row => normalizeBusinessName(row.employerName) === sourceName)
+      : candidates[0];
+    if (match) unusedEmployment.delete(match.id);
+    return match;
+  };
+  const takeOtherIncome = (source: IncomeSourceEntry) => {
+    const normalizedType = normalizeBusinessName(source.type);
+    const match = input.otherIncome.find(row =>
+      unusedOtherIncome.has(row.id) && normalizeBusinessName(row.incomeSource) === normalizedType,
+    ) ?? (source.type === "other"
+      ? input.otherIncome.find(row => unusedOtherIncome.has(row.id))
+      : undefined);
+    if (match) unusedOtherIncome.delete(match.id);
+    return match;
+  };
+
+  const hasReportedSource = (type: IncomeSourceEntry["type"]) =>
+    input.incomeSources.some(source => source.type === type);
+
+  for (const employment of input.employment) {
+    if (employment.paidInVirtualCurrency === null || employment.paidInVirtualCurrency === undefined) {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Confirm whether ${employment.employerName?.trim() || "the listed employment"} pays any income in virtual currency before approving household income.`,
+      });
+    }
+  }
+
+  for (const source of input.otherIncome) {
+    const label = source.incomeSource?.trim() || "Other income";
+    const monthlyAmount = Number(source.monthlyAmount ?? 0);
+    if (source.paidInVirtualCurrency === null || source.paidInVirtualCurrency === undefined) {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Confirm whether ${label} is paid in virtual currency before approving household income.`,
+      });
+    }
+    if (!source.taxTreatment || source.taxTreatment === "unknown") {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Confirm whether ${label} is exempt from federal income tax before approving household income.`,
+      });
+    }
+    if (source.taxTreatment === "partially_non_taxable") {
+      const nonTaxableAmount = Number(source.nonTaxableMonthlyAmount ?? 0);
+      if (nonTaxableAmount <= 0 || nonTaxableAmount > monthlyAmount) {
+        blockers.push({
+          code: "missing_evidence",
+          message: `Confirm the monthly nontaxable portion of ${label} before approving household income.`,
+        });
+      }
+    }
+    if (source.hasDefinedExpiration === null || source.hasDefinedExpiration === undefined) {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Confirm whether ${label} has a defined expiration date before approving household income.`,
+      });
+    } else if (source.hasDefinedExpiration && !source.expirationDate) {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Add the expiration date for ${label} before approving household income.`,
+      });
+    }
+  }
+  if (
+    input.primaryEmploymentType === "employed" &&
+    !hasReportedSource("w2") &&
+    !input.employment.some(row => !row.isSelfEmployed)
+  ) {
+    blockers.push({
+      code: "missing_evidence",
+      message: "Add the primary borrower’s full employment record before approving the household income calculation.",
+    });
+  }
+  if (
+    input.primaryEmploymentType === "self_employed" &&
+    !hasReportedSource("self_employed") &&
+    !input.employment.some(row => row.isSelfEmployed)
+  ) {
+    blockers.push({
+      code: "missing_evidence",
+      message: "Add the primary borrower’s self-employment record and income worksheet before approval.",
+    });
+  }
+
+  for (const source of input.incomeSources) {
+    if (source.type === "rental") continue;
+    const label = source.employerName?.trim() || source.type.replaceAll("_", " ");
+    if (source.type === "w2") {
+      if (!takeEmployment(source, false)) {
+        blockers.push({
+          code: "missing_evidence",
+          message: `Add the full employment record for ${label} before approving the household income calculation.`,
+        });
+      }
+      continue;
+    }
+    if (source.type === "self_employed") {
+      const employment = takeEmployment(source, true);
+      if (!employment) {
+        blockers.push({
+          code: "missing_evidence",
+          message: `Add the self-employment record and income worksheet for ${label} before approval.`,
+        });
+      } else if (!employment.selfEmploymentIncome) {
+        blockers.push({
+          code: "unconfirmed_worksheet",
+          message: `Complete the self-employment income worksheet for ${label} before approval.`,
+        });
+      }
+      continue;
+    }
+    if (!takeOtherIncome(source)) {
+      blockers.push({
+        code: "missing_evidence",
+        message: `Add the detailed ${label} income record before approving the household income calculation.`,
+      });
+    }
+  }
+  return blockers;
 }
 
 function reviewView(review: typeof financialWorkpaperReviews.$inferSelect | typeof creditMemoReviews.$inferSelect | undefined) {
@@ -701,18 +1369,7 @@ async function assembleWorkspace(tx: DatabaseTransaction, applicationId: string,
     : isTerminalLoanAppStatus(loaded.application.status)
       ? "This application is closed. Financial review history remains available."
       : null;
-  const bankStatementDocuments = loaded.currentDocuments.filter(document =>
-    document.status === "verified" && canonicalDocumentType(document.documentType) === "bank_statement",
-  );
-  const reviewedDepositFacts = bankStatementDocuments.flatMap(document =>
-    (loaded.factsByDocument.get(document.id) ?? []).filter(fact =>
-      fact.humanVerified && fact.fieldName === "total_deposits",
-    ),
-  );
-  const observedTotalDeposits = round2(reviewedDepositFacts.reduce((sum, fact) => {
-    const value = Number(fact.humanCorrectedValue ?? fact.valueNumeric);
-    return sum + (Number.isFinite(value) ? value : 0);
-  }, 0));
+  const bankEvidence = bankStatementEvidenceSummary(loaded.currentDocuments, loaded.factsByDocument);
   const latestBankStatementAnalysis = loaded.bankStatementAnalysisRecord;
   return {
     applicationId,
@@ -733,11 +1390,7 @@ async function assembleWorkspace(tx: DatabaseTransaction, applicationId: string,
       notes: latestBankStatementAnalysis.notes,
       createdAt: latestBankStatementAnalysis.createdAt.toISOString(),
     } : null,
-    bankStatementEvidence: {
-      documentCount: bankStatementDocuments.length,
-      reviewedDepositFactCount: reviewedDepositFacts.length,
-      observedTotalDeposits,
-    },
+    bankStatementEvidence: bankEvidence,
   };
 }
 
@@ -764,7 +1417,13 @@ function outputSummary(workpaper: FinancialWorkpaperView) {
     ? `${money(output.result.appliedMonthlyIncome ?? 0)} monthly income and ${money(output.result.appliedMonthlyObligation ?? 0)} monthly obligation applied.`
     : `${output.result.coverageRatio?.toFixed(2) ?? "unavailable"} coverage ratio.`;
   if (output.kind === "asset_reconciliation") return `${money(output.result.totalAssets)} recorded; ${money(output.result.liquidAssets)} available after existing valuation policy.`;
-  if (output.kind === "liability_reconciliation") return `${money(output.result.totalMonthlyPayment)} monthly obligations included; ${money(output.result.excludedDebts)} excluded with recorded reasons.`;
+  if (output.kind === "liability_reconciliation") {
+    const subject = output.subjectPropertyFinancing;
+    const ratios = subject.cltv === null
+      ? "combined-lien ratios pending"
+      : `${subject.cltv.toFixed(2)}% CLTV / ${subject.hcltv?.toFixed(2) ?? "pending"}% HCLTV`;
+    return `${money(output.result.totalMonthlyPayment)} monthly obligations included; ${money(output.result.excludedDebts)} excluded with recorded reasons; ${money(subject.monthlyHousingExpenseAdditions)} in subject-property payment additions; ${ratios}.`;
+  }
   return "Calculation recorded.";
 }
 
@@ -781,6 +1440,7 @@ function buildMemo(application: LoanApplication, workpapers: FinancialWorkpaperV
         references.push({
           type: "document",
           id: source.documentId,
+          documentId: source.documentId,
           label: `${source.documentName} · v${source.versionNumber}${source.pages.length ? ` · p. ${source.pages.join(", ")}` : ""}`,
           pageNumber: source.pages[0],
         });
@@ -792,6 +1452,7 @@ function buildMemo(application: LoanApplication, workpapers: FinancialWorkpaperV
         if (!references.some(reference => `${reference.type}:${reference.id}` === factKey)) references.push({
           type: "verified_fact",
           id: factId,
+          documentId: source.documentId,
           label: fact
             ? `${financialFactLabel(fact.fieldName)}: ${fact.valueType === "currency" ? money(fact.value) : fact.value.toLocaleString("en-US")} · ${source.documentName}${fact.pageNumber ? ` · p. ${fact.pageNumber}` : ""}`
             : `Verified extracted fact · ${source.documentName}`,
@@ -841,6 +1502,104 @@ export async function getFinancialReview(applicationId: string, actor: Financial
   return db.transaction(tx => assembleWorkspace(tx, applicationId, actor), { isolationLevel: "repeatable read" });
 }
 
+export async function recordLiabilityUnderwritingTreatment(
+  applicationId: string,
+  liabilityId: string,
+  actor: FinancialReviewActor,
+  input: {
+    treatment: LiabilityUnderwritingTreatment | null;
+    sourceDocumentId: string | null;
+    creditPullId: string | null;
+    tradelineIndex: number | null;
+  },
+) {
+  return withPostgresTransactionRetry(() => db.transaction(async tx => {
+    if (!FINANCIAL_VERIFICATION_ROLES.includes(actor.role)) {
+      throw new FinancialReviewError("Financial reviewer access required", 403);
+    }
+    const loaded = await loadCurrentAnalysis(tx, applicationId, actor);
+    const liability = loaded.liabilities.find(row => row.id === liabilityId);
+    if (!liability) throw new FinancialReviewError("Liability not found", 404);
+
+    if (input.treatment === null) {
+      await tx.update(urlaLiabilities).set({
+        underwritingTreatment: null,
+        treatmentSourceDocumentId: null,
+        treatmentCreditPullId: null,
+        treatmentTradelineIndex: null,
+        treatmentReviewedBy: null,
+        treatmentReviewedAt: null,
+      }).where(eq(urlaLiabilities.id, liabilityId));
+      await tx.insert(auditLogs).values({
+        actorUserId: actor.id,
+        action: "financial_review.liability_treatment_cleared",
+        targetType: "urla_liability",
+        targetId: liabilityId,
+        metadata: { applicationId },
+      });
+      return { treatment: null };
+    }
+
+    if (recommendedLiabilityTreatment(liability) !== input.treatment) {
+      throw new FinancialReviewError("That treatment does not match the current liability facts.", 409);
+    }
+    const source = loaded.currentDocuments.find(document => document.id === input.sourceDocumentId);
+    if (!source || source.status !== "verified" || !relevantDocument("liability_reconciliation", source.documentType)) {
+      throw new FinancialReviewError("Choose a current accepted liability document.", 409);
+    }
+    if (!loaded.decisionCredit || loaded.decisionCredit.pullId !== input.creditPullId) {
+      throw new FinancialReviewError("Choose a tradeline from the current bureau report.", 409);
+    }
+    const duplicate = loaded.liabilities.find(row =>
+      row.id !== liabilityId
+      && row.treatmentCreditPullId === input.creditPullId
+      && row.treatmentTradelineIndex === input.tradelineIndex
+      && storedLiabilityTreatment(row) !== null,
+    );
+    if (duplicate) {
+      throw new FinancialReviewError("That bureau tradeline is already linked to another reviewed liability.", 409);
+    }
+    const proposed = {
+      ...liability,
+      underwritingTreatment: input.treatment,
+      treatmentSourceDocumentId: input.sourceDocumentId,
+      treatmentCreditPullId: input.creditPullId,
+      treatmentTradelineIndex: input.tradelineIndex,
+    };
+    if (!liabilityTreatmentLinkIsCurrent(
+      proposed,
+      loaded.decisionCredit,
+      new Set([source.id]),
+    )) {
+      throw new FinancialReviewError("The selected bureau tradeline does not match this treatment.", 409);
+    }
+
+    const reviewedAt = new Date();
+    await tx.update(urlaLiabilities).set({
+      underwritingTreatment: input.treatment,
+      treatmentSourceDocumentId: input.sourceDocumentId,
+      treatmentCreditPullId: input.creditPullId,
+      treatmentTradelineIndex: input.tradelineIndex,
+      treatmentReviewedBy: actor.id,
+      treatmentReviewedAt: reviewedAt,
+    }).where(eq(urlaLiabilities.id, liabilityId));
+    await tx.insert(auditLogs).values({
+      actorUserId: actor.id,
+      action: "financial_review.liability_treatment_recorded",
+      targetType: "urla_liability",
+      targetId: liabilityId,
+      metadata: {
+        applicationId,
+        treatment: input.treatment,
+        sourceDocumentId: input.sourceDocumentId,
+        creditPullId: input.creditPullId,
+        tradelineIndex: input.tradelineIndex,
+      },
+    });
+    return { treatment: input.treatment, reviewedAt: reviewedAt.toISOString() };
+  }, { isolationLevel: "serializable" }));
+}
+
 /**
  * Trusted service-side lookup used by submission readiness and package
  * assembly. It recomputes freshness in one repeatable-read snapshot; a memo
@@ -860,6 +1619,7 @@ export async function getCurrentApprovedFinancialVerificationEvidence(applicatio
   memo: CreditMemoView | null;
   incomeWorkpaperId: string | null;
   assetWorkpaperId: string | null;
+  liabilityWorkpaperId: string | null;
 }> {
   const workspace = await db.transaction(
     tx => assembleWorkspace(tx, applicationId),
@@ -871,7 +1631,7 @@ export async function getCurrentApprovedFinancialVerificationEvidence(applicatio
     || !workspace.memo?.isCurrent
     || workspace.memo.blockers.length > 0
     || workspace.memo.review?.action !== "approve"
-  ) return { memo: null, incomeWorkpaperId: null, assetWorkpaperId: null };
+  ) return { memo: null, incomeWorkpaperId: null, assetWorkpaperId: null, liabilityWorkpaperId: null };
   const approvedWorkpaper = (kind: FinancialWorkpaperKind) =>
     workspace.workpapers.find(workpaper =>
       workpaper.kind === kind
@@ -884,6 +1644,7 @@ export async function getCurrentApprovedFinancialVerificationEvidence(applicatio
     memo: workspace.memo,
     incomeWorkpaperId: approvedWorkpaper("income_summary"),
     assetWorkpaperId: approvedWorkpaper("asset_reconciliation"),
+    liabilityWorkpaperId: approvedWorkpaper("liability_reconciliation"),
   };
 }
 

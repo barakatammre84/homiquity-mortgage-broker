@@ -21,6 +21,18 @@ const row = (over: Partial<LiabilityForm>): LiabilityForm => ({
 });
 
 describe("LiabilitiesSection — someone else pays this debt", () => {
+  it("captures the remaining term and student-loan plan needed for a documented review", () => {
+    render(<LiabilitiesSection liabilities={[row({ monthlyPayment: "0", remainingTermMonths: 18, studentLoanRepaymentPlan: "income_driven" })]} onChange={vi.fn()} />);
+    expect((screen.getByTestId("input-remaining-payments-0") as HTMLInputElement).value).toBe("18");
+    expect(screen.getByTestId("select-student-plan-0").textContent).toContain("Income-driven repayment");
+    expect(screen.getByText(/upload the latest student-loan statement/i)).toBeTruthy();
+  });
+
+  it("keeps vehicle leases outside the short-term installment exception", () => {
+    render(<LiabilitiesSection liabilities={[row({ liabilityType: "Lease", remainingTermMonths: 4 })]} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("input-remaining-payments-0")).toBeNull();
+  });
+
   it("offers the declaration on every liability and reports it through onChange", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

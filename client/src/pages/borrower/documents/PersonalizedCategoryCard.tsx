@@ -1,4 +1,4 @@
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { DocRow } from "@/components/DocumentItemRow";
@@ -50,6 +50,8 @@ export function PersonalizedCategoryCard({
   const pendingInGroup = items.filter(
     (i) => i.status === "needed" || i.status === "rejected",
   ).length;
+  const allVerified = items.length > 0 && items.every((item) => item.status === "verified");
+  const allSubmitted = pendingInGroup === 0;
   const description = personalizedCategoryDescription(categoryId, items);
 
   return (
@@ -63,8 +65,11 @@ export function PersonalizedCategoryCard({
             <div>
               <CardTitle className="flex items-center gap-2">
                 {meta.name}
-                {pendingInGroup === 0 && (
+                {allVerified && (
                   <CheckCircle2 className="h-5 w-5 text-success-subtle-foreground" />
+                )}
+                {allSubmitted && !allVerified && (
+                  <Clock className="h-5 w-5 text-warning-subtle-foreground" />
                 )}
               </CardTitle>
               <CardDescription>{description}</CardDescription>
@@ -72,12 +77,12 @@ export function PersonalizedCategoryCard({
           </div>
           <Badge
             className={
-              pendingInGroup === 0
+              allVerified
                 ? "bg-success-subtle text-success-subtle-foreground"
                 : "bg-warning-subtle text-warning-subtle-foreground"
             }
           >
-            {pendingInGroup === 0 ? "Complete" : `${pendingInGroup} needed`}
+            {allVerified ? "Complete" : allSubmitted ? "Submitted" : `${pendingInGroup} needed`}
           </Badge>
         </div>
       </CardHeader>

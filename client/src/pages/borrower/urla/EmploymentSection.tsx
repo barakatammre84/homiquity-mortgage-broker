@@ -199,6 +199,29 @@ export function EmploymentSection({
                   />
                   <Label htmlFor={`self-employed-${index}`} className="font-normal">Self-Employed</Label>
                 </div>
+                <div className="space-y-2">
+                  <Label>Is any income from this job or business paid in cryptocurrency?</Label>
+                  <Select
+                    value={emp.paidInVirtualCurrency === true
+                      ? "yes"
+                      : emp.paidInVirtualCurrency === false ? "no" : "unknown"}
+                    onValueChange={(value) => {
+                      const updated = [...employmentRecords];
+                      updated[index] = {
+                        ...updated[index],
+                        paidInVirtualCurrency: value === "unknown" ? null : value === "yes",
+                      };
+                      onChange(updated);
+                    }}
+                  >
+                    <SelectTrigger data-testid={`select-employment-virtual-currency-${index}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no">No</SelectItem>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="unknown">I’m not sure</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <hr />
@@ -329,47 +352,153 @@ export function EmploymentSection({
           ) : (
             <div className="space-y-4">
               {otherIncomes.map((income, index) => (
-                <div key={index} className="flex gap-4 items-end">
-                  <div className="flex-1 space-y-2">
-                    <Label>Income Source</Label>
-                    <Select
-                      value={income.incomeSource || ""}
-                      onValueChange={(value) => {
-                        const updated = [...otherIncomes];
-                        updated[index] = { ...updated[index], incomeSource: value };
-                        onOtherIncomesChange(updated);
-                      }}
+                <div key={index} className="rounded-lg border p-4 space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <div className="space-y-2">
+                      <Label>Income Source</Label>
+                      <Select
+                        value={income.incomeSource || ""}
+                        onValueChange={(value) => {
+                          const updated = [...otherIncomes];
+                          updated[index] = { ...updated[index], incomeSource: value };
+                          onOtherIncomesChange(updated);
+                        }}
+                      >
+                        <SelectTrigger data-testid={`select-income-source-${index}`}>
+                          <SelectValue placeholder="Select source..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {INCOME_SOURCES.map((source) => (
+                            <SelectItem key={source} value={source}>{source}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Monthly Amount</Label>
+                      <MoneyInput
+                        value={income.monthlyAmount || ""}
+                        onChange={(e) => {
+                          const updated = [...otherIncomes];
+                          updated[index] = { ...updated[index], monthlyAmount: e.target.value };
+                          onOtherIncomesChange(updated);
+                        }}
+                        data-testid={`input-income-amount-${index}`}
+                      />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon" aria-label="Delete"
+                      onClick={() => onOtherIncomesChange(otherIncomes.filter((_, i) => i !== index))}
+                      data-testid={`button-remove-income-${index}`}
                     >
-                      <SelectTrigger data-testid={`select-income-source-${index}`}>
-                        <SelectValue placeholder="Select source..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INCOME_SOURCES.map((source) => (
-                          <SelectItem key={source} value={source}>{source}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <div className="flex-1 space-y-2">
-                    <Label>Monthly Amount</Label>
-                    <MoneyInput
-                      value={income.monthlyAmount || ""}
-                      onChange={(e) => {
-                        const updated = [...otherIncomes];
-                        updated[index] = { ...updated[index], monthlyAmount: e.target.value };
-                        onOtherIncomesChange(updated);
-                      }}
-                      data-testid={`input-income-amount-${index}`}
-                    />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Is any of this income exempt from federal income tax?</Label>
+                      <Select
+                        value={income.taxTreatment || "unknown"}
+                        onValueChange={(value) => {
+                          const updated = [...otherIncomes];
+                          updated[index] = {
+                            ...updated[index],
+                            taxTreatment: value,
+                            ...(value !== "partially_non_taxable" ? { nonTaxableMonthlyAmount: null } : {}),
+                          };
+                          onOtherIncomesChange(updated);
+                        }}
+                      >
+                        <SelectTrigger data-testid={`select-income-tax-treatment-${index}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="taxable">No</SelectItem>
+                          <SelectItem value="fully_non_taxable">Yes, all of it</SelectItem>
+                          <SelectItem value="partially_non_taxable">Yes, part of it</SelectItem>
+                          <SelectItem value="unknown">I’m not sure</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {income.taxTreatment === "partially_non_taxable" && (
+                      <div className="space-y-2">
+                        <Label>Monthly amount that is tax-exempt</Label>
+                        <MoneyInput
+                          value={income.nonTaxableMonthlyAmount ?? ""}
+                          onChange={(e) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], nonTaxableMonthlyAmount: e.target.value };
+                            onOtherIncomesChange(updated);
+                          }}
+                          data-testid={`input-nontaxable-income-amount-${index}`}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Does this income have a known end date?</Label>
+                      <Select
+                        value={income.hasDefinedExpiration === true
+                          ? "yes"
+                          : income.hasDefinedExpiration === false ? "no" : "unknown"}
+                        onValueChange={(value) => {
+                          const updated = [...otherIncomes];
+                          updated[index] = {
+                            ...updated[index],
+                            hasDefinedExpiration: value === "unknown" ? null : value === "yes",
+                            ...(value !== "yes" ? { expirationDate: null } : {}),
+                          };
+                          onOtherIncomesChange(updated);
+                        }}
+                      >
+                        <SelectTrigger data-testid={`select-income-expiration-${index}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="no">No known end date</SelectItem>
+                          <SelectItem value="yes">Yes</SelectItem>
+                          <SelectItem value="unknown">I’m not sure</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {income.hasDefinedExpiration === true && (
+                      <div className="space-y-2">
+                        <Label>End date</Label>
+                        <Input
+                          type="date"
+                          value={income.expirationDate ?? ""}
+                          onChange={(e) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], expirationDate: e.target.value };
+                            onOtherIncomesChange(updated);
+                          }}
+                          data-testid={`input-income-expiration-date-${index}`}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Is this income paid in cryptocurrency?</Label>
+                      <Select
+                        value={income.paidInVirtualCurrency === true
+                          ? "yes"
+                          : income.paidInVirtualCurrency === false ? "no" : "unknown"}
+                        onValueChange={(value) => {
+                          const updated = [...otherIncomes];
+                          updated[index] = {
+                            ...updated[index],
+                            paidInVirtualCurrency: value === "unknown" ? null : value === "yes",
+                          };
+                          onOtherIncomesChange(updated);
+                        }}
+                      >
+                        <SelectTrigger data-testid={`select-other-income-virtual-currency-${index}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="no">No</SelectItem>
+                          <SelectItem value="yes">Yes</SelectItem>
+                          <SelectItem value="unknown">I’m not sure</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon" aria-label="Delete"
-                    onClick={() => onOtherIncomesChange(otherIncomes.filter((_, i) => i !== index))}
-                    data-testid={`button-remove-income-${index}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    These details help us calculate eligible income correctly and avoid asking for the same information later.
+                  </p>
                 </div>
               ))}
             </div>

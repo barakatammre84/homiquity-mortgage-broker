@@ -184,6 +184,33 @@ describe("F-028 — facts built from the real extraction shapes", () => {
     ]);
   });
 
+  it("turns a P&L into period-bound business income facts", () => {
+    const facts = buildDocumentFacts("profit_loss", {
+      businessName: "Harbor Studio LLC",
+      periodStartDate: "2026-01-01",
+      periodEndDate: "2026-08-31",
+      revenue: 120_000,
+      totalExpenses: 72_000,
+      netProfitLoss: 48_000,
+      fieldEvidence: {
+        businessName: { pageNumber: 1, confidence: 0.98 },
+        periodStartDate: { pageNumber: 1, confidence: 0.96 },
+        periodEndDate: { pageNumber: 1, confidence: 0.96 },
+        revenue: { pageNumber: 1, confidence: 0.97 },
+        totalExpenses: { pageNumber: 1, confidence: 0.97 },
+        netProfitLoss: { pageNumber: 1, confidence: 0.99 },
+      },
+    });
+
+    expect(facts.find(f => f.fieldName === "business_name")?.valueString).toBe("Harbor Studio LLC");
+    expect(facts.find(f => f.fieldName === "pnl_net_profit_loss")).toMatchObject({
+      fieldCategory: "income",
+      valueNumeric: 48_000,
+      pageNumber: 1,
+    });
+    expect(facts.find(f => f.fieldName === "pnl_period_end_date")?.valueString).toBe("2026-08-31");
+  });
+
   it("carries the source page, field confidence, and box into review facts", () => {
     expect(buildDocumentFacts("pay_stub", PAY_STUB).find(f => f.fieldName === "gross_pay"))
       .toMatchObject({

@@ -31,6 +31,7 @@ import {
   type ExtractedW2Data,
   type ExtractedBankStatementData,
   type ExtractedLeaseData,
+  type ExtractedProfitLossData,
 } from "./extractionCore";
 import {
   validateExtraction,
@@ -38,6 +39,7 @@ import {
   checkW2Consistency,
   checkBankStatementConsistency,
   checkLeaseConsistency,
+  checkProfitLossConsistency,
   lineageFor,
   rawLineage,
   VALIDATION_FAILED_WARNING,
@@ -47,6 +49,7 @@ import {
   w2Schema,
   bankStatementSchema,
   leaseSchema,
+  profitLossSchema,
 } from "./extractionValidation";
 
 // Model lineage, persisted with every extraction so a past result can be traced
@@ -291,6 +294,40 @@ function simulatedLeaseExtraction(source: string | Buffer): ExtractedLeaseData {
     }])),
     pageCount: 2,
     documentClassification: simulatedClassification("lease_agreement", 2),
+    ...lineageFor(SIMULATED_MODEL_ID),
+  };
+}
+
+function simulatedProfitLossExtraction(source: string | Buffer): ExtractedProfitLossData {
+  const frac = simulationFraction("profit-loss", source);
+  const revenue = Math.round(90_000 + frac * 80_000);
+  const costOfGoodsSold = Math.round(revenue * 0.18);
+  const grossProfit = revenue - costOfGoodsSold;
+  const totalExpenses = Math.round(grossProfit * 0.48);
+  const netProfitLoss = grossProfit - totalExpenses;
+  const fields = [
+    "businessName", "periodStartDate", "periodEndDate", "revenue", "costOfGoodsSold",
+    "grossProfit", "totalExpenses", "netProfitLoss",
+  ];
+  return {
+    businessName: "Demo Consulting LLC",
+    periodStartDate: "2026-01-01",
+    periodEndDate: "2026-08-31",
+    revenue,
+    costOfGoodsSold,
+    grossProfit,
+    totalExpenses,
+    netProfitLoss,
+    confidence: "medium",
+    extractedFields: fields,
+    warnings: [SIMULATED_EXTRACTION_WARNING],
+    fieldEvidence: Object.fromEntries(fields.map((fieldName, index) => [fieldName, {
+      pageNumber: 1,
+      confidence: 0.92,
+      boundingBox: { x: index % 2 ? 0.55 : 0.08, y: 0.12 + (index % 4) * 0.18, width: 0.35, height: 0.05 },
+    }])),
+    pageCount: 1,
+    documentClassification: simulatedClassification("profit_loss_statement", 1),
     ...lineageFor(SIMULATED_MODEL_ID),
   };
 }
@@ -719,6 +756,81 @@ ${CLASSIFICATION_INSTRUCTIONS}`;
     confidence: "low",
     extractedFields: [],
     warnings: ["Failed to extract data from lease agreement"],
+    ...lineageFor(model),
+  };
+}
+
+/** Extract the figures and covered period from a year-to-date business P&L. */
+export async function extractProfitLossData(
+  source: string | Buffer,
+  storedMimeType?: string,
+): Promise<ExtractedProfitLossData> {
+  const model = EXTRACTION_MODEL_SINGLE_DOC;
+  if (extractionSimulationEnabled()) return simulatedProfitLossExtraction(source);
+  if (!anthropic) {
+    return {
+      confidence: "low",
+      extractedFields: [],
+      warnings: ["Anthropic API not configured"],
+    };
+  }
+
+  try {
+    const base64 = await fileToBase64(source);
+    const mimeType = getMimeType(source, storedMimeType);
+    const prompt = `You are a mortgage income-review specialist. Extract the core figures from this business profit and loss statement.
+
+Return ONLY valid JSON with this structure:
+{
+  "businessName": "business legal or trade name or null",
+  "periodStartDate": "2026-01-01 or null",
+  "periodEndDate": "2026-08-31 or null",
+  "revenue": 150000,
+  "costOfGoodsSold": 25000,
+  "grossProfit": 125000,
+  "totalExpenses": 70000,
+  "netProfitLoss": 55000,
+  "confidence": "high or medium or low",
+  "extractedFields": ["list of successfully extracted field names"],
+  "warnings": ["any concerns, missing period labels, or unclear subtotals"],
+  "fieldEvidence": {
+    "businessName": {"pageNumber": 1, "confidence": 0.98},
+    "netProfitLoss": {"pageNumber": 1, "confidence": 0.97, "boundingBox": {"x": 0.1, "y": 0.8, "width": 0.3, "height": 0.04}}
+  },
+  "pageCount": 1,
+  ${classificationJsonExample("profit_loss_statement", 1)}
+}
+
+Use the statement's own labels. Revenue means total operating income or sales before expenses.
+Cost of goods sold excludes operating expenses. Gross profit is revenue minus cost of goods sold.
+Total expenses means operating expenses after cost of goods sold. Net profit or loss may be negative.
+Do not annualize or normalize the figures. Preserve the exact covered period so a reviewer can decide how to use it.
+Only include values that are clearly visible. Return null for unclear values.
+For every included value, add fieldEvidence with its 1-indexed source page,
+field-specific confidence from 0 to 1, and normalized boundingBox when visible.
+${CLASSIFICATION_INSTRUCTIONS}`;
+
+    const text = await generateExtractionText(anthropic, mimeType, base64, prompt, model);
+    const validated = validateExtraction(profitLossSchema, text, "Profit and loss statement");
+    if (validated) {
+      const extracted: ExtractedProfitLossData = { ...validated, ...rawLineage(text, model) };
+      checkProfitLossConsistency(extracted);
+      return extracted;
+    }
+    return {
+      confidence: "low",
+      extractedFields: [],
+      warnings: [VALIDATION_FAILED_WARNING],
+      ...lineageFor(model),
+    };
+  } catch (error) {
+    console.error("Profit and loss extraction error:", error);
+  }
+
+  return {
+    confidence: "low",
+    extractedFields: [],
+    warnings: ["Failed to extract data from profit and loss statement"],
     ...lineageFor(model),
   };
 }

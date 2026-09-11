@@ -246,8 +246,8 @@ export interface LoanAppStatusMeta {
 export const LOAN_APP_STATUS_META: Record<LoanAppStatus, LoanAppStatusMeta> = {
   draft:          { label: "Incomplete",     description: "Pick up where you left off.",                          progressPercent: 5,   phase: "intake",      badgeVariant: "outline" },
   submitted:      { label: "Submitted",      description: "Your application has been received.",                  progressPercent: 15,  phase: "application", badgeVariant: "outline" },
-  analyzing:      { label: "Analyzing",      description: "Your application is being reviewed.",                  progressPercent: 20,  phase: "application", badgeVariant: "secondary" },
-  under_review:   { label: "Under Review",   description: "A licensed underwriter is reviewing your application.", progressPercent: 25,  phase: "application", badgeVariant: "secondary" },
+  analyzing:      { label: "Analyzing",      description: "We're checking your answers and preparing your next steps.", progressPercent: 20,  phase: "application", badgeVariant: "secondary" },
+  under_review:   { label: "Under Review",   description: "Your application needs loan-team review. Complete the requested steps so the team can verify it.", progressPercent: 25,  phase: "application", badgeVariant: "secondary" },
   pre_approved:   { label: "Pre-Approved",   description: "You're pre-approved. Time to find your home.",         progressPercent: 35,  phase: "application", badgeVariant: "default" },
   doc_collection: { label: "Documents",      description: "We're collecting your documents.",                     progressPercent: 45,  phase: "processing",  badgeVariant: "secondary" },
   processing:     { label: "Processing",     description: "Your file is being processed.",                        progressPercent: 55,  phase: "processing",  badgeVariant: "secondary" },

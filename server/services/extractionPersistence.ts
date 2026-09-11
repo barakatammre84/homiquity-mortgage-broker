@@ -38,6 +38,10 @@ import {
   type TaxConsentTransaction,
 } from "./taxConsentWorkflow";
 import { assessDocumentClassification } from "./documentClassification";
+import {
+  extractionDocumentType,
+  isBusinessBankStatementDocumentType,
+} from "@shared/documentTypes";
 
 /** The slice of IStorage this needs — keeps the unit testable without a DB. */
 interface DocumentUpdater {
@@ -109,7 +113,8 @@ export async function applyExtractionToDocument(params: {
     const persist = async (): Promise<ApplyExtractionResult> => {
 
     const coarseConfidence = coarseConfidenceToNumeric(extracted.confidence);
-    const classification = ["pay_stub", "w2", "bank_statement", "lease_agreement"].includes(documentType)
+    const extractorType = extractionDocumentType(documentType);
+    const classification = extractorType && extractorType !== "tax_return"
       ? assessDocumentClassification(documentType, extracted.documentClassification)
       : null;
     let classificationWarning = classification?.warning ?? null;
@@ -151,7 +156,7 @@ export async function applyExtractionToDocument(params: {
         );
     const confidenceResult = await recordExtractionConfidence({
       documentId,
-      documentType,
+      documentType: extractorType ?? documentType,
       applicationId: applicationId ?? undefined,
       overallConfidence,
       fieldConfidences,
@@ -214,7 +219,7 @@ export async function applyExtractionToDocument(params: {
     const { persistDocumentFacts } = await import("./documentFacts");
     const factsPersisted = await persistDocumentFacts(
       documentId,
-      documentType,
+      extractorType ?? documentType,
       extracted as unknown as Record<string, any>,
       extracted.confidence,
       extracted.modelId,
@@ -228,7 +233,9 @@ export async function applyExtractionToDocument(params: {
     const readinessResult = await wireExtractionToReadiness(
       userId,
       documentId,
-      documentType,
+      isBusinessBankStatementDocumentType(documentType)
+        ? documentType
+        : extractorType ?? documentType,
       extracted as unknown as Record<string, any>,
       extracted.confidence,
       transaction,

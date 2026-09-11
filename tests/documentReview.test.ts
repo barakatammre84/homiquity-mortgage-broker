@@ -179,6 +179,15 @@ describe("compareExtractedToStated", () => {
     expect(rows[1].verdict).toBe("consistent"); // employer, case-insensitive
   });
 
+  it("uses the same comparison for the borrower catalog paystub alias", () => {
+    const rows = compareExtractedToStated(
+      "paystub",
+      { grossPay: 5000, payPeriodStartDate: "2026-06-01", payPeriodEndDate: "2026-06-14" },
+      { annualIncome: 130000 },
+    );
+    expect(rows[0].verdict).toBe("consistent");
+  });
+
   it("pay_stub: employer mismatch is a variance; missing dates degrade the income row", () => {
     const rows = compareExtractedToStated(
       "pay_stub",
@@ -220,6 +229,7 @@ describe("compareExtractedToStated", () => {
 
   it("returns no rows for types without compare rules", () => {
     expect(compareExtractedToStated("lease_agreement", { monthlyRent: 2000 }, {})).toEqual([]);
+    expect(compareExtractedToStated("bank_statement_business", { closingBalance: 20000 }, { downPayment: 60000 })).toEqual([]);
   });
 });
 
@@ -227,7 +237,11 @@ describe("extractable-type gate (UI mirror of the /extract support list)", () =>
   // The verify-role gate mirror is covered by tests/documentStatus.test.ts
   // (shared/documentStatus.ts owns DOCUMENT_REVIEW_ROLES).
   it("matches the /extract supported-type list", () => {
-    for (const t of ["tax_return", "pay_stub", "w2", "bank_statement", "lease_agreement"]) {
+    for (const t of [
+      "tax_return", "tax_return_1040", "pay_stub", "paystub", "w2", "bank_statement",
+      "bank_statement_checking", "bank_statement_savings", "bank_statement_business",
+      "business_bank_statement", "lease_agreement",
+    ]) {
       expect(isExtractableDocumentType(t)).toBe(true);
     }
     expect(isExtractableDocumentType(null)).toBe(false);

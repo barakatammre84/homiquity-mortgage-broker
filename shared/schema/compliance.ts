@@ -132,7 +132,19 @@ export const creditPulls = pgTable("credit_pulls", {
   experianScore: integer("experian_score"),
   equifaxScore: integer("equifax_score"),
   transunionScore: integer("transunion_score"),
-  representativeScore: integer("representative_score"), // Middle score used for underwriting
+  // For a joint file these top-level scores belong to the controlling
+  // borrower (the borrower with the lowest representative score).
+  representativeScore: integer("representative_score"),
+  // One reproducible score set per borrower. The decision layer refuses a
+  // joint file when any identified borrower is absent and uses the lowest
+  // borrower representative score, matching agency delivery convention.
+  borrowerScores: jsonb("borrower_scores").$type<Array<{
+    borrowerSequenceNumber: number;
+    experianScore: number | null;
+    equifaxScore: number | null;
+    transunionScore: number | null;
+    representativeScore: number;
+  }>>(),
   // FHFA is phasing VantageScore 4.0 into conforming underwriting alongside
   // Classic FICO; capture both when the bureau returns them.
   vantageScore4: integer("vantage_score_4"),

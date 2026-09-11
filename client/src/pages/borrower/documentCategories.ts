@@ -41,6 +41,7 @@ export const DOCUMENT_CATEGORIES = [
       { type: "w2", name: "W-2 Forms", required: true, description: "W-2s from the last 2 years" },
       { type: "tax_return_1040", name: "Tax Returns (1040)", required: true, description: "Personal tax returns from last 2 years" },
       { type: "1099_misc", name: "1099 Forms", required: false, description: "1099 forms if you have additional income" },
+      { type: "1099_nec", name: "1099-NEC Forms", required: false, description: "Nonemployee compensation forms for contract work" },
       { type: "profit_loss", name: "Profit & Loss Statement", required: false, description: "For self-employed borrowers" },
       { type: "business_license", name: "Business Records", required: false, description: "Business license or formation records" },
       { type: "social_security_award_letter", name: "Social Security Award Letter", required: false, description: "If receiving Social Security income" },
@@ -138,7 +139,7 @@ export const CONDITION_CATEGORY_META: Record<
   { name: string; description: string; icon: typeof User; color: string; bgColor: string }
 > = {
   income: { name: "Income Verification", description: "Pay stubs, tax returns, and employment documents", icon: DollarSign, color: "text-chart-2", bgColor: "bg-chart-2/10" },
-  assets: { name: "Assets & Savings", description: "Bank statements, gift funds, and reserves", icon: Building2, color: "text-chart-4", bgColor: "bg-chart-4/10" },
+  assets: { name: "Assets & Savings", description: "Bank statements and reserve documentation", icon: Building2, color: "text-chart-4", bgColor: "bg-chart-4/10" },
   credit: { name: "Credit & Liabilities", description: "Statements and explanations for credit items", icon: CreditCard, color: "text-chart-3", bgColor: "bg-chart-3/10" },
   property: { name: "Property & Transaction", description: "Contract, appraisal, and property documents", icon: Home, color: "text-chart-5", bgColor: "bg-chart-5/10" },
   insurance: { name: "Insurance", description: "Homeowners and other required coverage", icon: Shield, color: "text-chart-1", bgColor: "bg-chart-1/10" },

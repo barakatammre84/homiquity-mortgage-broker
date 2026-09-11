@@ -481,6 +481,48 @@ describe("protected extraction evaluation runner", () => {
     });
   });
 
+  it("scores the P&L fields that the production extractor can emit", () => {
+    const prediction = simpleExtractionToBenchmarkCase({
+      caseId: "pnl-1",
+      extractor: "profit_loss",
+      situationTags: ["self_employed", "raster_scan"],
+      pageCount: 1,
+      extracted: {
+        businessName: "North Star Consulting",
+        periodStartDate: "2026-01-01",
+        periodEndDate: "2026-08-31",
+        revenue: 120_000,
+        totalExpenses: 72_000,
+        netProfitLoss: 48_000,
+        confidence: "high",
+        extractedFields: ["businessName", "periodStartDate", "periodEndDate", "revenue", "totalExpenses", "netProfitLoss"],
+        fieldEvidence: {
+          businessName: { pageNumber: 1, confidence: 0.99 },
+          periodStartDate: { pageNumber: 1, confidence: 0.99 },
+          periodEndDate: { pageNumber: 1, confidence: 0.99 },
+          revenue: { pageNumber: 1, confidence: 0.99 },
+          totalExpenses: { pageNumber: 1, confidence: 0.99 },
+          netProfitLoss: { pageNumber: 1, confidence: 0.99 },
+        },
+        pageCount: 1,
+        documentClassification: {
+          pageCount: 1,
+          pages: [{ pageNumber: 1, documentType: "profit_loss_statement", confidence: 0.99 }],
+        },
+      },
+    });
+
+    expect(prediction).toMatchObject({
+      documentType: "profit_loss_statement",
+      fields: {
+        businessName: { value: "North Star Consulting", pageNumber: 1 },
+        revenue: { value: 120_000, pageNumber: 1 },
+        netProfitLoss: { value: 48_000, pageNumber: 1 },
+      },
+      logicalDocuments: [{ documentType: "profit_loss_statement", pageStart: 1, pageEnd: 1 }],
+    });
+  });
+
   it("namespaces repeated tax forms by source order without exposing entity names in field keys", () => {
     const prediction = taxExtractionToBenchmarkCase({
       caseId: "tax-1",

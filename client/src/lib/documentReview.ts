@@ -9,20 +9,16 @@
  * application data, never these comparisons.
  */
 
+import {
+  extractionDocumentType,
+  isBusinessBankStatementDocumentType,
+} from "@shared/documentTypes";
+
 // Who may review lives in shared/documentStatus.ts (DOCUMENT_REVIEW_ROLES /
 // canReviewDocuments) — the single client+server mirror of the verify gate.
 
-/** Document types POST /api/documents/:id/extract supports. */
-export const EXTRACTABLE_DOCUMENT_TYPES = [
-  "tax_return",
-  "pay_stub",
-  "w2",
-  "bank_statement",
-  "lease_agreement",
-] as const;
-
 export function isExtractableDocumentType(documentType: string | null | undefined): boolean {
-  return !!documentType && (EXTRACTABLE_DOCUMENT_TYPES as readonly string[]).includes(documentType);
+  return extractionDocumentType(documentType) !== null;
 }
 
 export interface ParsedExtractionNotes {
@@ -258,11 +254,12 @@ export function compareExtractedToStated(
   const rows: ComparisonRow[] = [];
   const statedIncome = toNumber(application.annualIncome);
 
-  if (documentType === "tax_return") {
+  const extractorType = extractionDocumentType(documentType);
+  if (extractorType === "tax_return") {
     rows.push(
       incomeRow("Gross income vs stated annual income", toNumber(extracted.grossIncome), statedIncome),
     );
-  } else if (documentType === "pay_stub") {
+  } else if (extractorType === "pay_stub") {
     const annualized = annualizePayStubGross(
       toNumber(extracted.grossPay),
       extracted.payPeriodStartDate,
@@ -292,7 +289,7 @@ export function compareExtractedToStated(
             : "variance"
           : "insufficient_data",
     });
-  } else if (documentType === "bank_statement") {
+  } else if (extractorType === "bank_statement" && !isBusinessBankStatementDocumentType(documentType)) {
     const closing = toNumber(extracted.closingBalance);
     const down = toNumber(application.downPayment);
     rows.push({

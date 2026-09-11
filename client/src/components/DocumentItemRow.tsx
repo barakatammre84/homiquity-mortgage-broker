@@ -62,6 +62,8 @@ export function DocumentItemRow({
 }) {
   const hasUpload = row.status !== "needed";
   const isRejected = row.status === "rejected";
+  const isVerified = row.status === "verified";
+  const isUnderReview = row.status === "uploaded" || row.status === "verifying";
   // Pending items and bounced items invite a (re-)upload right in the row;
   // accepted/in-review items stay calm.
   const showDropzone = !uploading && (!hasUpload || isRejected);
@@ -71,8 +73,10 @@ export function DocumentItemRow({
       className={`p-4 rounded-lg transition-colors ${
         isRejected
           ? "bg-destructive/5"
-          : hasUpload
+          : isVerified
           ? "bg-success-subtle/50"
+          : isUnderReview
+          ? "bg-info-subtle/50"
           : row.required
           ? "bg-warning-subtle/50"
           : "bg-muted/30"
@@ -83,8 +87,10 @@ export function DocumentItemRow({
         <div className="flex items-center gap-3 flex-1">
           {isRejected ? (
             <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
-          ) : hasUpload ? (
+          ) : isVerified ? (
             <CheckCircle2 className="h-5 w-5 text-success-subtle-foreground shrink-0" />
+          ) : isUnderReview ? (
+            <Clock className="h-5 w-5 text-info-subtle-foreground shrink-0" />
           ) : row.required ? (
             <AlertCircle className="h-5 w-5 text-warning-subtle-foreground shrink-0" />
           ) : (
@@ -106,9 +112,14 @@ export function DocumentItemRow({
                   Required
                 </Badge>
               )}
-              {row.required && hasUpload && !isRejected && (
+              {row.required && isVerified && (
                 <Badge variant="outline" className="text-xs border-border text-success-subtle-foreground">
                   Complete
+                </Badge>
+              )}
+              {row.required && isUnderReview && (
+                <Badge variant="outline" className="text-xs border-border text-info-subtle-foreground">
+                  Submitted
                 </Badge>
               )}
             </div>

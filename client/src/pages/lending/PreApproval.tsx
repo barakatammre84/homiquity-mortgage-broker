@@ -81,7 +81,7 @@ function PreApprovalFunnel() {
   const direction = funnelState.direction;
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
   usePageView("/apply");
   const track = useTrackActivity();
@@ -172,6 +172,8 @@ function PreApprovalFunnel() {
     try {
       localStorage.removeItem(AUTOSAVE_KEY);
       localStorage.removeItem(AUTOSAVE_STEP_KEY);
+      localStorage.removeItem(`${AUTOSAVE_KEY}:owner`);
+      localStorage.removeItem(`${AUTOSAVE_KEY}:saved-at`);
       localStorage.removeItem(PENDING_SUBMIT_KEY);
     } catch {}
   }, []);
@@ -330,6 +332,7 @@ function PreApprovalFunnel() {
     stepStorageKey: AUTOSAVE_STEP_KEY,
     values: watchedValues,
     stepId,
+    ownerId: user?.id ?? null,
     enabled: stepId !== "intro",
     shouldPersist: hasMeaningfulData,
   });
@@ -759,10 +762,16 @@ function PreApprovalFunnel() {
             <Button onClick={handleNext} size="lg" className="mt-10 h-auto min-h-14 rounded-full bg-flare-ink px-8 py-4 text-base font-semibold text-primary-foreground hover:bg-flare-ink/90" data-testid="button-start-preapproval">
               {currentQ.buttonText} <ArrowRight className="ml-2" />
             </Button>
-            <p className="mt-7 text-sm text-muted-foreground">
-              Have a saved application?{" "}
-              <a href="/login" className="font-medium text-foreground underline underline-offset-4">Sign in to resume</a>
-            </p>
+            {isAuthenticated ? (
+              <p className="mt-7 text-sm text-muted-foreground" data-testid="text-authenticated-autosave">
+                You're signed in. Your answers will save as you go.
+              </p>
+            ) : (
+              <p className="mt-7 text-sm text-muted-foreground">
+                Have a saved application?{" "}
+                <a href="/login" className="font-medium text-foreground underline underline-offset-4">Sign in to resume</a>
+              </p>
+            )}
             {urlPropertyId && urlSource === "property-detail" && (
               <Button asChild variant="ghost" size="sm" className="touch-target mt-4 gap-1.5 text-muted-foreground" data-testid="button-back-to-property">
                 <Link href={`/properties/${urlPropertyId}`}><ChevronLeft className="h-3.5 w-3.5" /> Back to property listing</Link>

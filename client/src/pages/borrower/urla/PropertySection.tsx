@@ -57,6 +57,7 @@ export function PropertySection({
             })}
           />
         </div>
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="sm:col-span-2 space-y-2">
             <Label htmlFor="property-street">Street Address</Label>
@@ -165,6 +166,44 @@ export function PropertySection({
           </div>
         </div>
 
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+          <div>
+            <h4 className="font-semibold">Other monthly property costs</h4>
+            <p className="mt-1 text-sm text-muted-foreground">
+              These costs are part of the payment a lender uses to qualify you. Enter $0 when a cost does not apply. Your loan team can help confirm any amount you do not know.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="monthly-flood-insurance">Flood insurance</Label>
+              <MoneyInput
+                id="monthly-flood-insurance"
+                value={propertyInfo.monthlyFloodInsurance ?? ""}
+                onChange={(e) => onChange({ ...propertyInfo, monthlyFloodInsurance: e.target.value })}
+                data-testid="input-monthly-flood-insurance"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="monthly-ground-rent">Ground rent</Label>
+              <MoneyInput
+                id="monthly-ground-rent"
+                value={propertyInfo.monthlyGroundRent ?? ""}
+                onChange={(e) => onChange({ ...propertyInfo, monthlyGroundRent: e.target.value })}
+                data-testid="input-monthly-ground-rent"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="monthly-special-assessments">Special assessments</Label>
+              <MoneyInput
+                id="monthly-special-assessments"
+                value={propertyInfo.monthlySpecialAssessments ?? ""}
+                onChange={(e) => onChange({ ...propertyInfo, monthlySpecialAssessments: e.target.value })}
+                data-testid="input-monthly-special-assessments"
+              />
+            </div>
+          </div>
+        </div>
+
         <hr />
 
         <h4 className="font-semibold">Loan Details</h4>
@@ -242,6 +281,58 @@ export function PropertySection({
               </SelectContent>
             </Select>
           </div>
+        </div>
+
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="subordinate-financing">Will another new loan or HELOC also be secured by this property?</Label>
+            <Select
+              value={propertyInfo.subordinateFinancingExists === true
+                ? "yes"
+                : propertyInfo.subordinateFinancingExists === false ? "no" : "unknown"}
+              onValueChange={(value) => onChange({
+                ...propertyInfo,
+                subordinateFinancingExists: value === "unknown" ? null : value === "yes",
+                ...(value === "no" ? {
+                  closedEndSubordinateBalance: "0",
+                  helocDrawnBalance: "0",
+                  helocCreditLimit: "0",
+                  monthlySubordinateFinancingPayment: "0",
+                } : {}),
+              })}
+            >
+              <SelectTrigger id="subordinate-financing" data-testid="select-subordinate-financing"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">No</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+                <SelectItem value="unknown">Not sure yet</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Include down-payment-assistance loans, second mortgages, and home-equity lines opened with this mortgage.
+            </p>
+          </div>
+          {propertyInfo.subordinateFinancingExists === true && (
+            <div className="grid gap-4 sm:grid-cols-2" data-testid="subordinate-financing-details">
+              <div className="space-y-2">
+                <Label htmlFor="closed-end-subordinate-balance">Second-mortgage amount</Label>
+                <MoneyInput id="closed-end-subordinate-balance" value={propertyInfo.closedEndSubordinateBalance ?? ""} onChange={(e) => onChange({ ...propertyInfo, closedEndSubordinateBalance: e.target.value })} />
+                <p className="text-xs text-muted-foreground">Enter $0 if there is no closed-end second mortgage.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="heloc-drawn-balance">HELOC amount drawn</Label>
+                <MoneyInput id="heloc-drawn-balance" value={propertyInfo.helocDrawnBalance ?? ""} onChange={(e) => onChange({ ...propertyInfo, helocDrawnBalance: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="heloc-credit-limit">Full HELOC credit limit</Label>
+                <MoneyInput id="heloc-credit-limit" value={propertyInfo.helocCreditLimit ?? ""} onChange={(e) => onChange({ ...propertyInfo, helocCreditLimit: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="monthly-subordinate-payment">Combined monthly payment</Label>
+                <MoneyInput id="monthly-subordinate-payment" value={propertyInfo.monthlySubordinateFinancingPayment ?? ""} onChange={(e) => onChange({ ...propertyInfo, monthlySubordinateFinancingPayment: e.target.value })} />
+              </div>
+            </div>
+          )}
         </div>
 
         <hr />

@@ -148,9 +148,47 @@ export interface CoachPanelState {
   loanStatus?: LoanStatusView;
   tasks?: BorrowerTaskLike[];
   borrowerPackage?: Record<string, unknown>;
+  documentEvidence?: CoachDocumentEvidenceView;
   suggestions?: string[];
   /** Whether the last panel payload was file-derived or assistant-authored. */
   source?: "file" | "assistant";
+}
+
+export interface CoachDocumentEvidenceFactView {
+  label: string;
+  value: number;
+  format: "currency" | "number";
+  reviewStatus: "machine_read" | "human_verified";
+  confidence: "high" | "medium" | "low" | "not_applicable";
+  needsHumanReview: boolean;
+  pageNumber: number | null;
+}
+
+export interface CoachDocumentEvidenceItemView {
+  documentId: string;
+  documentType: string;
+  label: string;
+  documentReviewStatus: "uploaded" | "in_review" | "accepted";
+  evidenceStatus: "not_extracted" | "machine_read" | "partly_human_verified" | "human_verified";
+  facts: CoachDocumentEvidenceFactView[];
+  omittedFactCount: number;
+}
+
+export interface CoachDocumentEvidenceView {
+  documents: CoachDocumentEvidenceItemView[];
+  summary: {
+    documentCount: number;
+    extractedFactCount: number;
+    humanVerifiedFactCount: number;
+    factsNeedingHumanReview: number;
+    omittedDocumentCount: number;
+  };
+  financialReview: {
+    status: "approved_for_lender_package" | "not_approved";
+    income: "approved" | "not_approved";
+    assets: "approved" | "not_approved";
+    liabilities: "approved" | "not_approved" | "not_required";
+  };
 }
 
 /** Borrower-safe stage snapshot (server whitelist — see coachFileTruth.ts). */
@@ -183,6 +221,15 @@ export interface LoanStatusView {
   } | null;
   lastActivityAt: string | null;
 }
+
+export interface PlanningDocumentStatsView {
+  total: number;
+  verified: number;
+  underReview: number;
+  rejected: number;
+}
+
+export type FileDocumentStatsView = PlanningDocumentStatsView;
 
 /** The masked borrower task view; only the fields this surface renders. */
 export interface BorrowerTaskLike {

@@ -20,7 +20,7 @@ vi.mock("../server/services/activitySummary", () => ({
   getUserActivitySummary: vi.fn(),
 }));
 
-import { loadFileTruth } from "../server/services/coachFileTruth";
+import { loadFileTruth, selectCoachApplications } from "../server/services/coachFileTruth";
 import { buildDocumentChecklist } from "../server/services/documentChecklist";
 import { storage } from "../server/storage";
 import { getPipelineSummary } from "../server/pipelineEngine";
@@ -224,12 +224,8 @@ describe("stage and journey come from the shared derivations", () => {
 });
 
 describe("the tools target the WORKABLE file, never a closed one", () => {
-  // The narrative context resolves with `pickActive ?? find(funded) ?? apps[0]`
-  // — deliberately wide, so the assistant is never blind to history. That tail
-  // is wrong for a tool that tells a borrower which documents to upload: it
-  // resurrects denied/withdrawn/funded files, which is how uploads once landed
-  // on a closed loan. Real seeded borrowers DO carry such files (test-buyer has
-  // denied, withdrawn and funded ones), so this is not hypothetical.
+  // Homi now resolves one coherent current file for both its narrative and its
+  // actions. Closed history can inform context only when no workable file exists.
   const closedOnly = [
     { id: "app-denied", status: "denied" },
     { id: "app-withdrawn", status: "withdrawn" },
@@ -249,6 +245,27 @@ describe("the tools target the WORKABLE file, never a closed one", () => {
     expect(
       pickWorkableLoanApplication([...closedOnly, { id: "app-draft", status: "draft" }])?.id,
     ).toBe("app-draft");
+  });
+
+  it("uses an in-flight file for both context and actions even when a draft is newer", () => {
+    const selected = selectCoachApplications([
+      { id: "app-draft", status: "draft" },
+      { id: "app-submitted", status: "submitted" },
+    ]);
+    expect(selected.contextApplication?.id).toBe("app-submitted");
+    expect(selected.workableApplication?.id).toBe("app-submitted");
+  });
+
+  it("keeps a funded file as narrative-only history", () => {
+    const selected = selectCoachApplications(closedOnly);
+    expect(selected.contextApplication?.id).toBe("app-funded");
+    expect(selected.workableApplication).toBeUndefined();
+  });
+
+  it("uses a draft for both context and actions when it is the only workable file", () => {
+    const selected = selectCoachApplications([{ id: "app-draft", status: "draft" }]);
+    expect(selected.contextApplication?.id).toBe("app-draft");
+    expect(selected.workableApplication?.id).toBe("app-draft");
   });
 });
 

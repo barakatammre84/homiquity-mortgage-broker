@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   checkTaxReturnConsistency,
+  checkProfitLossConsistency,
   extractBankStatementData,
   extractLeaseData,
   extractPayStubData,
+  extractProfitLossData,
   extractW2Data,
   validateW2Response,
+  validateProfitLossResponse,
 } from "../server/extractionService";
 import type { ExtractedTaxReturnData } from "../server/extractionService";
 import { extractionSimulationEnabled, getMimeType, mediaBlock } from "../server/extractionCore";
@@ -105,13 +108,14 @@ describe("deterministic document extraction simulation", () => {
     const prior = process.env.EXTRACTION_SIMULATE;
     process.env.EXTRACTION_SIMULATE = "true";
     try {
-      const [payStub, w2, bank, lease] = await Promise.all([
+    const [payStub, w2, bank, lease, profitLoss] = await Promise.all([
         extractPayStubData("/objects/demo-paystub"),
         extractW2Data("/objects/demo-w2"),
         extractBankStatementData("/objects/demo-bank"),
         extractLeaseData(Buffer.from("synthetic lease"), "application/pdf"),
+        extractProfitLossData("/objects/demo-profit-loss"),
       ]);
-      for (const result of [payStub, w2, bank, lease]) {
+      for (const result of [payStub, w2, bank, lease, profitLoss]) {
         expect(result.modelId).toBe("simulated");
         expect(result.confidence).toBe("medium");
         expect(result.extractedFields.length).toBeGreaterThan(0);
@@ -129,6 +133,8 @@ describe("deterministic document extraction simulation", () => {
       await expect(extractPayStubData("/objects/demo-paystub"))
         .resolves.toEqual(payStub);
       expect(w2.documentClassification?.pages[0]?.documentType).toBe("w2");
+      expect(profitLoss.documentClassification?.pages[0]?.documentType).toBe("profit_loss_statement");
+      expect(profitLoss.netProfitLoss).toBe(profitLoss.grossProfit! - profitLoss.totalExpenses!);
     } finally {
       process.env.EXTRACTION_SIMULATE = prior;
     }
@@ -148,6 +154,7 @@ describe("deterministic document extraction simulation", () => {
         extractW2Data("/objects/production-w2"),
         extractBankStatementData("/objects/production-bank"),
         extractLeaseData(Buffer.from("production lease"), "application/pdf"),
+        extractProfitLossData("/objects/production-profit-loss"),
       ]);
       expect(attempts.every((attempt) => attempt.status === "rejected")).toBe(true);
       for (const attempt of attempts) {
@@ -161,6 +168,40 @@ describe("deterministic document extraction simulation", () => {
       if (priorSimulation === undefined) delete process.env.EXTRACTION_SIMULATE;
       else process.env.EXTRACTION_SIMULATE = priorSimulation;
     }
+  });
+
+  it("validates source evidence and caps inconsistent P&L arithmetic", () => {
+    const response = {
+      businessName: "Harbor Studio LLC",
+      periodStartDate: "2026-01-01",
+      periodEndDate: "2026-08-31",
+      revenue: 100_000,
+      costOfGoodsSold: 20_000,
+      grossProfit: 80_000,
+      totalExpenses: 30_000,
+      netProfitLoss: 50_000,
+      confidence: "high",
+      extractedFields: ["businessName", "revenue", "netProfitLoss"],
+      fieldEvidence: Object.fromEntries([
+        "businessName", "periodStartDate", "periodEndDate", "revenue", "costOfGoodsSold",
+        "grossProfit", "totalExpenses", "netProfitLoss",
+      ].map(field => [field, { pageNumber: 1, confidence: 0.98 }])),
+      pageCount: 1,
+      documentClassification: {
+        pageCount: 1,
+        pages: [{ pageNumber: 1, documentType: "profit_loss_statement", confidence: 0.99 }],
+      },
+    };
+    expect(validateProfitLossResponse(JSON.stringify(response))).not.toBeNull();
+
+    const missingEvidence = structuredClone(response);
+    delete (missingEvidence.fieldEvidence as Record<string, unknown>).netProfitLoss;
+    expect(validateProfitLossResponse(JSON.stringify(missingEvidence))).toBeNull();
+
+    const inconsistent = { ...response, netProfitLoss: 75_000, warnings: [] as string[] };
+    checkProfitLossConsistency(inconsistent);
+    expect(inconsistent.confidence).toBe("medium");
+    expect(inconsistent.warnings.join(" ")).toMatch(/net profit or loss/i);
   });
 
   it("keeps only the last four EIN digits and requires page evidence for W-2 values", () => {

@@ -20,6 +20,14 @@ vi.mock("../server/auditLog", () => ({ logAudit: vi.fn() }));
 vi.mock("../server/services/trid", () => ({
   evaluateTridTrigger: vi.fn().mockResolvedValue({ justTriggered: false, leDueDate: null }),
 }));
+vi.mock("../server/services/planningDocumentHandoff", () => ({
+  attachPlanningDocumentsToApplication: vi.fn().mockResolvedValue({
+    documents: 0,
+    taxRuns: 0,
+    businessEntities: 0,
+    situationProfiles: 0,
+  }),
+}));
 
 import { storage } from "../server/storage";
 import { logAudit } from "../server/auditLog";
@@ -265,8 +273,9 @@ describe("syncCoachIntakeToApplication (mocked persistence)", () => {
     expect(result.created).toBe(true);
     expect(result.applicationId).toBe("app-new");
     expect(storage.createLoanApplication).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1", status: "draft", creditScore: 720 }),
+      { userId: "user-1", status: "draft" },
     );
+    expect(storage.updateLoanApplication).toHaveBeenCalledWith("app-new", { creditScore: 720 });
   });
 
   it("refuses to fork a file when a submitted application exists and no draft", async () => {

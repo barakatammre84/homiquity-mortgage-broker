@@ -188,7 +188,13 @@ const STEPS: UrlaStep[] = [
           !!property.propertyAddress &&
           property.marketValue !== null && property.marketValue !== undefined && property.marketValue !== "" &&
           property.mortgageBalance !== null && property.mortgageBalance !== undefined && property.mortgageBalance !== "" &&
-          !!(property.status || property.occupancyType),
+          property.helocBalance !== null && property.helocBalance !== undefined && property.helocBalance !== "" &&
+          !!property.status &&
+          !!property.occupancyType &&
+          (
+            !(Number(property.mortgageBalance || 0) > 0 || Number(property.helocBalance || 0) > 0 || Number(property.mortgagePayment || 0) > 0) ||
+            property.personallyObligated !== null && property.personallyObligated !== undefined
+          ),
         )
       ),
   },
@@ -199,7 +205,18 @@ const STEPS: UrlaStep[] = [
     intro: "The home and loan this application is for — much of it carries over from your pre-approval.",
     isComplete: ({ propertyInfo, app }) =>
       !!((propertyInfo.propertyStreet || app.propertyAddress) &&
-         (propertyInfo.propertyValue || app.propertyValue || app.purchasePrice)),
+         (propertyInfo.propertyValue || app.propertyValue || app.purchasePrice) &&
+         propertyInfo.monthlyFloodInsurance !== null && propertyInfo.monthlyFloodInsurance !== undefined && propertyInfo.monthlyFloodInsurance !== "" &&
+         propertyInfo.monthlyGroundRent !== null && propertyInfo.monthlyGroundRent !== undefined && propertyInfo.monthlyGroundRent !== "" &&
+         propertyInfo.monthlySpecialAssessments !== null && propertyInfo.monthlySpecialAssessments !== undefined && propertyInfo.monthlySpecialAssessments !== "" &&
+         propertyInfo.subordinateFinancingExists !== null && propertyInfo.subordinateFinancingExists !== undefined &&
+         (
+           propertyInfo.subordinateFinancingExists === false ||
+           propertyInfo.closedEndSubordinateBalance !== null && propertyInfo.closedEndSubordinateBalance !== undefined && propertyInfo.closedEndSubordinateBalance !== "" &&
+           propertyInfo.helocDrawnBalance !== null && propertyInfo.helocDrawnBalance !== undefined && propertyInfo.helocDrawnBalance !== "" &&
+           propertyInfo.helocCreditLimit !== null && propertyInfo.helocCreditLimit !== undefined && propertyInfo.helocCreditLimit !== "" &&
+           propertyInfo.monthlySubordinateFinancingPayment !== null && propertyInfo.monthlySubordinateFinancingPayment !== undefined && propertyInfo.monthlySubordinateFinancingPayment !== ""
+         )),
   },
   {
     id: "declarations",
@@ -269,8 +286,8 @@ export default function URLAForm() {
   const [borrowerData, setBorrowerData] = useState<Record<number, BorrowerSlice>>({ 1: emptySlice(), 2: emptySlice() });
   const [activeSeq, setActiveSeq] = useState<number>(1);
   const [hasCoBorrower, setHasCoBorrower] = useState<boolean>(false);
-  // Shared (primary-only) data
-  const [otherIncomes, setOtherIncomes] = useState<Partial<OtherIncomeSource>[]>([]);
+  // Subject-property and loan data are shared. Section 1e other income belongs
+  // to the active borrower and lives inside that borrower's slice.
   const [propertyInfo, setPropertyInfo] = useState<Partial<UrlaPropertyInfo>>({});
   const [realEstateOwned, setRealEstateOwned] = useState<RealEstateOwnedForm[]>([]);
   const [ownsOtherRealEstate, setOwnsOtherRealEstate] = useState<boolean | null>(null);
@@ -292,6 +309,9 @@ export default function URLAForm() {
 
   const setPersonalInfo = (v: PersonalInfoForm) => updateSlice({ personalInfo: v });
   const setEmploymentRecords = (v: Partial<EmploymentHistory>[]) => updateSlice({ employmentRecords: v });
+  const setOtherIncomes = (v: Partial<OtherIncomeSource>[]) => updateSlice({
+    otherIncomeSources: v.map(income => ({ ...income, borrowerSequenceNumber: activeSeq })),
+  });
   const setAssets = (v: AssetForm[]) => updateSlice({ assets: v });
   const setLiabilities = (v: LiabilityForm[]) => updateSlice({ liabilities: v });
   const setDeclarations = (v: Partial<BorrowerDeclarations>) => updateSlice({ declarations: v });
@@ -306,6 +326,7 @@ export default function URLAForm() {
       const emp = orderEmploymentRecords(
         (urlaData.employmentHistory || []).filter((e) => seqOf(e) === seq),
       );
+      const otherIncome = (urlaData.otherIncomeSources || []).filter((income) => seqOf(income) === seq);
       const ast = (urlaData.assets || []).filter((a) => seqOf(a) === seq);
       const lia = (urlaData.liabilities || []).filter((l) => seqOf(l) === seq);
       const decl = (urlaData.allDeclarations || []).find((d) => seqOf(d) === seq);
@@ -313,6 +334,9 @@ export default function URLAForm() {
       return {
         personalInfo: seq === 1 ? prefillPrimaryPersonalInfo(pi, user) : pi || {},
         employmentRecords: seq === 1 ? prefillPrimaryEmployment(emp, urlaData.application) : emp.length ? emp : [{}],
+        otherIncomeSources: seq === 1
+          ? prefillOtherIncomeSources(otherIncome, urlaData.application)
+          : otherIncome,
         assets: ast.length ? ast : [{}],
         liabilities: lia.length ? lia : [{}],
         declarations: decl || {},
@@ -321,10 +345,6 @@ export default function URLAForm() {
     };
 
     setBorrowerData({ 1: buildSlice(1), 2: buildSlice(2) });
-    setOtherIncomes(prefillOtherIncomeSources(
-      urlaData.otherIncomeSources || [],
-      urlaData.application,
-    ));
     setPropertyInfo(urlaData.propertyInfo || {});
     const carriedRealEstate = prefillRealEstateOwned(
       urlaData.realEstateOwned || [],
@@ -339,6 +359,7 @@ export default function URLAForm() {
     const hasCo =
       (urlaData.allPersonalInfo || []).some((p) => seqOf(p) > 1) ||
       (urlaData.employmentHistory || []).some((e) => seqOf(e) > 1) ||
+      (urlaData.otherIncomeSources || []).some((income) => seqOf(income) > 1) ||
       (urlaData.assets || []).some((a) => seqOf(a) > 1) ||
       (urlaData.liabilities || []).some((l) => seqOf(l) > 1) ||
       (urlaData.allDeclarations || []).some((d) => seqOf(d) > 1) ||
@@ -402,17 +423,16 @@ export default function URLAForm() {
     const mine = hasCoBorrower ? "your " : "";
     const sections: { section: UrlaRowSection; rows: Record<string, unknown>[]; noun: string; whose: string }[] = [
       { section: "employment", rows: borrowerData[1]?.employmentRecords ?? [], noun: "job", whose: mine },
+      { section: "otherIncome", rows: (borrowerData[1]?.otherIncomeSources ?? []) as Record<string, unknown>[], noun: "other-income", whose: mine },
       { section: "asset", rows: borrowerData[1]?.assets ?? [], noun: "asset", whose: mine },
       { section: "liability", rows: borrowerData[1]?.liabilities ?? [], noun: "liability", whose: mine },
-      // Other income is shared, primary-only state — `buildPayload` sends it
-      // once, outside either slice, so it carries no owner.
-      { section: "otherIncome", rows: otherIncomes as Record<string, unknown>[], noun: "other-income", whose: "" },
     ];
     // Gated on the same flag `buildPayload` gates `coApplicants` on, so the
     // two can never disagree about which rows were actually filtered.
     if (hasCoBorrower) {
       sections.push(
         { section: "employment", rows: borrowerData[2]?.employmentRecords ?? [], noun: "job", whose: "co-borrower " },
+        { section: "otherIncome", rows: (borrowerData[2]?.otherIncomeSources ?? []) as Record<string, unknown>[], noun: "other-income", whose: "co-borrower " },
         { section: "asset", rows: borrowerData[2]?.assets ?? [], noun: "asset", whose: "co-borrower " },
         { section: "liability", rows: borrowerData[2]?.liabilities ?? [], noun: "liability", whose: "co-borrower " },
       );
@@ -522,6 +542,8 @@ export default function URLAForm() {
     employmentHistory: s.employmentRecords
       .filter(r => isUrlaRowSaveable("employment", r))
       .map(emp => ({ ...emp, employmentType: emp.employmentType || "current" })),
+    otherIncomeSources: s.otherIncomeSources
+      .filter(r => isUrlaRowSaveable("otherIncome", r)),
     assets: s.assets.filter(r => isUrlaRowSaveable("asset", r)),
     liabilities: s.liabilities.filter(r => isUrlaRowSaveable("liability", r)),
     declarations: s.declarations,
@@ -529,15 +551,10 @@ export default function URLAForm() {
   });
 
   const buildPayload = (): UrlaSavePayload => {
-    // Was `incomeSource && monthlyAmount` — the only section requiring BOTH, so
-    // it lost a row for a source with no amount yet AND for an amount with no
-    // source. That asymmetry was not deliberate.
-    const cleanedOtherIncomes = otherIncomes.filter(r => isUrlaRowSaveable("otherIncome", r));
     const primary = buildSectionsPayload(borrowerData[1] ?? emptySlice());
 
     const payload: UrlaSavePayload = {
       ...primary,
-      otherIncomeSources: cleanedOtherIncomes,
       propertyInfo,
       loanDetails,
     };
@@ -645,7 +662,7 @@ export default function URLAForm() {
   const app = urlaData?.application || activeApplication;
   const stepContext: StepContext = {
     slice,
-    otherIncomes,
+    otherIncomes: slice.otherIncomeSources,
     propertyInfo,
     realEstateOwned,
     ownsOtherRealEstate,
@@ -677,7 +694,7 @@ export default function URLAForm() {
         acc.total += 1;
         const ctx: StepContext = {
           slice: borrowerData[seq] ?? emptySlice(),
-          otherIncomes,
+          otherIncomes: borrowerData[seq]?.otherIncomeSources ?? [],
           propertyInfo,
           realEstateOwned,
           ownsOtherRealEstate,
@@ -869,7 +886,7 @@ export default function URLAForm() {
                 <EmploymentSection
                   employmentRecords={slice.employmentRecords}
                   onChange={setEmploymentRecords}
-                  otherIncomes={otherIncomes}
+                  otherIncomes={slice.otherIncomeSources}
                   onOtherIncomesChange={setOtherIncomes}
                 />
               </TabsContent>

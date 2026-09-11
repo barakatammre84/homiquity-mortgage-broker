@@ -209,11 +209,11 @@ function scoreEmployment(employment: EmploymentHistory[]): URLASectionScore {
     { name: "Prior Employer End Date", value: priorEmployment?.endDate, required: needsPriorEmployer },
   ];
 
-  return scoreSection("Employment & Income", "1b-1e", fields);
+  return scoreSection("Employment", "1b-1d", fields);
 }
 
 function scoreOtherIncome(otherIncome: OtherIncomeSource[]): URLASectionScore {
-  // Other income (1f) is optional in aggregate, but when a source is declared
+  // Other income (1e) is optional in aggregate, but when a source is declared
   // its source and amount become required for that entry.
   const hasSources = otherIncome.length > 0;
   const fields: { name: string; value: unknown; required: boolean }[] = [
@@ -231,7 +231,7 @@ function scoreOtherIncome(otherIncome: OtherIncomeSource[]): URLASectionScore {
     fields.push({ name: "Additional income sources (if any)", value: null, required: false });
   }
 
-  return scoreSection("Other Income", "1f", fields);
+  return scoreSection("Other Income", "1e", fields);
 }
 
 function scoreAssets(assets: UrlaAsset[]): URLASectionScore {
@@ -313,6 +313,18 @@ function scorePropertyInfo(
   application: LoanApplication,
   propertyInfo: UrlaPropertyInfo | null | undefined
 ): URLASectionScore {
+  const associationRequired = [
+    "condo",
+    "condominium",
+    "co_op",
+    "coop",
+    "planned_unit_development",
+    "townhouse",
+    "townhome",
+    "town_house",
+    "town_home",
+  ].includes((application.propertyType ?? "").toLowerCase().trim().replace(/[\s-]+/g, "_"));
+  const subordinateExists = propertyInfo?.subordinateFinancingExists === true;
   const fields = [
     { name: "Property Address", value: propertyInfo?.propertyStreet || application.propertyAddress, required: true },
     { name: "Property City", value: propertyInfo?.propertyCity || application.propertyCity, required: true },
@@ -321,6 +333,27 @@ function scorePropertyInfo(
     { name: "Property Type", value: application.propertyType, required: true },
     { name: "Occupancy Type", value: propertyInfo?.occupancyType, required: true },
     { name: "Number of Units", value: propertyInfo?.numberOfUnits, required: false },
+    { name: "Monthly HOA / co-op dues", value: propertyInfo?.monthlyAssociationDues, required: associationRequired },
+    { name: "Monthly flood insurance", value: propertyInfo?.monthlyFloodInsurance, required: true },
+    { name: "Monthly ground rent", value: propertyInfo?.monthlyGroundRent, required: true },
+    { name: "Monthly special assessments", value: propertyInfo?.monthlySpecialAssessments, required: true },
+    {
+      name: "Subordinate financing disclosure",
+      value: propertyInfo?.subordinateFinancingExists,
+      required: true,
+    },
+    {
+      name: "Closed-end subordinate balance",
+      value: propertyInfo?.closedEndSubordinateBalance,
+      required: subordinateExists,
+    },
+    { name: "HELOC drawn balance", value: propertyInfo?.helocDrawnBalance, required: subordinateExists },
+    { name: "HELOC credit limit", value: propertyInfo?.helocCreditLimit, required: subordinateExists },
+    {
+      name: "Monthly subordinate financing payment",
+      value: propertyInfo?.monthlySubordinateFinancingPayment,
+      required: subordinateExists,
+    },
   ];
 
   return scoreSection("Property Information", "3", fields);
@@ -659,7 +692,9 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
 
   const personalInfoScore = scorePersonalInfo(urlaData.personalInfo);
   const employmentScore = scoreEmployment(urlaData.employmentHistory.filter(e => (e.borrowerSequenceNumber ?? 1) === 1));
-  const otherIncomeScore = scoreOtherIncome(urlaData.otherIncomeSources);
+  const otherIncomeScore = scoreOtherIncome(
+    urlaData.otherIncomeSources.filter(income => (income.borrowerSequenceNumber ?? 1) === 1),
+  );
   const assetsScore = scoreAssets(urlaData.assets.filter(a => (a.borrowerSequenceNumber ?? 1) === 1));
   const liabilitiesScore = scoreLiabilities(urlaData.liabilities.filter(l => (l.borrowerSequenceNumber ?? 1) === 1));
   const reoScore = scoreRealEstateOwned(application, urlaData.realEstateOwned);
@@ -694,6 +729,11 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
       .map(e => e.borrowerSequenceNumber ?? 1)
       .filter(seq => seq > 1)
   );
+  const coOtherIncomeSeqs = new Set(
+    urlaData.otherIncomeSources
+      .map(income => income.borrowerSequenceNumber ?? 1)
+      .filter(seq => seq > 1)
+  );
   const coAssetSeqs = new Set(
     urlaData.assets.map(a => a.borrowerSequenceNumber ?? 1).filter(seq => seq > 1)
   );
@@ -716,6 +756,7 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
   const coSequences = new Set<number>([
     ...Array.from(coPersonalInfoSeqs),
     ...Array.from(coEmploymentSeqs),
+    ...Array.from(coOtherIncomeSeqs),
     ...Array.from(coAssetSeqs),
     ...Array.from(coLiabilitySeqs),
     ...Array.from(coDeclarationSeqs),
@@ -724,6 +765,9 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
 
   for (const seq of Array.from(coSequences).sort((a, b) => a - b)) {
     const coEmployment = urlaData.employmentHistory.filter(e => (e.borrowerSequenceNumber ?? 1) === seq);
+    const coOtherIncome = urlaData.otherIncomeSources.filter(
+      income => (income.borrowerSequenceNumber ?? 1) === seq,
+    );
     const coAssets = urlaData.assets.filter(a => (a.borrowerSequenceNumber ?? 1) === seq);
     const coLiabilities = urlaData.liabilities.filter(l => (l.borrowerSequenceNumber ?? 1) === seq);
     const coDemographic = coHmda.find(h => (h.borrowerSequenceNumber ?? 1) === seq);
@@ -737,6 +781,7 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
       name: coName,
       sections: [
         scoreEmployment(coEmployment),
+        scoreOtherIncome(coOtherIncome),
         scoreAssets(coAssets),
         scoreLiabilities(coLiabilities),
         scoreDemographics(coDemographic),
@@ -752,7 +797,7 @@ export function evaluateMISMOCompleteness(inputs: MISMOValidationInputs): MISMOV
     || (urlaData.personalInfo?.totalBorrowers ?? 1) > 1;
   if (declaresCoBorrower && coApplicants.length === 0) {
     coApplicantLimitation =
-      "A co-borrower is indicated for this application, but no per-co-applicant URLA records are stored. Co-applicant personal info, employment, assets, liabilities, declarations, and demographics must be captured (borrowerSequenceNumber > 1) to be scored independently.";
+      "A co-borrower is indicated for this application, but no per-co-applicant URLA records are stored. Co-applicant personal info, employment, other income, assets, liabilities, declarations, and demographics must be captured (borrowerSequenceNumber > 1) to be scored independently.";
   }
 
   const overallScore = Math.round(
