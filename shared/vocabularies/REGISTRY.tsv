@@ -36,7 +36,7 @@ CITIZENSHIP_TYPES	shared/schema/intelligence.ts	array	5	5ec1becd6652		0	internal
 CitizenshipResidencyType	shared/mismo.ts	union	5	33891f98ee6f		3	ULAD	CitizenshipResidencyType
 ClawbackWindowSource	shared/compensationClawback.ts	union	2	7fbcd2f86f87		0	internal	
 CLEARABLE_INTAKE_FIELDS	shared/intakeClearable.ts	array	10	96a744b83abc	ClearableIntakeField	7	internal	
-CLIENT_ROLES	shared/roles.ts	array	2	e328b4fb0a37		6	internal	
+CLIENT_ROLES	shared/roles.ts	array	2	e328b4fb0a37		7	internal	
 COC_REASON_TYPES	shared/compliance/changeOfCircumstance.ts	array	6	24c507660296	CocReasonType	3	internal	
 COC_STATUSES	shared/compliance/changeOfCircumstance.ts	array	3	26ee4a217c9a	CocStatus	1	internal	
 COMPENSATION_MODELS	shared/compliance/loCompensation.ts	array	2	76e2ec5200ed	CompensationModel	6	internal	

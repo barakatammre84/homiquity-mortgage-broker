@@ -1,3 +1,5 @@
+import { CLIENT_ROLES } from "@shared/roles";
+
 const HOMI_OUTCOME_SCHEMA_VERSION = 2;
 const MAX_VALID_TURN_RESPONSE_MS = 120_000;
 const MIN_MEASURED_TURNS = 30;
@@ -129,12 +131,14 @@ export function buildHomiTurnOutcomePayload(input: HomiTurnOutcomeInput): HomiTu
 
 export interface HomiTurnMetricRow {
   userId: string | null;
+  userRole: string | null;
   payload: unknown;
   responseMs: number | null;
 }
 
 export interface HomiFailedTurnMetricRow {
   userId: string | null;
+  userRole: string | null;
   responseMs: number | null;
   payload: unknown;
 }
@@ -163,8 +167,10 @@ export interface HomiOutcomeMetrics {
   turnAttempts: number;
   turns: number;
   failedTurns: number;
+  excludedNonBorrowerTurnAttempts: number;
   turnSuccessRate: number;
   uniqueBorrowers: number;
+  measuredUniqueBorrowers: number;
   serverTruthTurns: number;
   serverActionTurns: number;
   exactRepeatedQuestions: number;
@@ -197,6 +203,12 @@ export interface HomiOutcomeMetrics {
     canClaimReducedFriction: false;
     minimumMeasuredTurns: typeof MIN_MEASURED_TURNS;
     minimumUniqueBorrowers: typeof MIN_UNIQUE_BORROWERS;
+    comparisonStudy: {
+      status: "not_registered";
+      registrationId: null;
+      assignmentUnit: null;
+      comparisonCohort: null;
+    };
     blockers: string[];
   };
 }
@@ -243,6 +255,10 @@ function isCurrentOutcome(payload: Record<string, unknown>): boolean {
     && payload.completionBasis === "server_file_snapshot";
 }
 
+function isEligibleBorrowerRole(role: string | null): boolean {
+  return role !== null && CLIENT_ROLES.includes(role as typeof CLIENT_ROLES[number]);
+}
+
 function responseKey(applicationId: string | null, recipientId: string): string {
   return `${applicationId ?? ""}\u0000${recipientId}`;
 }
@@ -263,22 +279,48 @@ function indexStaffResponses(
   return index;
 }
 
-function firstRecordedStaffResponse(
-  task: HomiHandoffMetricRow,
+/**
+ * Match each secure staff message to at most one Homi handoff. A later message
+ * is evidence only while that request is still open: a message sent after the
+ * task was completed cannot retroactively prove how the request was handled.
+ *
+ * Tasks are processed oldest-first within one borrower file. `request_human_help`
+ * prevents simultaneous open Homi tasks today, but the one-to-one consumption
+ * below also keeps historical or malformed overlap from counting one message
+ * as several responses.
+ */
+function matchRecordedStaffResponses(
+  tasks: HomiHandoffMetricRow[],
   responseIndex: Map<string, number[]>,
-): Date | null {
-  const timestamps = responseIndex.get(responseKey(task.applicationId, task.borrowerUserId));
-  if (!timestamps || timestamps.length === 0) return null;
-
-  const target = task.createdAt.getTime();
-  let low = 0;
-  let high = timestamps.length;
-  while (low < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    if (timestamps[middle] < target) low = middle + 1;
-    else high = middle;
+): Map<string, Date> {
+  const matches = new Map<string, Date>();
+  const tasksByKey = new Map<string, HomiHandoffMetricRow[]>();
+  for (const task of tasks) {
+    const key = responseKey(task.applicationId, task.borrowerUserId);
+    const grouped = tasksByKey.get(key) ?? [];
+    grouped.push(task);
+    tasksByKey.set(key, grouped);
   }
-  return low < timestamps.length ? new Date(timestamps[low]) : null;
+
+  for (const [key, groupedTasks] of tasksByKey) {
+    const timestamps = responseIndex.get(key) ?? [];
+    let messageIndex = 0;
+    for (const task of [...groupedTasks].sort(
+      (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
+    )) {
+      const openedAt = task.createdAt.getTime();
+      const closedAt = task.completedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      while (messageIndex < timestamps.length && timestamps[messageIndex] < openedAt) {
+        messageIndex += 1;
+      }
+      const candidate = timestamps[messageIndex];
+      if (candidate === undefined || candidate > closedAt) continue;
+      matches.set(task.id, new Date(candidate));
+      messageIndex += 1;
+    }
+  }
+
+  return matches;
 }
 
 /**
@@ -295,14 +337,24 @@ export function buildHomiOutcomeMetrics(input: {
   now?: Date;
 }): HomiOutcomeMetrics {
   const now = input.now ?? new Date();
-  const failedTurns = input.failedTurns ?? [];
-  const payloads = input.turns.map((turn) => recordOf(turn.payload));
-  const current = payloads.filter(isCurrentOutcome);
-  const measuredCompletion = current.filter((payload) =>
+  const allFailedTurns = input.failedTurns ?? [];
+  const turns = input.turns.filter((turn) => isEligibleBorrowerRole(turn.userRole));
+  const failedTurns = allFailedTurns.filter((turn) => isEligibleBorrowerRole(turn.userRole));
+  const excludedNonBorrowerTurnAttempts =
+    (input.turns.length - turns.length) + (allFailedTurns.length - failedTurns.length);
+  const turnsWithPayload = turns.map((turn) => ({
+    turn,
+    payload: recordOf(turn.payload),
+  }));
+  const payloads = turnsWithPayload.map(({ payload }) => payload);
+  const current = turnsWithPayload.filter(({ payload }) => isCurrentOutcome(payload));
+  const measuredCompletion = current.filter(({ payload }) =>
     validCompletion(typeof payload.completionBefore === "number" ? payload.completionBefore : null)
     && validCompletion(typeof payload.completionAfter === "number" ? payload.completionAfter : null)
   );
-  const captureAttempts = current.filter((payload) => payload.captureAttempted === true);
+  const captureAttempts = current
+    .map(({ payload }) => payload)
+    .filter((payload) => payload.captureAttempted === true);
   const captureSuccesses = captureAttempts.filter((payload) =>
     typeof payload.capturedFieldCount === "number" && payload.capturedFieldCount > 0
   );
@@ -313,23 +365,24 @@ export function buildHomiOutcomeMetrics(input: {
   const completionImprovedTurns = measuredCaptureSuccesses.filter((payload) =>
     (payload.completionAfter as number) > (payload.completionBefore as number)
   ).length;
-  const completionRegressedTurns = measuredCompletion.filter((payload) =>
+  const completionRegressedTurns = measuredCompletion.filter(({ payload }) =>
     (payload.completionAfter as number) < (payload.completionBefore as number)
   ).length;
-  const responseTimes = input.turns
+  const responseTimes = turns
     .map((turn) => turn.responseMs)
     .filter((value): value is number =>
       value !== null && Number.isFinite(value) && value >= 0 && value <= MAX_VALID_TURN_RESPONSE_MS
     );
-  const invalidTurnLatencyRows = input.turns.filter((turn) =>
+  const invalidTurnLatencyRows = turns.filter((turn) =>
     turn.responseMs !== null
     && (!Number.isFinite(turn.responseMs) || turn.responseMs < 0 || turn.responseMs > MAX_VALID_TURN_RESPONSE_MS)
   ).length;
 
   const responseIndex = indexStaffResponses(input.staffMessages);
+  const matchedResponses = matchRecordedStaffResponses(input.handoffs, responseIndex);
   const handoffResponses = input.handoffs.map((task) => ({
     task,
-    responseAt: firstRecordedStaffResponse(task, responseIndex),
+    responseAt: matchedResponses.get(task.id) ?? null,
   }));
   const responseDurations = handoffResponses
     .filter((item): item is typeof item & { responseAt: Date } => item.responseAt !== null)
@@ -348,27 +401,32 @@ export function buildHomiOutcomeMetrics(input: {
   ).length;
 
   const uniqueBorrowers = new Set(
-    [...input.turns, ...failedTurns].flatMap((turn) => turn.userId ? [turn.userId] : []),
+    [...turns, ...failedTurns].flatMap((turn) => turn.userId ? [turn.userId] : []),
+  ).size;
+  const measuredUniqueBorrowers = new Set(
+    measuredCompletion.flatMap(({ turn }) => turn.userId ? [turn.userId] : []),
   ).size;
   const enoughMeasuredTurns = measuredCompletion.length >= MIN_MEASURED_TURNS;
-  const enoughBorrowers = uniqueBorrowers >= MIN_UNIQUE_BORROWERS;
+  const enoughBorrowers = measuredUniqueBorrowers >= MIN_UNIQUE_BORROWERS;
   const blockers: string[] = [];
   if (!enoughMeasuredTurns) {
     blockers.push(`Collect ${MIN_MEASURED_TURNS - measuredCompletion.length} more server-measured Homi turns.`);
   }
   if (!enoughBorrowers) {
-    blockers.push(`Collect outcomes from ${MIN_UNIQUE_BORROWERS - uniqueBorrowers} more distinct borrowers.`);
+    blockers.push(`Collect server-measured outcomes from ${MIN_UNIQUE_BORROWERS - measuredUniqueBorrowers} more distinct borrowers.`);
   }
-  blockers.push("Define a pre-registered comparison cohort before claiming that Homi reduced friction.");
+  blockers.push("Register the comparison study before enrollment; the 30-turn/10-borrower floor proves measurement coverage, not causation.");
   blockers.push("Phone calls and work completed outside secure Messages are not measured as staff responses.");
 
   return {
     daysBack: input.daysBack,
-    turnAttempts: input.turns.length + failedTurns.length,
-    turns: input.turns.length,
+    turnAttempts: turns.length + failedTurns.length,
+    turns: turns.length,
     failedTurns: failedTurns.length,
-    turnSuccessRate: rate(input.turns.length, input.turns.length + failedTurns.length),
+    excludedNonBorrowerTurnAttempts,
+    turnSuccessRate: rate(turns.length, turns.length + failedTurns.length),
     uniqueBorrowers,
+    measuredUniqueBorrowers,
     serverTruthTurns: payloads.filter((payload) => {
       const calls = stringArray(payload.serverTruthToolCalls).length > 0
         ? stringArray(payload.serverTruthToolCalls)
@@ -381,13 +439,13 @@ export function buildHomiOutcomeMetrics(input: {
         : uniqueKnownTools(stringArray(payload.toolCalls), SERVER_ACTION_TOOLS);
       return calls.length > 0;
     }).length,
-    exactRepeatedQuestions: payloads.filter((payload) => payload.repeatedQuestion === true).length,
+    exactRepeatedQuestions: current.filter(({ payload }) => payload.repeatedQuestion === true).length,
     exactRepeatedQuestionRate: rate(
-      payloads.filter((payload) => payload.repeatedQuestion === true).length,
-      input.turns.length,
+      current.filter(({ payload }) => payload.repeatedQuestion === true).length,
+      current.length,
     ),
     completionMeasuredTurns: measuredCompletion.length,
-    completionMeasurementCoverageRate: rate(measuredCompletion.length, input.turns.length),
+    completionMeasurementCoverageRate: rate(measuredCompletion.length, turns.length),
     captureAttemptTurns: captureAttempts.length,
     captureSucceededTurns: captureSuccesses.length,
     capturedFields: captureSuccesses.reduce(
@@ -413,12 +471,18 @@ export function buildHomiOutcomeMetrics(input: {
     invalidTurnLatencyRows,
     degradedTurns: payloads.filter((payload) => payload.degraded === true).length,
     lintReplacedTurns: payloads.filter((payload) => payload.lintReplaced === true).length,
-    legacyTurns: input.turns.length - current.length,
+    legacyTurns: turns.length - current.length,
     measurement: {
       status: enoughMeasuredTurns && enoughBorrowers ? "observational_only" : "collecting",
       canClaimReducedFriction: false,
       minimumMeasuredTurns: MIN_MEASURED_TURNS,
       minimumUniqueBorrowers: MIN_UNIQUE_BORROWERS,
+      comparisonStudy: {
+        status: "not_registered",
+        registrationId: null,
+        assignmentUnit: null,
+        comparisonCohort: null,
+      },
       blockers,
     },
   };
