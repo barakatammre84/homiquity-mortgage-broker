@@ -12,6 +12,8 @@ import { monthlyPrincipalAndInterest } from "@shared/lib/amortization";
 
 export interface LoanEstimateData {
   applicationId: string;
+  /** The selected product family whose terms and insurance were priced. */
+  loanProgram: "CONVENTIONAL" | "FHA" | "VA";
   dateIssued: Date;
   expirationDate: Date;
   
@@ -254,6 +256,7 @@ async function resolveActualFeesFor(applicationId: string): Promise<ActualFeeMap
  */
 interface PricingDerivation {
   application: LoanApplication;
+  loanProgram: LoanEstimateData["loanProgram"];
   purchasePrice: number;
   downPayment: number;
   loanAmount: number;
@@ -329,10 +332,24 @@ async function derivePricing(
   if (loanType === "usda") {
     throw new Error("USDA pricing is not automated yet; loan officer review is required");
   }
+  if (loanType !== "conventional" && loanType !== "fha" && loanType !== "va") {
+    throw new Error(`Pricing is not automated for loan program "${loanType}"; loan officer review is required`);
+  }
+  const amortizationType = (application.amortizationType ?? "fixed").trim().toLowerCase();
+  if (amortizationType === "adjustable" || amortizationType === "arm") {
+    throw new Error(
+      "Adjustable-rate pricing is not automated because the index, margin, and rate caps are not captured; loan officer review is required",
+    );
+  }
   // Program selection comes from the application. Veteran status establishes
   // possible eligibility for VA; it does not silently change a conventional,
   // FHA or USDA request into a VA loan.
   const isVaLoan = loanType === "va";
+  if (isVaLoan && !application.isVeteran) {
+    throw new Error("VA eligibility must be confirmed before VA terms can be priced");
+  }
+  const loanProgram: LoanEstimateData["loanProgram"] =
+    isVaLoan ? "VA" : loanType === "fha" ? "FHA" : "CONVENTIONAL";
 
   let baseRate = 6.875;
   if (isVaLoan) baseRate = 6.250;
@@ -398,6 +415,7 @@ async function derivePricing(
 
   return {
     application,
+    loanProgram,
     purchasePrice,
     downPayment,
     loanAmount,
@@ -594,6 +612,7 @@ export async function computeDecisionPaymentProjection(
 export async function generateLoanEstimate(applicationId: string): Promise<LoanEstimateData> {
   const {
     application,
+    loanProgram,
     purchasePrice,
     downPayment,
     loanAmount,
@@ -711,6 +730,7 @@ export async function generateLoanEstimate(applicationId: string): Promise<LoanE
   
   return {
     applicationId,
+    loanProgram,
     dateIssued,
     expirationDate,
     

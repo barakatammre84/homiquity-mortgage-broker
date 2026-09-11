@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
+const policyScalarCalls = vi.hoisted(() => [] as string[]);
+
 // ---------------------------------------------------------------------------
 // The DTI helper and the deterministic engine both resolve policy scalars from
 // LookupResolverService, which transitively needs a live Postgres connection.
@@ -9,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../server/services/lookupResolver", () => ({
   lookupResolver: {
     getPolicyScalar: async (code: string) => {
+      policyScalarCalls.push(code);
       const scalars: Record<string, number> = {
         CONVENTIONAL_DTI_CAP: 43,
         CONVENTIONAL_STRETCH_DTI: 50,
@@ -153,5 +156,44 @@ describe("ConsolidatedUnderwritingEngine value guards", () => {
     expect(err).toBeInstanceOf(UnderwritingError);
     expect((err as UnderwritingError).kind).toBe("POLICY_OUT_OF_BAND");
     expect((err as UnderwritingError).publicMessage).toMatch(/confirm VA eligibility/i);
+  });
+
+  it("evaluates VA without reading unrelated conventional policy rows", async () => {
+    const callStart = policyScalarCalls.length;
+    const result = await engine.evaluate({
+      ...baseInput,
+      requestedLoanProgram: "VA",
+      isVeteran: true,
+      subjectPropertyState: "IL",
+      householdFamilySize: 2,
+      homeSquareFootage: 1600,
+    });
+    const calls = policyScalarCalls.slice(callStart);
+
+    expect(calls).toEqual([
+      "HAIRCUT_STOCK_INVESTMENT",
+      "HAIRCUT_RETIREMENT",
+    ]);
+    expect(result.resolvedPolicy.conventionalDtiCapPct).toBeUndefined();
+    expect(result.resolvedPolicy.conventionalStretchDtiPct).toBeUndefined();
+    expect(result.resolvedPolicy.conventionalLtvCapPct).toBeUndefined();
+  });
+
+  it.each([
+    ["refinance", { loanPurpose: "refinance" }],
+    ["adjustable", { amortizationType: "adjustable" }],
+  ] as const)("routes a VA %s outside the automated purchase/fixed scope", async (_label, overrides) => {
+    const result = await engine.evaluate({
+      ...baseInput,
+      ...overrides,
+      requestedLoanProgram: "VA",
+      isVeteran: true,
+      subjectPropertyState: "IL",
+      householdFamilySize: 2,
+      homeSquareFootage: 1600,
+    });
+
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.reviewReasons.join(" ")).toMatch(/review|not automated/i);
   });
 });

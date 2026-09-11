@@ -69,13 +69,18 @@ ineligible deposits.
 The underwriting release now keeps the mortgage program explicit from URLA through pricing,
 qualification, decision fingerprints, loan-option comparisons and preapproval letters. The fast
 application still produces a clearly identified preliminary conventional candidate without asking
-a novice borrower to select a program. A verified decision requires the application-selected
-program. Veteran status can establish possible VA eligibility but cannot silently convert another
+a novice borrower to select a program. That self-reported candidate remains a preliminary plan: it
+cannot set pre-approval status, persist issued options or send pre-approval messages. A verified
+decision requires the application-selected program. Veteran status can establish possible VA eligibility but cannot silently convert another
 program to VA. Conventional and VA are the only automated policy families; FHA, USDA, jumbo, ARM,
 HELOC and unknown products route to a loan officer before a conventional result can be reused.
 Every mutable eligibility threshold used by a conventional or VA decision is now retained in the
-policy snapshot, and policy-store failure cannot fall back to a hidden 43% DTI limit. VA maximum
-sizing is not extrapolated with the conventional DTI calculator.
+policy snapshot, while the evaluated program and its selection basis are first-class decision-history
+fields even when no policy JSON exists. Conventional maximum sizing uses the cap already captured by
+the decision rather than reading mutable policy twice. VA maximum sizing is not extrapolated with
+the conventional DTI calculator, and a VA evaluation no longer loads unrelated conventional policy.
+The current VA automation is limited to a fixed-purchase residual screen; VA refinance and ARM
+requests route to review before fixed-purchase pricing.
 
 Every binding or customer-visible verified status is now recalculated from current proof. Pricing,
 loan options, Homi, approval statuses and underwriting advancement require a current approved

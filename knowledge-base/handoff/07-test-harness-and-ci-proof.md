@@ -3,8 +3,7 @@
 > **Freshness:** last verified 2026-08-23 · review every 30 days
 > **Verified against** `origin/main` @ d9e8f79d · **Authoritative:** `../runbooks/CICD.md` §Checks, `../governance/TEAM_PRACTICES.md` §5 and `vitest.config.ts`'s own header (they win on conflict; the code wins over both).
 
-> **Dated status box (re-verify on every refresh):** at 12d7cbec (re-checked 2026-08-22, not since) `main` requires **no** status
-> checks (`gh api …/branches/main/protection` → `contexts: []`, rulesets `0`); `migrate-prod` and
+> **Dated status box (re-verified 2026-09-11):** `main` is protected by classic branch protection (rulesets `0`). The session token cannot read the protection detail, but merge behaviour proves that the named `gate (typecheck · tests · schema guard)` check is required and strict; `migrate-prod` and
 > `verify-deploy` were **re-armed on 2026-08-22** by `76c96751` (#669) after a two-day pause, but
 > `verify-deploy` carries `continue-on-error: true` on purpose, so it reddens without failing the
 > workflow (chapter 10); the test-collection guard **merged 2026-08-23** (`fd4a22c5`, #670) and
@@ -28,9 +27,9 @@ the source as text, so a failure there is an incident, not a flake.
 back to back and then refuses to pass unless every test file on disk was actually collected (the
 bare pair survives as `pnpm test:raw`, `:20`). The **node** lane's `include` was a hand-maintained
 allowlist of ~230 entries in `vitest.config.ts` **until 2026-08-24**, when `387a3518`/#725 deleted
-it for `include: ["tests/**/*.test.{ts,tsx}"]` (`vitest.config.ts:71`) plus an 18-entry `exclude`
+it for `include: ["tests/**/*.test.{ts,tsx}"]` (`vitest.config.ts:71`) plus a 30-entry `exclude`
 that drops the integration files (`:77-95`). Read the reason, not just the diff: the list *carried
-no information* — 251 files in `tests/` minus the 18 integration files is exactly the number that
+no information* — 307 files in `tests/` minus the 30 integration files is exactly the number that
 was typed out — and it cost merges, because every concurrent PR inserted its entry at the same
 place (`:44-62`). What replaced its one virtue, failing closed on a typo'd path, is the collection
 guard: the orphan floor fails when a test file matches no lane, and a second check fails when one
@@ -43,7 +42,7 @@ crawls via `tinyglobby` → `fdir`, which defaults `suppressErrors: true`, so a 
 `readdir` FAILED is indistinguishable from an empty one; under load `pnpm test` collected 111 of 118
 client files and exited 0. A glob protects against a file being *forgotten*, not against the crawl
 being *truncated* (`fd4a22c5` corrected the `CICD.md` sentence and added the floor). A third config,
-`vitest.integration.config.ts`, lists 18 files that hit a *running* HTTP server over the network;
+`vitest.integration.config.ts`, lists 30 files that hit a *running* HTTP server over the network;
 for the life of the repo nothing but `scripts/preflight.sh` ran it, and since `d9e8f79d` (#704,
 2026-08-23) the gate runs it too — against the bundle it has just booted, in development mode,
 and only when code changed (`.github/workflows/ci.yml:583-646`). `knowledge-base/runbooks/CICD.md:357`
@@ -57,8 +56,7 @@ full guard set since #703 brought it to parity; the unit lanes only under `PREPU
 uninstalled checkout is *warned*, not blocked — it skips with `exit 0`), and above it
 `scripts/preflight.sh` (21 steps including the build, the boot and the integration lane) and
 `scripts/checkup.sh` (18 read-only checks plus a live prod probe). The caveat that outranks all of
-it: branch protection on `main` currently requires nothing, so a green gate is advisory until it
-is re-armed.
+it: classic branch protection requires the named PR gate and a branch current with `main`; the post-merge deploy verifier remains advisory because it runs after the merge and carries `continue-on-error: true`.
 
 ## Mechanism
 
@@ -84,7 +82,7 @@ flowchart TD
   R -. covers .-> F
   R -. "covers since #704, when code changed" .-> G
   S["scripts/checkup.sh - 18 checks + live prod probe"] -. covers .-> E
-  T["branch protection: contexts empty, strict false"] -. "nothing is required" .-> R
+  T["classic branch protection: required gate + strict"] -. "blocks an unproved merge" .-> R
 ```
 
 ## The facts, with receipts
@@ -97,12 +95,12 @@ flowchart TD
   `package.json` (92) and more than any source file, 172 of its last 195 adding nothing but a path
   (`:44-51`); its globbed sibling has 3 commits in its whole life doing the same job (`:49-51`).
   The old "append at the END" rule was treating a symptom and is gone with the list it protected.
-- **The client lane.** `vitest.client.config.ts:37` `include: ["client/src/**/*.test.{ts,tsx}"]`
+- **The client lane.** `vitest.client.config.ts:41` `include: ["client/src/**/*.test.{ts,tsx}"]`
   ("a GLOB on purpose", `:11-13`); `:18` `environment: "happy-dom"`; the `@assets` alias (`:47`)
   exists because without it a component test "reports '0 tests' rather than a failure" (`:44-46`).
-  `git ls-files 'client/src/**/*.test.ts' 'client/src/**/*.test.tsx' | wc -l` → `124`.
-- **The integration lane.** `vitest.integration.config.ts:15-34` — 18 files
-  (`grep -cE '^\s*"tests/'` → `18`); `tests/setup.ts:1` `BASE_URL = TEST_BASE_URL || "http://localhost:5000"`;
+  `git ls-files 'client/src/**/*.test.ts' 'client/src/**/*.test.tsx' | wc -l` → `148`.
+- **The integration lane.** `vitest.integration.config.ts` — 30 files
+  (`grep -cE '^\s*"tests/'` → `30`); `tests/setup.ts:1` `BASE_URL = TEST_BASE_URL || "http://localhost:5000"`;
   tighter timeouts than the unit lane (15 s / 30 s, `:13-14`). Every request sends
   `X-Forwarded-Proto: https` + `Origin` (`tests/roleSeparation.test.ts:31`), logs in through
   `POST /api/test-login` with a **per-file session cache of promises** because hammering the login
@@ -115,7 +113,7 @@ flowchart TD
   `resolveMatrixValue` throws rather than guesses, `RATE_LIMIT_RELAXED` for the auth limiter only.
   The runbook sentence is LEDGER HO-0823-05.
 - **Counts that must agree — and now a guard makes them.** `git ls-files 'tests/*.test.ts' | wc -l`
-  → `251`; the node lane takes all of them and excludes 18, which is exactly the integration lane's
+  → `307`; the node lane takes all of them and excludes 30, which is exactly the integration lane's
   list, so the two `"tests/…"` blocks must be **identical**:
   `{ grep -ohE '"tests/[^"]+\.test\.ts"' vitest.config.ts | tr -d '"' | sort -u; grep -ohE '"tests/[^"]+\.test\.ts"' vitest.integration.config.ts | tr -d '"' | sort -u; } | sort | uniq -u | wc -l`
   → `0` (FACTS F-39; a file on one side only is either an orphan or double-claimed, and both are
@@ -125,7 +123,7 @@ flowchart TD
   command diffed the on-disk list against the paths *quoted in the configs*, and with the allowlist
   gone it reported 231 files as stranded when the true answer is none — the corpus's own F-39 command
   was rewritten on 2026-08-24 for exactly this reason.
-- **Source-text tests.** `grep -lE 'readFileSync\(' tests/*.test.ts | wc -l` → `66` (27% of the
+- **Source-text tests.** `grep -lE 'readFileSync\(' tests/*.test.ts | wc -l` → `70` (27% of the
   node suite asserts on source text, not behaviour). `tests/complianceInvariants.test.ts` (716
   lines, 16 describes, 55 its): `:16` "If one of these fails, treat it as a compliance incident,
   not a flaky test"; the Reg B check is a grep of 8 decision-path modules for 6 AI import patterns
@@ -207,7 +205,7 @@ flowchart TD
   cancellable; `:237` the scope step fails closed. Note what `:110`/`:115` *do not* pin: both
   accept LIVE **or** PAUSED, so the two-day pause and the re-arm that ended it were each green.
   The property under test is only that no `pull_request` reaches a deploy job.
-- **Other workflows.** `cron-jobs.yml` (7 sweeps, pinned by `tests/cronSchedules.test.ts:30-40` —
+- **Other workflows.** `cron-jobs.yml` (8 sweeps, pinned by `tests/cronSchedules.test.ts:30-40` —
   whose title at `:63` still says "six"), `doc-freshness.yml` (weekly, `0 9 * * 1`, deliberately not
   in the gate — "it would go red on the day ASSUMPTIONS.md hits day 31 and block EVERY merge",
   `:10-13`), `preview-seed.yml` (dispatch only).

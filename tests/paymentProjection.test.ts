@@ -256,6 +256,7 @@ describe("computePaymentProjection — no drift from the Loan Estimate", () => {
     );
     expect(projection.interestRate).toBe(le.loanTerms.interestRate);
     expect(projection.loanAmount).toBe(le.loanTerms.loanAmount);
+    expect(le.loanProgram).toBe("CONVENTIONAL");
   });
 
   it("holds parity on an MI-bearing file too (LTV > 80)", async () => {
@@ -275,5 +276,36 @@ describe("computePaymentProjection — no drift from the Loan Estimate", () => {
     expect(projection.monthlyMortgageInsurance).toBe(
       le.projectedPayments.years1Through5.mortgageInsurance,
     );
+  });
+
+  it("keeps a veteran's selected conventional Loan Estimate conventional", async () => {
+    h.application = application({
+      isVeteran: true,
+      preferredLoanType: "conventional",
+      loCompensationModel: "lender_paid",
+      loCompensationBps: 125,
+    });
+
+    const le = await generateLoanEstimate("app-1");
+    expect(le.loanProgram).toBe("CONVENTIONAL");
+  });
+
+  it("refuses VA terms without a VA eligibility signal", async () => {
+    h.application = application({
+      preferredLoanType: "va",
+      isVeteran: false,
+      loCompensationModel: "lender_paid",
+      loCompensationBps: 125,
+    });
+    await expect(generateLoanEstimate("app-1")).rejects.toThrow(/VA eligibility.*confirmed/i);
+  });
+
+  it("refuses to disclose a fixed-rate estimate for an adjustable-rate selection", async () => {
+    h.application = application({
+      amortizationType: "adjustable",
+      loCompensationModel: "lender_paid",
+      loCompensationBps: 125,
+    });
+    await expect(generateLoanEstimate("app-1")).rejects.toThrow(/adjustable-rate pricing is not automated/i);
   });
 });

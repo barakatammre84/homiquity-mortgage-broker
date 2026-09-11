@@ -59,8 +59,9 @@ export interface RiskBriefFacts {
     /** Resolved policy caps actually used (reproducibility snapshot). */
     policy: {
       loanType: string;
-      dtiCapPct: number;
-      ltvCapPct: number;
+      /** Conventional caps are null on a VA-only policy snapshot. */
+      dtiCapPct: number | null;
+      ltvCapPct: number | null;
       fingerprint: string;
     } | null;
   };

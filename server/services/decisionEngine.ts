@@ -517,6 +517,39 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     };
   }
 
+  // The internal payment model below is a 30-year fixed purchase projection.
+  // Do not calculate a plausible-looking payment and only then discover that
+  // the selected transaction needs different program rules. Preserve the exact
+  // product in the snapshot and route it to review before pricing.
+  const loanPurpose = (app.loanPurpose ?? "purchase").trim().toLowerCase();
+  if (loanPurpose && loanPurpose !== "purchase") {
+    return {
+      status: "DECISION_READY",
+      decision: "MANUAL_REVIEW",
+      reasons: [
+        `${requestedLoanProgram} ${loanPurpose} underwriting is outside the automated purchase screen and requires program-specific loan officer review.`,
+      ],
+      missingItems: [],
+      metrics: null,
+      resolvedPolicy: null,
+      ...base,
+    };
+  }
+  const amortizationType = (app.amortizationType ?? "fixed").trim().toLowerCase();
+  if (amortizationType === "adjustable" || amortizationType === "arm") {
+    return {
+      status: "DECISION_READY",
+      decision: "MANUAL_REVIEW",
+      reasons: [
+        `${requestedLoanProgram} adjustable-rate qualification is not automated because the index, margin, and rate caps needed to calculate the qualifying payment are not captured.`,
+      ],
+      missingItems: [],
+      metrics: null,
+      resolvedPolicy: null,
+      ...base,
+    };
+  }
+
   // Price the loan to get a proposed PITI — the loan-estimate service's
   // INTERNAL payment projection: the same rate/P&I/MI/escrow derivation the
   // disclosable Loan Estimate prices, minus the §1026.36(d)(2) compensation
@@ -725,6 +758,8 @@ export async function recalculateDecision(
       status: d.status,
       decision: d.decision,
       qualifier: d.qualifier,
+      loanProgram: d.loanProgram,
+      loanProgramSelection: d.loanProgramSelection,
       dti: d.metrics ? String(d.metrics.dti) : null,
       ltv: d.metrics ? String(d.metrics.ltv) : null,
       monthlyIncome: d.metrics ? String(d.metrics.monthlyIncome) : null,

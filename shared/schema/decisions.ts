@@ -25,6 +25,12 @@ export const decisionSnapshots = pgTable(
     status: varchar("status", { length: 30 }).notNull(), // DECISION_READY | NEEDS_MORE_INFO
     decision: varchar("decision", { length: 30 }), // APPROVED | REJECTED | MANUAL_REVIEW | null
     qualifier: varchar("qualifier", { length: 20 }).notNull(), // PRELIMINARY | VERIFIED
+    // The exact product family evaluated and whether it came from a persisted
+    // borrower/LO selection or the explicitly labeled fast-intake candidate.
+    // These stay first-class because unsupported products have no
+    // resolvedPolicy object from which the program could be reconstructed.
+    loanProgram: varchar("loan_program", { length: 30 }),
+    loanProgramSelection: varchar("loan_program_selection", { length: 50 }),
 
     // Snapshotted metrics (null when NEEDS_MORE_INFO)
     dti: decimal("dti", { precision: 6, scale: 2 }),

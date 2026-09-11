@@ -519,6 +519,13 @@
       "when": 1789070400000,
       "tag": "0073_final_aus_findings_artifact",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789074000000,
+      "tag": "0074_decision_product_lineage",
+      "breakpoints": true
     }
   ]
 }

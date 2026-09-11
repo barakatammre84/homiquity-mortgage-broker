@@ -53,7 +53,7 @@ flowchart TD
     H1["GET /api/health - routes.ts:76 - SELECT 1 + commit"] --> H2["assertEncryptionConfig, initEncryption - routes.ts:95, :99 - fail closed"]
     H2 --> H3["setupAuth - routes.ts:101 - session + passport + auth routes"]
     H3 --> H4["seedDatabase - routes.ts:102 - idempotent"]
-    H4 --> H5["40 registrars - routes.ts:109-148"]
+    H4 --> H5["42 registrars - routes.ts:109-152"]
     H5 --> H6["app.all /api/*splat -> 404 JSON - routes.ts:151"]
   end
   RR --> ERR["error handler - app.ts:539 - 5xx detail hidden in prod"]
@@ -66,11 +66,11 @@ flowchart TD
 
 - **39 `app.use(` mounts in the app file.** `grep -c "app.use(" server/app.ts` → `39`.
 - **Trust proxy is set first, from a shared function, and it is *not* what identifies the
-  client IP.** `server/app.ts:36` `app.set("trust proxy", trustProxyHops())`; `server/trustProxy.ts:10-16`
+  client IP.** `server/app.ts:37` `app.set("trust proxy", trustProxyHops())`; `server/trustProxy.ts:10-16`
   explains that Railway's edge sends `X-Real-IP`, and every consent/audit IP and the rate-limit key
   go through `server/clientIp.ts` instead.
 - **Express 5's query parser is explicitly reverted to the extended (qs) behaviour.**
-  `server/app.ts:46` `app.set("query parser", "extended")` — the regression guard at `:38-46`.
+  `server/app.ts:47` `app.set("query parser", "extended")` — the regression guard at `:38-46`.
 - **Compression is first and excludes SSE.** `server/app.ts:54-58` — buffering would hold
   `text/event-stream` frames past their flush (the assistant streams over SSE).
 - **CSP is report-only in production until `CSP_ENFORCE=true`, and off outside production;
@@ -85,7 +85,7 @@ flowchart TD
   (`/api/` passthrough), `:129-137` (`/robots.txt` answers `Disallow: /` while armed), cookie =
   SHA-256 of the code, 90 days (`:165`).
 - **Nine named limiters plus two inline ones.** `grep -cE '^const [a-zA-Z]+Limiter = rateLimit\(' server/app.ts`
-  → `9`; inline mounts at `server/app.ts:360` (`/api/webhooks/sms`) and `:368` (`/api/client-errors`);
+  → `9`; inline mounts at `server/app.ts:361` (`/api/webhooks/sms`) and `:368` (`/api/client-errors`);
   `generalLimiter` is last and skips non-`/api` paths (`:377`, `:242`). Two limiters relax under
   `RATE_LIMIT_RELAXED=true`, never in production (`server/services/rateLimitPolicy.ts:8-13`).
 - **Body parsing comes *after* every limiter** (a flood is dropped before it is parsed):
@@ -102,8 +102,8 @@ flowchart TD
   Staff-invite codes are redacted from the logged path (`:471`).
 - **`createApp` wires everything without a socket; `runApp` listens.** `server/app.ts:536`,
   `:573`.
-- **Forty registrars, in mount order, exactly one awaited.** `server/routes.ts:109-148`;
-  `grep -cE "^\s*(await )?register[A-Za-z]+Routes\(app" server/routes.ts` → `40`; the `await` is
+- **Forty-two registrars, in mount order, exactly one awaited.** `server/routes.ts:109-152`;
+  `grep -cE "^\s*(await )?register[A-Za-z]+Routes\(app" server/routes.ts` → `42`; the `await` is
   `registerTaskEngineRoutes` at `:115`.
 - **Boot fails closed on encryption before any route is mounted.** `server/routes.ts:95`
   `assertEncryptionConfig()`, `:99` `await initEncryption()` — "a misconfigured KMS setup stops boot
@@ -118,9 +118,9 @@ flowchart TD
   ORIGINAL registration order, so Express route matching is unchanged", and
   `server/routes/borrower/index.ts:43-45` records that `registerLeaseRoutes` was *appended, not
   inserted*.
-- **Size.** `find server -name '*.ts' | wc -l` → `291`; `find server -name '*.ts' -exec cat {} + | wc -l`
-  → `81487`; routes 82 files / 25,826 lines; services 123 / 36,027; storage 26 / 6,311.
-  `grep -rhoE "(app|router)\.(get|post|put|patch|delete|all)\(" server | wc -l` → `579`
+- **Size.** `find server -name '*.ts' | wc -l` → `326`; `find server -name '*.ts' -exec cat {} + | wc -l`
+  → `100125`; routes 84 files / 27,769 lines; services 156 / 50,804; storage 26 / 6,642.
+  `grep -rhoE "(app|router)\.(get|post|put|patch|delete|all)\(" server | wc -l` → `603`
   registration call sites (an over-count of distinct URLs — see *What we do not know*).
 - **Dev loads `.env` explicitly; prod does not.** `server/index-dev.ts:1` `import "./load-env"`
   (must stay first; falls back to the main worktree's `.env` for secrets but never for `PORT`);

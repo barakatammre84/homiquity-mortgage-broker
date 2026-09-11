@@ -91,7 +91,7 @@ flowchart TD
   `requiredRoles?: readonly UserRole[]`). `client/src/components/PageShell.tsx:124` owns the only
   legitimate `min-h-screen` (its `fullHeight` prop) and four semantic widths (`:36-41`).
 - **`<Gated>` is the pre-license redirect.** `client/src/App.tsx:238-239`; used on 24 route
-  sites; `client/src/lib/prelaunch.ts:17-19` `PRELAUNCH_GATED = VITE_PRELAUNCH_GATED === "true" || (PROD && VITE_PRELAUNCH_GATED !== "false")`
+  sites; `client/src/lib/prelaunch.ts:21-23` `PRELAUNCH_GATED = VITE_PRELAUNCH_GATED === "true" || (PROD && VITE_PRELAUNCH_GATED !== "false")`
   — gated by default in a production build.
 - **Ten gates, one source.** `client/src/lib/routeGates.ts:33-109`: `borrower`, `staff`,
   `internalStaff`, `underwriterOps`, `disclosure`, `marketData`, `loTeam`, `cpaPortal`,

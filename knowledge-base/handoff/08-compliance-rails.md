@@ -61,7 +61,7 @@ flowchart TD
   end
   subgraph PII["PII and audit"]
     P1["AES-256-GCM + keyId registry + KMS envelope - encryptionService.ts"] --> P2["ssnVault / piiVault - last4 only ever leaves the server"]
-    P3["logAudit - 138 sites - swallows its own errors"] --> P4["audit_logs"]
+    P3["logAudit - 155 sites - swallows its own errors"] --> P4["audit_logs"]
     P5["logCreditAction - 16 sites"] --> P6["hash chain, v2 folds sequenceNumber - verifyHashChain"]
   end
   subgraph AI["the AI boundary"]
@@ -107,13 +107,13 @@ flowchart TD
   action (`:298`), Reg N/UDAAP coach lint (`:337`), advisory risk brief (`:360`), SAFE Act/Reg H
   footprint (`:389`), protocol safety (`:416`), AI governance AG-1 (`:436`) and AG-2 (`:474`), C2
   binding (`:518`), the compliance-critical field registry (`:639`).
-  `grep -lE 'readFileSync\(' tests/*.test.ts | wc -l` → `63` — source-text tests are a repo-wide style.
+  `grep -lE 'readFileSync\(' tests/*.test.ts | wc -l` → `70` — source-text tests are a repo-wide style.
 - **Encryption.** `server/services/encryptionService.ts:3` `ALGORITHM = "aes-256-gcm"` (32-byte
   key, 12-byte IV, 16-byte tag); ciphertext is `keyId`-tagged into a registry so versions coexist;
   precedence `ENCRYPTION_ACTIVE_KEY_ID` > newest KMS DEK > highest app version (`:32-34`); KMS
   envelope — DEKs unwrapped once at boot, KEK never leaves KMS, boot fails closed if KMS is
   configured but unusable (`:91-93`, `:148`); `assertEncryptionConfig()` (`:197-215`) refuses
-  production without `CREDIT_ENCRYPTION_KEY` and `PII_HASH_SALT`, called at `server/routes.ts:95`.
+  production without `CREDIT_ENCRYPTION_KEY` and `PII_HASH_SALT`, called at `server/routes.ts:97`.
 - **The audit hash chain is versioned, and v1 is kept on purpose.** `encryptionService.ts:298-300`
   `AUDIT_HASH_V1`, `AUDIT_HASH_V2_SEQUENCED` (folds `sequenceNumber` in, so renumbering after a
   deletion no longer verifies); `:294-296` — "Re-hashing history to retire it would rewrite the
@@ -128,7 +128,7 @@ flowchart TD
   `stripEncryptedFields` `:69`; Plaid tokens as `encv1:keyId:iv:ciphertext` (`:49`). Eight
   `_encrypted` column sites in the schema (chapter 03). The only audited full-SSN reveal:
   `server/routes/borrower/urla.ts:89` `logAudit(req, "urla.ssn_reveal", …)`, allow-list
-  `["admin","underwriter","processor"]` (`:79`). `grep -rn "logAudit(" server | wc -l` → `138`;
+  `["admin","underwriter","processor"]` (`:79`). `grep -rn "logAudit(" server | wc -l` → `155`;
   `server/auditLog.ts:23-25` swallows its own errors.
 - **FCRA consent is deny-by-default and exact-match.** `server/services/creditConsents.ts:37`
   `consentCoversPullType` — "Unknown types authorize nothing"; before the map existed "a `soft_pull`

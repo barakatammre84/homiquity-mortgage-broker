@@ -127,11 +127,12 @@ The current release makes the evaluated program an explicit required engine inpu
 selected value and selection basis in the decision fingerprint. A new fast application still gets
 a preliminary conventional candidate because the short funnel deliberately does not ask a novice
 borrower to choose a program. That candidate is labeled and cannot become a verified decision,
-AUS submission or outward preapproval letter until URLA contains the actual selection. Veteran
+AUS submission, persisted loan option, pre-approval status/message or outward preapproval letter
+until current evidence is verified and URLA contains the actual selection. Veteran
 status is an eligibility signal only. Each loan-option offer is qualified and cached by both program
 and payment, and the letter product comes from the approved policy result.
 
-Only conventional purchase/fixed and selected VA are automated today. The engine rejects FHA,
+Only conventional purchase/fixed and a selected VA fixed-purchase residual screen are automated today. The engine rejects FHA,
 USDA, jumbo, ARM, HELOC and unknown families from the automated path before resolving an unrelated
 matrix. This follows the current policy-authority boundary: Fannie Mae publishes a separate
 conventional eligibility structure, HUD identifies Handbook 4000.1 as its consolidated FHA source,
@@ -143,9 +144,12 @@ The same pass closed four adjacent integrity gaps. A rejected but otherwise pric
 conventional file retains its PMI instead of showing a lower payment with MI removed. The policy
 snapshot now captures the FICO floor, conforming limit, occupancy LTV cell, VA extra-member value
 and code-level VA residual constants actually used. The maximum-purchase calculator no longer
-falls back to a hidden 43% DTI cap when policy lookup fails, and it does not extrapolate a VA maximum
+reads mutable policy a second time or falls back to a hidden 43% DTI cap, and it does not extrapolate a VA maximum
 with the conventional DTI formula. A below-floor score is no longer described as a borrower
-strength.
+strength. The evaluated program and its application-selected or preliminary-candidate basis are now
+stored directly on each immutable decision snapshot, including unsupported-product reviews with no
+resolved-policy object. VA runs do not load conventional DTI/LTV rules, and VA refinance or ARM
+requests route to review before fixed-purchase pricing.
 
 ### The schema anticipates the right document model
 
@@ -750,6 +754,15 @@ missed escalation or time to a useful human response.
     hidden DTI-policy fallback. A rejected but priceable conventional file now retains its PMI, and
     VA approvals are no longer extrapolated through conventional maximum-purchase math. Internal
     tests prove these paths; live provider findings and lender acceptance remain external gates.
+60. Repeated the underwriting audit against the borrower-visible state and adjacent product seams.
+    A self-reported preliminary candidate can no longer set `pre_approved`, persist issued options or
+    send pre-approval messages; it produces a clearly labeled preliminary plan and evidence checklist.
+    Changed facts remove stale approval amounts/options and return the file to review without an
+    automated denial. Decision history now stores program and selection basis directly. VA policy is
+    isolated from conventional scalars, VA refinance/ARM routes before fixed-purchase pricing, a
+    non-veteran VA-only filter remains empty instead of becoming all products, and conventional-only
+    veteran scenarios no longer ask for VA residual fields. Formal-letter payment comes from the
+    verified selected-program projection, and Loan Estimates name the priced product.
 
 ## Sources
 

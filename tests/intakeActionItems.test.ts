@@ -12,8 +12,9 @@ import { BASE_URL } from "./setup";
 // honestly rendered "You're all caught up."
 //
 // This pins the fix end to end: a profile the engine routes to under_review
-// must, within seconds of the 201, have (a) borrower action items whose
-// actionUrls are routes the client actually registers, and (b) loan options.
+// must, within seconds of the 201, have borrower action items whose actionUrls
+// are routes the client actually registers. It must not issue loan options or
+// an approval amount until the financial evidence is verified.
 //
 // Uses the dev test-login accounts (DEV_TEST_PASSWORD). The session cookie is
 // secure-only, so every request sends X-Forwarded-Proto: https.
@@ -92,7 +93,7 @@ async function pollUntil<T>(
 }
 
 describe("under_review intake produces action items", () => {
-  it("gives the borrower document tasks, valid action links, and loan options", { timeout: 60_000 }, async () => {
+  it("gives document tasks and valid action links without issuing loan options", { timeout: 60_000 }, async () => {
     const borrower = await loginAs("buyer@test.com");
 
     const createRes = await fetch(`${BASE_URL}/api/loan-applications`, {
@@ -127,6 +128,7 @@ describe("under_review intake produces action items", () => {
     // ever starts approving this profile, the fixture must get weaker, not
     // the assertion.
     expect(settled.status, "profile chosen to land under_review").toBe("under_review");
+    expect(Number(settled.preApprovalAmount ?? 0)).toBe(0);
 
     // (a) Action items exist and every link resolves to a registered route.
     // Wait for a DOCUMENT item, not merely a non-empty list — the next line
@@ -187,12 +189,10 @@ describe("under_review intake produces action items", () => {
       "each required document category is requested once",
     ).toBe(documentCategories.length);
 
-    // (c) Loan options were generated for the under_review file too.
-    const options = await pollUntil(async () => {
-      const { status, body } = await getJson(borrower, `/api/loan-applications/${app.id}/options`);
-      if (status !== 200) return null;
-      return body.options?.length > 0 ? body : null;
-    }, "loan options");
-    expect(options.options.length).toBeGreaterThan(0);
+    // (c) An unverified, under-review file must not expose approval-like cards.
+    // The borrower still has a clear next step through the document tasks above.
+    const options = await getJson(borrower, `/api/loan-applications/${app.id}/options`);
+    expect(options.status).toBe(200);
+    expect(options.body.options ?? []).toHaveLength(0);
   });
 });

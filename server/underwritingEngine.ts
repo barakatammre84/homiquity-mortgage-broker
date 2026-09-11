@@ -61,9 +61,9 @@ export class UnderwritingError extends Error {
  */
 export interface ResolvedPolicy {
   loanType: "CONVENTIONAL" | "VA";
-  conventionalDtiCapPct: number;
-  conventionalStretchDtiPct: number;
-  conventionalLtvCapPct: number;
+  conventionalDtiCapPct?: number;
+  conventionalStretchDtiPct?: number;
+  conventionalLtvCapPct?: number;
   conventionalFicoFloor?: number;
   conformingLoanLimit?: number;
   conventionalOccupancyMaxLtvPct?: number;
@@ -361,10 +361,18 @@ export class ConsolidatedUnderwritingEngine {
       );
     }
 
-    // Step 1: Process dynamic values from Postgres lookup tables
-    const dtiCap = (await this.resolver.getPolicyScalar("CONVENTIONAL_DTI_CAP")) / 100;
-    const stretchDti = (await this.resolver.getPolicyScalar("CONVENTIONAL_STRETCH_DTI")) / 100;
-    const ltvCap = await this.resolver.getPolicyScalar("CONVENTIONAL_LTV_CAP");
+    // Step 1: Process dynamic values from Postgres lookup tables. Product-
+    // specific policy is loaded only for that product. A VA evaluation must
+    // remain reproducible and available even if an unrelated conventional row
+    // is being changed or repaired.
+    let dtiCap: number | undefined;
+    let stretchDti: number | undefined;
+    let ltvCap: number | undefined;
+    if (targetLoanType === "CONVENTIONAL") {
+      dtiCap = (await this.resolver.getPolicyScalar("CONVENTIONAL_DTI_CAP")) / 100;
+      stretchDti = (await this.resolver.getPolicyScalar("CONVENTIONAL_STRETCH_DTI")) / 100;
+      ltvCap = await this.resolver.getPolicyScalar("CONVENTIONAL_LTV_CAP");
+    }
     const haircutStock = (await this.resolver.getPolicyScalar("HAIRCUT_STOCK_INVESTMENT")) / 100;
     const haircutRetirement = (await this.resolver.getPolicyScalar("HAIRCUT_RETIREMENT")) / 100;
 
@@ -405,7 +413,7 @@ export class ConsolidatedUnderwritingEngine {
     // Step 3: Enforce the conventional maximum LTV ceiling. The scalar is
     // CONVENTIONAL_LTV_CAP by definition — VA loans are guaranteed to 100% LTV
     // ($0 down), so the cap must not reject the VA path.
-    if (targetLoanType === "CONVENTIONAL" && preciseLtv > ltvCap) {
+    if (targetLoanType === "CONVENTIONAL" && preciseLtv > ltvCap!) {
       reasons.push(`Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds policy ceiling of ${ltvCap}%`);
       conventionalPricingEligible = false;
     }
@@ -553,9 +561,10 @@ export class ConsolidatedUnderwritingEngine {
         conventionalPricingEligible = false;
       }
 
-      if (calculatedDti > stretchDti * 100) {
+      const stretchDtiPct = stretchDti! * 100;
+      if (calculatedDti > stretchDtiPct) {
         reasons.push(
-          `Debt-to-Income ratio (${calculatedDti.toFixed(2)}%) exceeds the system's hard stretch ceiling of ${(stretchDti * 100).toFixed(0)}%`,
+          `Debt-to-Income ratio (${calculatedDti.toFixed(2)}%) exceeds the system's hard stretch ceiling of ${stretchDtiPct.toFixed(0)}%`,
         );
       }
 
@@ -592,8 +601,23 @@ export class ConsolidatedUnderwritingEngine {
         resolvedLlpafUpfrontFee = input.originalLoanAmount * (llpaAdjustmentRate / 100);
       }
 
-      // VA Veteran Loan Path
+      // VA Veteran Loan Path. The implemented automation is a purchase/fixed
+      // residual-income screen. VA refinance and ARM eligibility/payment rules
+      // are materially different and are not encoded here, so keep the useful
+      // residual analysis but route the overall result to a loan officer.
     } else {
+      const purpose = (input.loanPurpose ?? "purchase").toLowerCase().trim();
+      if (purpose !== "purchase" && purpose !== "") {
+        reviewReasons.push(
+          `VA loan purpose "${purpose}" is outside the automated purchase screen. VA refinance eligibility and fee rules require program-specific review.`,
+        );
+      }
+      const amortization = (input.amortizationType ?? "fixed").toLowerCase().trim();
+      if (amortization === "adjustable" || amortization === "arm") {
+        reviewReasons.push(
+          "VA adjustable-rate qualification is not automated because the index, margin, and rate caps needed to calculate the qualifying payment are not captured. Manual review required.",
+        );
+      }
       if (!input.subjectPropertyState || !input.householdFamilySize || !input.homeSquareFootage) {
         throw new UnderwritingError(
           "INPUT_INCOMPLETE",
@@ -692,15 +716,15 @@ export class ConsolidatedUnderwritingEngine {
       // Jumbo routing or a subject-property mismatch: a human must look, but it
       // is not a decline.
       decision = "MANUAL_REVIEW";
-    } else if (targetLoanType === "CONVENTIONAL" && calculatedDti > dtiCap * 100) {
+    } else if (targetLoanType === "CONVENTIONAL" && calculatedDti > dtiCap! * 100) {
       // DTI between baseline (43%) and stretch (50%) moves to Manual Review
       decision = "MANUAL_REVIEW";
     }
 
     const resolvedPolicy = buildResolvedPolicy({
       loanType: targetLoanType,
-      conventionalDtiCapPct: dtiCap * 100,
-      conventionalStretchDtiPct: stretchDti * 100,
+      conventionalDtiCapPct: dtiCap === undefined ? undefined : dtiCap * 100,
+      conventionalStretchDtiPct: stretchDti === undefined ? undefined : stretchDti * 100,
       conventionalLtvCapPct: ltvCap,
       conventionalFicoFloor: resolvedConventionalFicoFloor,
       conformingLoanLimit: resolvedConformingLoanLimit,

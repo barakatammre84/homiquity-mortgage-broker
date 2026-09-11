@@ -14,6 +14,7 @@ const BASE: ScenarioInputs = {
   isVeteran: false,
   isFirstTimeBuyer: false,
   enginePmiMonthly: null,
+  selectedLoanProgram: "CONVENTIONAL",
 };
 
 const num = (v: string) => parseFloat(v);
@@ -86,10 +87,10 @@ describe("buildScenarios — comparison matrix contract", () => {
       downPayment: 20000,
       loanAmount: 380000,
       creditScore: 680,
-      isFirstTimeBuyer: true, // brings the FHA scenario (and its MIP) in
+      isFirstTimeBuyer: true,
       enginePmiMonthly: 270,
     };
-    const veteran: ScenarioInputs = { ...BASE, isVeteran: true };
+    const veteran: ScenarioInputs = { ...BASE, isVeteran: true, selectedLoanProgram: "VA" };
 
     for (const inputs of [BASE, lowDownFirstTime, veteran]) {
       for (const s of buildScenarios(inputs)) {
@@ -137,5 +138,15 @@ describe("buildScenarios — comparison matrix contract", () => {
       num(s.apr) - num(s.interestRate);
     expect(num(pick(withPmi).pmi)).toBeGreaterThan(0);
     expect(spread(pick(withPmi))).toBeGreaterThan(spread(pick(noPmi)));
+  });
+
+  it("keeps option cards inside the selected product family", () => {
+    expect(buildScenarios({ ...BASE, isVeteran: true }).map((s) => s.loanType))
+      .toEqual(["conventional", "conventional", "conventional"]);
+    expect(buildScenarios({ ...BASE, selectedLoanProgram: "FHA" }).map((s) => s.loanType))
+      .toEqual(["fha"]);
+    expect(buildScenarios({ ...BASE, isVeteran: true, selectedLoanProgram: "VA" }).map((s) => s.loanType))
+      .toEqual(["va"]);
+    expect(buildScenarios({ ...BASE, selectedLoanProgram: "USDA" })).toEqual([]);
   });
 });

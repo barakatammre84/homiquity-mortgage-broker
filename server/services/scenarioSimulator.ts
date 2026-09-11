@@ -292,7 +292,12 @@ export function normalizeScenario(
   }
 
   const propertyState = raw.propertyState ?? app.propertyState ?? null;
-  if (app.isVeteran) {
+  const normalizedProductTypes = raw.productTypes?.length ? [...raw.productTypes].sort() : null;
+  const evaluatesVa = app.isVeteran && (
+    normalizedProductTypes === null
+    || normalizedProductTypes.some((type) => underwritingProgramForProduct(type) === "VA")
+  );
+  if (evaluatesVa) {
     // VA residual evaluation needs all three — name the gaps like the
     // instant decision does instead of letting the engine throw.
     if (!propertyState) missing.push("Property state (required for VA residual income)");
@@ -316,7 +321,7 @@ export function normalizeScenario(
       purchasePrice: cents(purchasePrice),
       downPayment: downPayment!,
       downPaymentPercent: cents((downPayment! / purchasePrice) * 100),
-      productTypes: raw.productTypes?.length ? [...raw.productTypes].sort() : null,
+      productTypes: normalizedProductTypes,
       occupancyType,
       propertyType,
       numberOfUnits,
@@ -366,6 +371,38 @@ export function underwritingProgramForProduct(
     case "HELOC": return "HELOC";
     default: return "OTHER";
   }
+}
+
+/**
+ * Resolve the product filter without collapsing an explicitly requested but
+ * ineligible set into "all products". Exported so the VA-only/non-veteran
+ * boundary is pinned without database fixtures.
+ */
+export function resolveEligibleProductFilter(
+  requestedProductTypes: string[] | null,
+  isVeteran: boolean,
+): { productTypes: string[] | undefined; excludedProducts: string[]; explicitFilterEmpty: boolean } {
+  if (isVeteran) {
+    return {
+      productTypes: requestedProductTypes ?? undefined,
+      excludedProducts: [],
+      explicitFilterEmpty: requestedProductTypes !== null && requestedProductTypes.length === 0,
+    };
+  }
+  if (requestedProductTypes === null) {
+    return {
+      productTypes: undefined,
+      excludedProducts: ["VA (borrower is not a veteran)"],
+      explicitFilterEmpty: false,
+    };
+  }
+  const requestedVa = requestedProductTypes.some((type) => underwritingProgramForProduct(type) === "VA");
+  const productTypes = requestedProductTypes.filter((type) => underwritingProgramForProduct(type) !== "VA");
+  return {
+    productTypes,
+    excludedProducts: requestedVa ? ["VA (borrower is not a veteran)"] : [],
+    explicitFilterEmpty: productTypes.length === 0,
+  };
 }
 
 /**
@@ -736,32 +773,29 @@ export async function runScenario(
     // VA products require a positive veteran/active-duty eligibility signal.
     // Product choice remains explicit; the signal only controls whether a VA
     // offer may be shown and evaluated.
-    let productTypes = scenario.productTypes ?? undefined;
-    if (!appFacts.isVeteran) {
-      const requested = productTypes;
-      if (!requested) {
-        excludedProducts.push("VA (borrower is not a veteran)");
-        productTypes = undefined; // filtered below via offer filter
-      } else if (requested.some((t) => t.toUpperCase() === "VA")) {
-        excludedProducts.push("VA (borrower is not a veteran)");
-        productTypes = requested.filter((t) => t.toUpperCase() !== "VA");
-      }
-    }
+    const eligibleFilter = resolveEligibleProductFilter(scenario.productTypes, appFacts.isVeteran);
+    const productTypes = eligibleFilter.productTypes;
+    excludedProducts.push(...eligibleFilter.excludedProducts);
 
-    const profile: BorrowerPricingProfile = {
-      creditScore: scenario.fico,
-      loanAmount,
-      propertyValue: scenario.purchasePrice,
-      propertyType: scenario.propertyType,
-      occupancyType: scenario.occupancyType,
-      loanPurpose: "purchase",
-      isFirstTimeHomeBuyer: appFacts.isFirstTimeBuyer,
-      lockTermDays: scenario.lockTermDays,
-      productTypes: productTypes?.length ? productTypes : undefined,
-    };
-    offers = await computeOffers(storage, profile);
-    if (!appFacts.isVeteran) {
-      offers = offers.filter((o) => o.productType.toUpperCase() !== "VA");
+    // Preserve the distinction between "no filter" and "the explicit filter
+    // became empty after eligibility checks". Passing [] as undefined caused a
+    // non-veteran who requested VA-only to receive every unrelated product.
+    if (!eligibleFilter.explicitFilterEmpty) {
+      const profile: BorrowerPricingProfile = {
+        creditScore: scenario.fico,
+        loanAmount,
+        propertyValue: scenario.purchasePrice,
+        propertyType: scenario.propertyType,
+        occupancyType: scenario.occupancyType,
+        loanPurpose: "purchase",
+        isFirstTimeHomeBuyer: appFacts.isFirstTimeBuyer,
+        lockTermDays: scenario.lockTermDays,
+        productTypes,
+      };
+      offers = await computeOffers(storage, profile);
+      if (!appFacts.isVeteran) {
+        offers = offers.filter((o) => o.productType.toUpperCase() !== "VA");
+      }
     }
 
     // FTHB LLPA waiver → lender credit, mirroring generateLoanEstimate.

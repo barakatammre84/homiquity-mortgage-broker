@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   composeScenario,
   normalizeScenario,
+  resolveEligibleProductFilter,
   type ScenarioFacts,
   type EngineEvaluator,
 } from "../server/services/scenarioSimulator";
@@ -445,6 +446,29 @@ describe("normalizeScenario", () => {
     });
     expect(scenario!.fico).toBe(780);
     expect(scenario!.ficoIsWhatIf).toBe(true);
+  });
+
+  it("does not require VA residual inputs for a veteran's conventional-only scenario", () => {
+    const { scenario, missingItems } = normalizeScenario({
+      application: { ...facts().application, isVeteran: true },
+      scenario: {
+        purchasePrice: 400000,
+        downPaymentPercent: 20,
+        productTypes: ["CONVENTIONAL"],
+      },
+      urlaOccupancyType: null,
+      urlaNumberOfUnits: null,
+    });
+    expect(missingItems).toEqual([]);
+    expect(scenario?.productTypes).toEqual(["CONVENTIONAL"]);
+  });
+
+  it("preserves an explicitly empty eligible set for a non-veteran VA-only request", () => {
+    expect(resolveEligibleProductFilter(["VA"], false)).toEqual({
+      productTypes: [],
+      excludedProducts: ["VA (borrower is not a veteran)"],
+      explicitFilterEmpty: true,
+    });
   });
 });
 

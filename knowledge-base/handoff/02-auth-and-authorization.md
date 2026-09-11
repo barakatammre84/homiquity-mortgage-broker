@@ -90,10 +90,10 @@ sequenceDiagram
   middleware." `server/auth.ts:430-435` `user.role = dbUser.role;` after `authStorage.getUser`.
 - **`GET /api/auth/user` is the "me" endpoint** and strips `passwordHash`
   (`server/integrations/auth/routes.ts:14-18`). The client keys it as `["/api/auth/user"]`.
-- **The three gates, and the counts.** `isAuthenticated` `server/auth.ts:417` — `grep -rn "isAuthenticated" server --include='*.ts' | wc -l` → `347`;
-  `isAdmin` `:443`; `requireRole(...roles)` `:452` — 40 files, 220 call sites; `requireStaff` → `0`
+- **The three gates, and the counts.** `isAuthenticated` `server/auth.ts:417` — `grep -rn "isAuthenticated" server --include='*.ts' | wc -l` → `349`;
+  `isAdmin` `:443`; `requireRole(...roles)` `:452` — 42 files, 242 call sites; `requireStaff` → `0`
   (there is none — handlers use the `shared/roles.ts` predicates:
-  `grep -rnE "is(Staff|InternalStaff|Client|Partner)Role" server --include='*.ts' | wc -l` → 136).
+  `grep -rnE "is(Staff|InternalStaff|Client|Partner)Role" server --include='*.ts' | wc -l` → 141).
 - **Object-level access has two helpers with different reach.** `server/storage/applications.ts:43`
   `getLoanApplicationWithAccess` (114 references): admin unrestricted (`:45`); internal staff **or**
   `broker`/`lender` need an active `deal_team_members` row (`:57-77`); everyone else is scoped to
@@ -177,8 +177,8 @@ sequenceDiagram
   "Client gates are a UX affordance, never the security boundary. The server's own role checks are
   what actually protect the data; these only keep users out of pages that would fail for them
   anyway" (`client/src/lib/routeGates.ts:29-31`) — the boundary is `requireRole(`/`isAuthenticated`
-  on the route (`grep -rn "requireRole(" server --include='*.ts' | wc -l` → `220`;
-  `isAuthenticated` → `347`).
+  on the route (`grep -rn "requireRole(" server --include='*.ts' | wc -l` → `242`;
+  `isAuthenticated` → `349`).
 - **The cookie, end to end — and why there is no CSRF token.** (1) Login calls `req.login`
   (`server/auth.ts:107,185,389`); Passport's serializer is the identity function, so the whole user
   object — role included — is the session row in Postgres (`server/integrations/auth/session.ts:65-68`,
@@ -196,7 +196,7 @@ sequenceDiagram
   and `/api/webhooks/` (`:424-429`, signature-checked per route); anything else is **403**
   `CSRF validation failed` (`:462-468`) — except in `development`, where the check is skipped
   outright (`:457-459`). (6) `secure` and `req.protocol` resolve through one hop count,
-  `trustProxyHops()` (`server/app.ts:36`, re-set at `session.ts:60`; `server/trustProxy.ts:22-27`,
+  `trustProxyHops()` (`server/app.ts:37`, re-set at `session.ts:60`; `server/trustProxy.ts:22-27`,
   default 1, `TRUST_PROXY_HOPS` overrides) — get it wrong and production never sets the cookie.
   Put together: `sameSite=lax` withholds the cookie from a cross-site POST, and a same-site forged
   request cannot forge the browser-set `Origin`, so **the Origin check is the CSRF control** and the
