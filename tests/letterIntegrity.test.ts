@@ -106,19 +106,22 @@ describe("letters route source guards", () => {
     ).toBe(1);
   });
 
-  it("regeneration renders from the stored row, and only issuance prices", async () => {
+  it("regeneration renders from the stored row, and a non-rate-locked letter quotes no payment", async () => {
     const source = await lettersSource();
     expect(
       source.includes("letterDataFromStoredRow(letter)"),
       "expected the letter-pdf regeneration fallback to build its render input from the stored row via letterDataFromStoredRow",
     ).toBe(true);
-    // currentAdvertised30YrRate: one definition + one call, in generate-letter.
-    // A second call site means a download/regen path started pricing from
-    // today's rates under an original issuance date.
+    // A pre-approval can show a maximum purchase amount while the application
+    // still carries a smaller target transaction. Quoting the target payment
+    // beside the maximum amount would imply a false shared basis, and no rate
+    // is locked on this artifact. Payment figures belong on the LE/options.
     expect(
-      (source.match(/currentAdvertised30YrRate\(/g) || []).length,
-      "expected currentAdvertised30YrRate to appear exactly twice: its definition and the single issuance-route call",
-    ).toBe(2);
+      (source.match(/await computeDecisionPaymentProjection\(/g) || []).length,
+      "expected no payment projection in the pre-approval-letter route",
+    ).toBe(0);
+    expect(source).not.toContain("monthlyPaymentEstimate:");
+    expect(source).not.toContain("currentAdvertised30YrRate");
   });
 
   it("issuing a new letter supersedes prior issued letters", async () => {

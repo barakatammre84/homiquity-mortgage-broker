@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   composeScenario,
   normalizeScenario,
+  resolveEligibleProductFilter,
   type ScenarioFacts,
   type EngineEvaluator,
 } from "../server/services/scenarioSimulator";
@@ -70,7 +71,7 @@ const fakeEvaluate: EngineEvaluator = async (input: UnderwritingInput): Promise<
   if (dti > 50) reasons.push(`DTI ${dti.toFixed(2)}% exceeds 50%`);
   return {
     decision: reasons.length > 0 ? "REJECTED" : dti > 43 ? "MANUAL_REVIEW" : "APPROVED",
-    loanType: input.isVeteran ? "VA" : "CONVENTIONAL",
+    loanType: input.requestedLoanProgram === "VA" ? "VA" : "CONVENTIONAL",
     calculatedLtv: Math.floor(ltv * 100) / 100,
     lookupLtv: Math.ceil(ltv),
     calculatedDti: dti,
@@ -80,7 +81,7 @@ const fakeEvaluate: EngineEvaluator = async (input: UnderwritingInput): Promise<
     rejectionReasons: reasons,
     reviewReasons: [],
     resolvedPolicy: {
-      loanType: input.isVeteran ? "VA" : "CONVENTIONAL",
+      loanType: input.requestedLoanProgram === "VA" ? "VA" : "CONVENTIONAL",
       conventionalDtiCapPct: 43,
       conventionalStretchDtiPct: 50,
       conventionalLtvCapPct: 97,
@@ -185,6 +186,33 @@ describe("composeScenario (LO-2 what-if simulator)", () => {
       expect(evaluated.payment.totalPiti).toBeGreaterThan(evaluated.payment.principalAndInterest);
     }
     expect(result.engineVersions!.policyFingerprints).toEqual(["fixture-policy-fingerprint"]);
+  });
+
+  it("qualifies equal-payment offers on their own product policy path", async () => {
+    const seenPrograms: UnderwritingInput["requestedLoanProgram"][] = [];
+    const evaluator: EngineEvaluator = async (input) => {
+      seenPrograms.push(input.requestedLoanProgram);
+      if (input.requestedLoanProgram === "FHA") {
+        throw new UnderwritingError(
+          "POLICY_UNSUPPORTED",
+          "FHA policy is not encoded",
+          "FHA underwriting is not automated yet. A loan officer must review this program.",
+        );
+      }
+      return fakeEvaluate(input);
+    };
+    const samePaymentOffers = [
+      offer({ productId: "conv", productType: "CONVENTIONAL", estimatedMonthlyMI: 0 }),
+      offer({ productId: "fha", productType: "FHA", estimatedMonthlyMI: 0 }),
+    ];
+
+    const result = await composeScenario(facts({ offers: samePaymentOffers }), evaluator);
+
+    expect(seenPrograms).toEqual(["CONVENTIONAL", "FHA"]);
+    expect(result.offers.find((item) => item.productId === "conv")?.qualification.decision).toBe("APPROVED");
+    expect(result.offers.find((item) => item.productId === "fha")?.qualification.decision).toBe("MANUAL_REVIEW");
+    expect(result.offers.find((item) => item.productId === "fha")?.qualification.reasons.join(" "))
+      .toMatch(/not automated.*loan officer/i);
   });
 
   it("reports NEEDS_MORE_INFO when no credit score exists and no what-if is set", async () => {
@@ -361,7 +389,7 @@ describe("what-if MI prices the offer's product-aware matrix figure (F-077 follo
     expect(withMI.apr).toBeGreaterThan(control.apr);
   });
 
-  it("keeps a veteran's what-if MI-free on every product (VA underwriting routing parity)", async () => {
+  it("prices each offer's program for a veteran instead of treating every product as VA", async () => {
     const result = await composeScenario(
       facts({
         application: {
@@ -373,9 +401,8 @@ describe("what-if MI prices the offer's product-aware matrix figure (F-077 follo
         },
         scenario: F077_SCENARIO,
         offers: [
-          // Even a conventional offer carrying a matrix figure prices at zero:
-          // the platform underwrites veterans as VA (qualifyAtPiti passes
-          // isVeteran), so their what-if PITI matches their decision's.
+          // A conventional offer remains conventional even when the borrower
+          // may also be eligible for VA.
           convOffer(),
           offer({
             lenderId: "lender-va",
@@ -391,9 +418,10 @@ describe("what-if MI prices the offer's product-aware matrix figure (F-077 follo
       fakeEvaluate,
     );
 
-    for (const evaluated of result.offers) {
-      expect(evaluated.payment.mortgageInsurance).toBe(0);
-    }
+    expect(result.offers.find((item) => item.productId === "product-1")?.payment.mortgageInsurance)
+      .toBe(MATRIX_MONTHLY_PMI);
+    expect(result.offers.find((item) => item.productId === "product-va")?.payment.mortgageInsurance)
+      .toBe(0);
   });
 });
 
@@ -418,6 +446,29 @@ describe("normalizeScenario", () => {
     });
     expect(scenario!.fico).toBe(780);
     expect(scenario!.ficoIsWhatIf).toBe(true);
+  });
+
+  it("does not require VA residual inputs for a veteran's conventional-only scenario", () => {
+    const { scenario, missingItems } = normalizeScenario({
+      application: { ...facts().application, isVeteran: true },
+      scenario: {
+        purchasePrice: 400000,
+        downPaymentPercent: 20,
+        productTypes: ["CONVENTIONAL"],
+      },
+      urlaOccupancyType: null,
+      urlaNumberOfUnits: null,
+    });
+    expect(missingItems).toEqual([]);
+    expect(scenario?.productTypes).toEqual(["CONVENTIONAL"]);
+  });
+
+  it("preserves an explicitly empty eligible set for a non-veteran VA-only request", () => {
+    expect(resolveEligibleProductFilter(["VA"], false)).toEqual({
+      productTypes: [],
+      excludedProducts: ["VA (borrower is not a veteran)"],
+      explicitFilterEmpty: true,
+    });
   });
 });
 

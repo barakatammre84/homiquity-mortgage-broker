@@ -5,17 +5,17 @@
 
 ## The mental model
 
-188 Drizzle tables in 34 files behind one barrel; `loan_applications` is the root that 91 foreign
+196 Drizzle tables in 37 files behind one barrel; `loan_applications` is the root that 95 foreign
 keys point at; status is a `varchar` plus an `as const` vocabulary — the database enforces almost
 nothing about state, the code does.
 
 ## Explain it to a new hire
 
-The whole database lives in TypeScript under `shared/schema/`: 34 files holding 188 `pgTable(…)`
-declarations, re-exported through a 23-line barrel at `shared/schema.ts`, so the client gets the
+The whole database lives in TypeScript under `shared/schema/`: 37 files holding 196 `pgTable(…)`
+declarations, re-exported through a 27-line barrel at `shared/schema.ts`, so the client gets the
 same types and the same `drizzle-zod` validators the server uses (and a renamed column is a compile
-error on both sides at once). Everything hangs off two tables — `users` (130 inbound foreign keys)
-and `loan_applications` (91) — and almost everything else is a timestamped side-car keyed by
+error on both sides at once). Everything hangs off two tables — `users` (138 inbound foreign keys)
+and `loan_applications` (95) — and almost everything else is a timestamped side-car keyed by
 `applicationId`: the URLA (Form 1003) sections, consents and credit records, tasks, decisions,
 delivery data. Runtime *values* such as status vocabularies deliberately live in table-free
 modules like `shared/loanApplicationStatus.ts`, because `pgTable()` is side-effecting and a single
@@ -62,24 +62,23 @@ erDiagram
 
 ## The facts, with receipts
 
-- **Sizes.** `grep -c "pgTable(" shared/schema/*.ts | awk -F: '{s+=$2} END{print s}'` → `188`;
-  `ls shared/schema/*.ts | wc -l` → `34`; `wc -l shared/schema/*.ts | tail -1` → `10669`;
-  `wc -l shared/schema.ts` → `23` (23 `export *` lines and nothing else).
-- **Two of the 34 are zero-table re-export shims.** `shared/schema/lending.ts:5-10` re-exports six
+- **Sizes.** `grep -c "pgTable(" shared/schema/*.ts | awk -F: '{s+=$2} END{print s}'` → `196`;
+  `ls shared/schema/*.ts | wc -l` → `37`; `wc -l shared/schema/*.ts | tail -1` → `10982`;
+  `wc -l shared/schema.ts` → `27` (26 `export *` lines plus one blank separator).
+- **Two of the 37 are zero-table re-export shims.** `shared/schema/lending.ts:5-10` re-exports six
   `lending*.ts` files; `shared/schema/underwriting.ts:4-8` five `underwriting*.ts` files (split
-  2026-07-17; new tables go in the domain file, never the shim). 21 barrel entries + 2 shims + 11
-  shim-covered = 34.
+  2026-07-17; new tables go in the domain file, never the shim).
 - **Exactly one `pgEnum`.** `grep -o "pgEnum(" shared/schema/*.ts | wc -l` → `1`
-- **The 188 tables by file.** `grep -c "pgTable(" shared/schema/*.ts | awk -F: '{s+=$2} END {print s}'`
-  → `188`, and per file, `grep -c "pgTable(" shared/schema/*.ts | sort -t: -k2 -rn`:
+- **The 196 tables by file.** `grep -c "pgTable(" shared/schema/*.ts | awk -F: '{s+=$2} END {print s}'`
+  → `196`, and per file, `grep -c "pgTable(" shared/schema/*.ts | sort -t: -k2 -rn`:
 
   | file | `pgTable(` |
   |---|---|
   | `shared/schema/admin.ts` | 29 |
   | `shared/schema/compliance.ts` | 17 |
   | `shared/schema/underwritingCore.ts` | 15 |
-  | `shared/schema/intelligence.ts` | 12 |
-  | `shared/schema/documents.ts` | 12 |
+  | `shared/schema/intelligence.ts` | 13 |
+  | `shared/schema/documents.ts` | 13 |
   | `shared/schema/lendingLetters.ts` | 11 |
   | `shared/schema/lendingWholesale.ts` | 9 |
   | `shared/schema/lendingRatesOps.ts` | 8 |
@@ -91,6 +90,7 @@ erDiagram
   | `shared/schema/core.ts` | 5 |
   | `shared/schema/underwritingPolicy.ts` | 4 |
   | `shared/schema/lendingComms.ts` | 4 |
+  | `shared/schema/financialReview.ts` | 4 |
   | `shared/schema/underwritingFinancials.ts` | 3 |
   | `shared/schema/rent.ts` | 3 |
   | `shared/schema/marketData.ts` | 3 |
@@ -104,6 +104,8 @@ erDiagram
   | `shared/schema/scenarioRuns.ts` | 1 |
   | `shared/schema/leads.ts` | 1 |
   | `shared/schema/incomePathEvaluations.ts` | 1 |
+  | `shared/schema/fileReview.ts` | 1 |
+  | `shared/schema/documentLineage.ts` | 1 |
   | `shared/schema/decisions.ts` | 1 |
   | `shared/schema/autopilot.ts` | 1 |
   | `shared/schema/ai.ts` | 1 |
@@ -125,9 +127,12 @@ core.ts: sessions users auth_tokens sms_opt_outs user_phones
 cpaPartners.ts: cpa_partners cpa_referrals 
 decisions.ts: decision_snapshots 
 delivery.ts: loan_delivery_data lender_submissions 
-documents.ts: document_packages document_package_items document_uploads document_pages page_classifications logical_documents logical_document_pages extracted_fields completeness_checks tax_extraction_runs borrower_business_entities situation_profiles 
+documents.ts: document_packages document_package_items document_uploads document_extraction_jobs document_pages page_classifications logical_documents logical_document_pages extracted_fields completeness_checks tax_extraction_runs borrower_business_entities situation_profiles
 incomePathEvaluations.ts: income_path_evaluations 
-intelligence.ts: borrower_profiles real_estate_owned lender_products borrower_state_history readiness_checklist intent_events lender_match_results anonymized_borrower_facts analytics_events loan_outcomes document_confidence_scores predictive_snapshots 
+fileReview.ts: file_review_checkpoints
+documentLineage.ts: document_lineage
+financialReview.ts: financial_workpaper_versions financial_workpaper_reviews credit_memo_versions credit_memo_reviews
+intelligence.ts: borrower_profiles real_estate_owned lender_products borrower_state_history readiness_checklist intent_events lender_match_results anonymized_borrower_facts analytics_events loan_outcomes document_confidence_scores core_provider_canary_runs predictive_snapshots
 leads.ts: leads 
 lending.ts: 
 lendingComms.ts: team_messages loan_milestones plaid_link_tokens verifications 
@@ -153,8 +158,8 @@ underwritingTasks.ts: tasks task_documents task_events task_audit_log sla_class_
   ```
   (`shared/schema/lookup.ts:24` `lifecycleStatusEnum`, `policy_lifecycle_status`). Every other
   status is `varchar` + an `as const` array + a `z.enum` re-pin.
-- **The spine.** `grep -rn "references(() => loanApplications.id)" shared/schema/*.ts | wc -l` → `91`;
-  `grep -rn "references(() => users.id)" shared/schema/*.ts | wc -l` → `130`. Naming split:
+- **The spine.** `grep -rn "references(() => loanApplications.id)" shared/schema/*.ts | wc -l` → `95`;
+  `grep -rn "references(() => users.id)" shared/schema/*.ts | wc -l` → `138`. Naming split:
   `applicationId` is the column name in 18 schema files, `loanId:` in 14 declarations (the UAL
   document pipeline and `underwritingCore.ts`) — a real navigation hazard when joining.
 - **`users`.** `shared/schema/core.ts:47`; `:55` `role: varchar("role",{length:50}).default("aspiring_owner").notNull()`;
@@ -197,8 +202,8 @@ underwritingTasks.ts: tasks task_documents task_events task_audit_log sla_class_
 - **Rent furnishing performs no I/O by design.** `shared/schema/rent.ts:22-29` — "Nothing here
   transmits anything to a credit bureau … The queue accumulates state and performs no I/O."
 - **Encrypted-at-rest columns: 8 sites, 3-column pattern each.** `grep -rn "_encrypted" shared/schema/*.ts | wc -l`
-  → `8`: `shared/schema/documents.ts:302` (`raw_response_encrypted`), `:462` (`classification_raw_encrypted`),
-  `lendingCore.ts:417` (`extraction_raw_encrypted`), `lendingUrla.ts:40` (`ssn_encrypted`), `:354`
+  → `8`: `shared/schema/documents.ts:339` (`raw_response_encrypted`), `:462` (`classification_raw_encrypted`),
+  `lendingCore.ts:429` (`extraction_raw_encrypted`), `lendingUrla.ts:40` (`ssn_encrypted`), `:354`
   and `:383` (`account_number_encrypted` on assets and liabilities), `rent.ts:107`
   (`landlord_email_encrypted`), `:110` (`property_address_encrypted`). Plus `credit_pulls`'
   `encryptedRawResponse` (`shared/schema/compliance.ts:158-160`) which the grep's naming misses. Chapter 08 has
@@ -210,24 +215,24 @@ underwritingTasks.ts: tasks task_documents task_events task_audit_log sla_class_
   each extend the previous one — in a linear chain ending in `DatabaseStorage`, with two helper
   modules (`server/storage/batchGroup.ts`, `server/storage/urlaBatch.ts`) beside them: 26 files; `export type IStorage = DatabaseStorage` — derived,
   not hand-maintained (the old 733-line interface had to move in lockstep with every method).
-  `grep -rln "\.transaction(" server` → 6 files; `grep -rn "inArray(" server --include='*.ts' | wc -l` → `56`.
+  `grep -rln "\.transaction(" server --include='*.ts'` → 19 files; `.transaction(` has 39 call sites; `grep -rn "inArray(" server --include='*.ts' | wc -l` → `84`.
 - **The driver.** `server/db.ts:23-24` picks node-postgres for a localhost URL (or
   `USE_LOCAL_PG=true`), Neon serverless otherwise; `drizzle.config.ts:9-10` points at the barrel and
   `./migrations`.
-- **Migrations.** `ls migrations/*.sql | wc -l` → `58` (`0000`…`0057`); `grep -c '"tag"' migrations/meta/_journal.json`
-  → `58`; journal entry shape `{idx, version:"7", when, tag, breakpoints:true}`. `package.json:30,34`
+- **Migrations.** `ls migrations/*.sql | wc -l` → `74` (`0000`…`0073`); `grep -c '"tag"' migrations/meta/_journal.json`
+  → `74`; journal entry shape `{idx, version:"7", when, tag, breakpoints:true}`. `package.json:30,34`
   block `db:generate` and `db:push` with an explaining `echo … && exit 1`.
   `scripts/schema-migration-guard.cjs:5-18` exists because of the 2026-07-13 outage and runs schema
   → migrations only; `scripts/migration-ledger-guard.cjs:18-24` runs six hard checks.
 - **Stale counts in the wild.** `knowledge-base/handbook/app-guide/03-database.md:7` said "21 schema
-  files, 178 tables" until `3d047ce9` corrected it to 34 / 188 — but its per-file table (`:40-56`)
-  still lists 17 of the 34 files (`grep -cE '^\| .[a-zA-Z]+\.ts. \| [0-9]' knowledge-base/handbook/app-guide/03-database.md` → `17`) and four counts the inventory above contradicts (`admin.ts` 28 →
-  29, `compliance.ts` 13 → 17, `documents.ts` 9 → 12, `core.ts` 4 → 5); "174 Drizzle tables" in `shared/loanApplicationStatus.ts:9`,
+  files, 178 tables" until `3d047ce9` corrected it to 34 / 188 — but the code has since reached 37 / 196, and its per-file table (`:40-56`)
+  still lists only 17 of the 37 files (`grep -cE '^\| .[a-zA-Z]+\.ts. \| [0-9]' knowledge-base/handbook/app-guide/03-database.md` → `17`) and four counts the inventory above contradicts (`admin.ts` 28 →
+  29, `compliance.ts` 13 → 17, `documents.ts` 9 → 13, `core.ts` 4 → 5); "174 Drizzle tables" in `shared/loanApplicationStatus.ts:9`,
   `shared/statusVocabularies.ts:8`, `client/src/pages/lending/preApproval/useServerDraftAutosave.ts:24`,
   `tests/clientSchemaImports.test.ts:15` — all history inside rationale comments (LEDGER HO-0822-01/02).
 - **The status machine.** `shared/loanApplicationStatus.ts:29-48` — 16 states, 4 terminal
   (`funded denied withdrawn expired`, `:52`), a full transition table (`:59`); the single writer is
-  `updatePipelineStage` in `server/pipelineEngine.ts:594` (chapter 04).
+  `updatePipelineStage` in `server/pipelineEngine.ts:849` (chapter 04).
 
 ## Prove it yourself
 
@@ -264,7 +269,7 @@ grep -rn "174" shared/loanApplicationStatus.ts shared/statusVocabularies.ts
 
 | Trap | Where | Caught by |
 |---|---|---|
-| One value import from `@shared/schema` in client code ships all 188 table names to the browser — `pgTable()` is side-effecting and tree-shaking cannot drop it. | `shared/loanApplicationStatus.ts:8-15` | Yes — `tests/clientSchemaImports.test.ts` scans `client/src` for value imports of the barrel; TypeScript, the bundler and ESLint all stay silent. |
+| One value import from `@shared/schema` in client code ships all 196 table names to the browser — `pgTable()` is side-effecting and tree-shaking cannot drop it. | `shared/loanApplicationStatus.ts:8-15` | Yes — `tests/clientSchemaImports.test.ts` scans `client/src` for value imports of the barrel; TypeScript, the bundler and ESLint all stay silent. |
 | The deprecated plaintext `ssn` column still exists and is still accepted as insert input; storage encrypts on write and masks on read, but nothing stops a *new* code path from writing plaintext via `db.insert(urlaPersonalInfo)`. | `shared/schema/lendingUrla.ts:34-37`, `:104-114`; `server/storage/urla.ts:69`, `:116` | No DB constraint. |
 | `guard:schema` is a name-presence check, not table-scoped: a drifted column whose name coincides with any quoted identifier in any migration passes — its own documented blind spot. | `scripts/schema-migration-guard.cjs:20-25` | Catches genuinely new names only. |
 | `guard:schema`'s baseline allow-list can be regenerated to silence a failure; the comment forbids it, no code enforces it. | `scripts/schema-migration-guard.cjs:34-41` | Nothing. |
@@ -278,14 +283,14 @@ grep -rn "174" shared/loanApplicationStatus.ts shared/statusVocabularies.ts
 
 | Question | What resolves it |
 |---|---|
-| How many tables exist in the production database vs 188 declared — the guard is one-directional, so prod may carry extra legacy tables. | A prod read-only probe through CI (`knowledge-base/runbooks/DB_MIGRATIONS.md` §contract migrations); no prod credential lives locally. |
+| How many tables exist in the production database vs 196 declared — the guard is one-directional, so prod may carry extra legacy tables. | A prod read-only probe through CI (`knowledge-base/runbooks/DB_MIGRATIONS.md` §contract migrations); no prod credential lives locally. |
 | Has the plaintext `ssn` backfill run in every environment? The schema says "drop the column once the backfill has run in every environment". | `server/scripts/backfillSsnEncryption.ts` and the PII vault owner. |
 | What are the five snapshot files in `migrations/meta/` (0000 to 0004) for (0000–0004 only, for 58 migrations), given `db:generate` is blocked? | `git log --follow migrations/meta/0004_snapshot.json`; `hq-ci-guards-owner`. |
 | Do all 12 `uniqueIndex(` declarations exist in prod (the guard checks columns, not indexes)? | A prod `\di` through CI. |
 
 ## Analogy
 
-A filing cabinet with one master index card. `loan_applications` is the card; 91 other drawers
+A filing cabinet with one master index card. `loan_applications` is the card; 95 other drawers
 hold folders stamped with that card's number, so pull the card and everything about the borrower
 is one hop away — but nothing in the cabinet stops you filing a folder with no card number on it
 (`documents.applicationId` is nullable), and that folder is then invisible forever. The contract
@@ -296,14 +301,14 @@ the table of contents.
 
 ## Teach-back checkpoint
 
-1. 23 lines in the barrel but 34 files in `shared/schema/`. Where did the other eleven come from?
+1. 27 lines in the barrel but 37 files in `shared/schema/`. Where do the extra domain files come from?
 2. Why does `shared/loanApplicationStatus.ts` import nothing at all?
 3. What are the two axes of a task's status, and what incident produced the split?
 4. Why is `adverse_actions.basedOnConsumerReport` nullable with no default?
 5. You need to add a column. What is the exact sequence, and what is forbidden?
 6. `IStorage` is 733 lines shorter than it used to be. Why?
 7. `urla_personal_info` gets an `upsert` method but `employment_history` gets create/update/delete. Why the asymmetry?
-8. Only six places in the server use a transaction. Name one and say why it needs one.
+8. Name one transaction boundary in the server and say why its writes must be atomic.
 
 ## Go deeper
 

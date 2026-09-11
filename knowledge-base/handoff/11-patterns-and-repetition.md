@@ -132,7 +132,7 @@ the KMS unwrap, the `SESSION_SECRET` floor, `prelaunchGate` failing *safe* to th
 (`server/services/prelaunchGate.ts:25-31`), `requireConsent` (`server/consentGate.ts:177`), the
 credit interlocks, the ECOA chokepoint (`server/routes/lending/statusDecisions.ts:235-244`),
 `resolveMatrixValue`, the MCP identity handshake (`server/mcp/index.ts:63-70`), `CRON_SECRET` unset
-→ admin-only never open (`server/routes/jobs.ts:28-32`), the change-scope CI step failing closed
+→ admin-only never open (`server/routes/jobs.ts:61`), the change-scope CI step failing closed
 to `code=true` (`.github/workflows/ci.yml:213-217`). **Loop rule.** When a loop cannot satisfy a
 gate, it stops and reports; it never adds a bypass. **Exceptions.** `logAudit` deliberately
 swallows its own errors (`server/auditLog.ts:23-25`) — the one fail-open by design.
@@ -141,7 +141,7 @@ swallows its own errors (`server/auditLog.ts:23-25`) — the one fail-open by de
 
 **What.** `loan_applications.status` has one legal writer; the single sanctioned exception is
 listed by file name in a test. **Evidence.** `grep -rn "updatePipelineStage(" server --include='*.ts' | wc -l`
-→ 5 (the definition at `server/pipelineEngine.ts:594` + four callers); `tests/statusVocabulary.test.ts:254-259`
+→ 5 (the definition at `server/pipelineEngine.ts:849` + four callers); `tests/statusVocabulary.test.ts:254-259`
 allow-lists four files. **Loop rule.** Status changes go through `updatePipelineStage`; a loop
 that needs a new writer has found a hand-back. **Exceptions.** `finalizeIntake`
 (`server/services/loanAnalysis.ts:436,455,588`) — and it compensates by hand for the side effects
@@ -170,7 +170,7 @@ multi-table writes are mostly best-effort sequences (FACTS F-12).
 
 ### A9. Batch reads (`inArray`), never a query in a loop
 
-**Evidence.** `grep -rn "inArray(" server --include='*.ts' | wc -l` → 56; the two-wave dashboard
+**Evidence.** `grep -rn "inArray(" server --include='*.ts' | wc -l` → 84; the two-wave dashboard
 (`server/routes/lending/dashboard.ts:45,88-139`, "8 + ~13×N serial queries" replaced, `:54`). **Loop
 rule.** Any `for`/`map` that awaits a query inside is a defect.
 

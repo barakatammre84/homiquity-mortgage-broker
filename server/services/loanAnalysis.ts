@@ -1,5 +1,4 @@
 import { storage } from "../storage";
-import { lookupResolver } from "./lookupResolver";
 import { recalculateDecision, type InstantDecision } from "./decisionEngine";
 import { monthlyPrincipalAndInterest, paymentFactor } from "@shared/lib/amortization";
 import { calculateMortgageAPR, estimatePrepaidFinanceCharges } from "./apr";
@@ -13,7 +12,8 @@ import { calculateMortgageAPR, estimatePrepaidFinanceCharges } from "./apr";
 // path (Reg B / ECOA — see tests/complianceInvariants.test.ts).
 //
 // Decision locus:
-//   - APPROVED (engine)        -> "pre_approved"  (automation may say yes)
+//   - APPROVED + VERIFIED      -> "pre_approved"  (automation may say yes)
+//   - APPROVED + PRELIMINARY   -> "under_review"  (planning result only)
 //   - MANUAL_REVIEW / REJECTED -> "under_review"  (only a human may say no —
 //     a formal denial requires ECOA adverse-action handling, so intake never
 //     auto-denies; the engine's reasons are preserved for the underwriter)
@@ -44,7 +44,10 @@ export interface LoanScenario {
 export interface IntakeAnalysisResult {
   /** Application status to persist. Intake never sets "denied" (ECOA locus). */
   outcome: "pre_approved" | "under_review";
+  /** True only for a current VERIFIED approval that can support outward approval state. */
   isApproved: boolean;
+  /** Self-reported facts support a planning candidate, but no approval has been issued. */
+  isPreliminaryCandidate: boolean;
   preApprovalAmount: string;
   dtiRatio: string;
   ltvRatio: string;
@@ -90,6 +93,8 @@ export interface ScenarioInputs {
   isFirstTimeBuyer: boolean;
   /** Engine-resolved monthly PMI for the conventional path (matrix-driven). */
   enginePmiMonthly: number | null;
+  /** The exact program evaluated by the current decision. */
+  selectedLoanProgram: InstantDecision["loanProgram"];
 }
 
 // Escrow model matches generateLoanEstimate: tax 1.2%/yr, insurance
@@ -214,20 +219,29 @@ function buildScenario(
 }
 
 export function buildScenarios(inputs: ScenarioInputs): LoanScenario[] {
-  const scenarios: LoanScenario[] = [
-    buildScenario("conventional", inputs, { isRecommended: !inputs.isVeteran }),
-    buildScenario("conventional", inputs, { points: 1 }),
-    // 15-year fixed: same deterministic model, shorter amortization — shows
-    // the equity-velocity trade-off (higher payment, far less total interest).
-    buildScenario("conventional", inputs, { termYears: 15 }),
-  ];
-  if (inputs.creditScore <= 720 || inputs.isFirstTimeBuyer) {
-    scenarios.push(buildScenario("fha", inputs));
+  // These legacy comparison cards do not run a cross-product eligibility
+  // search. They must stay inside the program the current decision evaluated;
+  // borrower traits such as veteran or first-time-buyer status never add a
+  // different product behind the borrower's selection.
+  if (inputs.selectedLoanProgram === "CONVENTIONAL") {
+    return [
+      buildScenario("conventional", inputs, { isRecommended: true }),
+      buildScenario("conventional", inputs, { points: 1 }),
+      // 15-year fixed: same deterministic model, shorter amortization — shows
+      // the equity-velocity trade-off (higher payment, far less total interest).
+      buildScenario("conventional", inputs, { termYears: 15 }),
+    ];
   }
-  if (inputs.isVeteran) {
-    scenarios.push(buildScenario("va", inputs, { isRecommended: true }));
+  if (inputs.selectedLoanProgram === "FHA") {
+    return [buildScenario("fha", inputs, { isRecommended: true })];
   }
-  return scenarios;
+  if (inputs.selectedLoanProgram === "VA" && inputs.isVeteran) {
+    return [buildScenario("va", inputs, { isRecommended: true })];
+  }
+  // USDA/Jumbo/ARM/HELOC/other products have no implementation in this legacy
+  // card builder. An empty set is honest; the decision reason routes the file
+  // to a loan officer without fabricating a conventional option.
+  return [];
 }
 
 /**
@@ -318,6 +332,7 @@ export async function analyzeIntake(
           isVeteran: app.isVeteran ?? false,
           isFirstTimeBuyer: app.isFirstTimeBuyer ?? false,
           enginePmiMonthly: decision?.metrics ? decision.metrics.pmiMonthly : null,
+          selectedLoanProgram: decision?.loanProgram ?? null,
         })
       : [];
 
@@ -325,9 +340,15 @@ export async function analyzeIntake(
   const concerns: string[] = [];
   const recommendations: string[] = [];
 
-  if (creditScore > 0) {
+  const conventionalFicoFloor = decision?.resolvedPolicy?.conventionalFicoFloor;
+  if (
+    creditScore > 0 &&
+    decision?.loanProgram === "CONVENTIONAL" &&
+    typeof conventionalFicoFloor === "number" &&
+    creditScore >= conventionalFicoFloor
+  ) {
     strengths.push(
-      `Credit score: ${creditScore} (620 minimum for conforming eligibility, Fannie Mae Eligibility Matrix)`,
+      `Credit score: ${creditScore} (${conventionalFicoFloor} minimum resolved for this conventional decision)`,
     );
   }
   if (purchasePrice > 0 && downPayment > 0) {
@@ -378,23 +399,39 @@ export async function analyzeIntake(
     concerns.push("Automated evaluation was unavailable — an underwriter will review your application.");
   }
 
-  const isApproved = decision?.decision === "APPROVED";
+  // The deterministic engine may calculate a useful planning candidate from
+  // self-reported facts. That is not an issued pre-approval. Only the verified
+  // data grade may change outward status, create options, notify the borrower,
+  // or support a formal letter.
+  const isApproved = decision?.decision === "APPROVED" && decision.qualifier === "VERIFIED";
+  const isPreliminaryCandidate =
+    decision?.decision === "APPROVED" && decision.qualifier === "PRELIMINARY";
 
   let preApprovalAmount = "0";
   if (isApproved && monthlyIncome > 0) {
-    const rawCap = await lookupResolver.getPolicyScalar("CONVENTIONAL_DTI_CAP").catch(() => 43);
-    // Sanity floor: a corrupt/zero matrix scalar must not silently drive the
-    // affordability math to zero. Fall back to the platform's own conservative
-    // baseline if wild — 43 is OUR overlay (ledger: platform-conv-dti-cap-43),
-    // stricter than B3-6-02's 50% DU maximum. It is not an ATR/QM cap: the
-    // 43% general-QM DTI limit was replaced by the price-based threshold.
-    const dtiCapPct = Number.isFinite(rawCap) && rawCap >= 30 && rawCap <= 60 ? rawCap : 43;
-    if (dtiCapPct !== rawCap) {
-      console.warn(`[loanAnalysis] CONVENTIONAL_DTI_CAP out of range (${rawCap}); using ${dtiCapPct}`);
+    if (decision?.loanProgram === "CONVENTIONAL") {
+      // Size from the exact cap already captured by the decision. Reading the
+      // mutable policy store again here could combine an approval from policy A
+      // with an amount from policy B if policy changed between the two reads.
+      const dtiCapPct = decision.resolvedPolicy?.conventionalDtiCapPct;
+      if (typeof dtiCapPct !== "number" || !Number.isFinite(dtiCapPct) || dtiCapPct < 30 || dtiCapPct > 60) {
+        throw new Error(
+          `CRITICAL COMPLIANCE ERROR: CONVENTIONAL_DTI_CAP is outside the permitted 30%-60% range (${dtiCapPct})`,
+        );
+      }
+      const maxPrice = maxQualifyingPurchase(dtiCapPct, monthlyIncome, monthlyDebts, downPayment, creditScore);
+      // Never issue less than the price the engine just approved.
+      preApprovalAmount = String(Math.max(maxPrice, purchasePrice));
+    } else {
+      // The VA engine evaluates the requested loan, including residual income,
+      // but the maximum-purchase calculator is conventional-only. Preserve the
+      // approved request without extrapolating a larger VA amount through a
+      // conventional DTI formula.
+      preApprovalAmount = String(purchasePrice);
+      recommendations.push(
+        "The requested VA purchase was evaluated; a higher VA pre-approval amount requires program-specific review by the loan team.",
+      );
     }
-    const maxPrice = maxQualifyingPurchase(dtiCapPct, monthlyIncome, monthlyDebts, downPayment, creditScore);
-    // Never issue less than the price the engine just approved.
-    preApprovalAmount = String(Math.max(maxPrice, purchasePrice));
   }
 
   // A pre-approval must be for a positive amount. If the engine approved but the
@@ -405,6 +442,7 @@ export async function analyzeIntake(
   return {
     outcome: approvedForAmount ? "pre_approved" : "under_review",
     isApproved: approvedForAmount,
+    isPreliminaryCandidate,
     preApprovalAmount,
     dtiRatio: metrics ? metrics.dti.toFixed(2) : "0",
     ltvRatio: metrics ? metrics.ltv.toFixed(2) : "0",
@@ -423,9 +461,10 @@ const REFRESHABLE_INTAKE_STATUSES = new Set(["under_review", "pre_approved"]);
  * row's DTI, pre-approval amount, status, and loan options untouched. Every UI
  * then showed an older answer than the decision history. This function keeps
  * those projections together for files that are still in the preliminary
- * intake phase. It may promote under_review -> pre_approved after missing facts
- * are supplied. It never retracts an issued pre-approval automatically; a new
- * non-approval snapshot remains visible to staff for a licensed review.
+ * intake phase. It may promote under_review -> pre_approved after verified facts
+ * are supplied. If changed facts no longer support the issued state, it removes
+ * the stale amount/options and routes the file to review; that is a review state,
+ * never an automated denial.
  */
 export async function refreshEarlyStageIntakeAnalysis(
   applicationId: string,
@@ -437,25 +476,53 @@ export async function refreshEarlyStageIntakeAnalysis(
   const result = await analyzeIntake(applicationId, trigger);
   const promotesToPreApproval =
     application.status === "under_review" && result.outcome === "pre_approved";
-  const remainsIssuedPreApproval =
+  const retractsStalePreApproval =
     application.status === "pre_approved" && result.outcome !== "pre_approved";
 
   await storage.updateLoanApplication(applicationId, {
     ...(promotesToPreApproval ? { status: "pre_approved" } : {}),
-    ...(!remainsIssuedPreApproval ? { preApprovalAmount: result.preApprovalAmount } : {}),
+    ...(retractsStalePreApproval ? { status: "under_review" } : {}),
+    preApprovalAmount: result.preApprovalAmount,
     dtiRatio: result.dtiRatio,
     ltvRatio: result.ltvRatio,
     aiAnalysis: result.analysis,
     aiAnalyzedAt: new Date(),
   });
 
-  // Rebuild quoted options from the same facts as the refreshed headline.
-  // Under-review files have no offer to present; an existing issued approval is
-  // preserved for licensed review rather than silently withdrawn by automation.
+  // Rebuild quoted options from the same facts as the refreshed headline. A
+  // preliminary candidate or review state has no issued options to present.
+  await storage.deleteLoanOptionsByApplication(applicationId);
   if (result.isApproved) {
-    await storage.deleteLoanOptionsByApplication(applicationId);
     for (const scenario of result.scenarios) {
       await storage.createLoanOption({ applicationId, ...scenario });
+    }
+  }
+
+  if (retractsStalePreApproval) {
+    try {
+      const { syncApplicationStatusToStateMachine } = await import("./optimizationEngine");
+      await syncApplicationStatusToStateMachine(application.userId, applicationId, "under_review");
+    } catch (syncErr) {
+      console.warn("[Analysis] Pre-approval review state sync failed (non-fatal):", syncErr);
+    }
+    try {
+      await storage.createDealActivity({
+        applicationId,
+        activityType: "status_change",
+        title: "Pre-Approval Needs Review",
+        description: "New application facts no longer support the prior automated amount. The file has been routed to the loan team for review; no denial was issued.",
+      });
+      await storage.createNotification({
+        userId: application.userId,
+        type: "application_under_review",
+        title: "Your mortgage plan needs review",
+        body: "Your application changed, so the prior pre-approval amount is no longer current. Your loan team will review the updated facts and your dashboard shows any documents needed next.",
+        entityType: "loan_application",
+        entityId: applicationId,
+        status: "unread",
+      });
+    } catch (notificationErr) {
+      console.warn("[Analysis] Pre-approval review notification failed (non-fatal):", notificationErr);
     }
   }
 
@@ -560,11 +627,13 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
     } catch (delErr) {
       console.error("[Analysis] Failed to clear prior loan options (non-fatal):", delErr);
     }
-    for (const scenario of analysisResult.scenarios) {
-      try {
-        await storage.createLoanOption({ applicationId, ...scenario });
-      } catch (optErr) {
-        console.error("[Analysis] Failed to create loan option:", optErr);
+    if (analysisResult.isApproved) {
+      for (const scenario of analysisResult.scenarios) {
+        try {
+          await storage.createLoanOption({ applicationId, ...scenario });
+        } catch (optErr) {
+          console.error("[Analysis] Failed to create loan option:", optErr);
+        }
       }
     }
 
@@ -590,7 +659,9 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
       title: "Document Collection Started",
       description: analysisResult.isApproved
         ? "Required documents have been identified. Please upload them to continue your application."
-        : "Required documents have been identified. Uploading them now gives your underwriter what they need to verify your file.",
+        : analysisResult.isPreliminaryCandidate
+          ? "Your preliminary plan is ready. Upload the requested documents so the loan team can verify your income, assets, and property details."
+          : "Required documents have been identified. Uploading them now gives your loan team what they need to review your file.",
     });
 
     try {
@@ -619,12 +690,19 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
     }
     try {
       const firstReason = analysisResult.analysis.concerns[0];
+      const preliminary = analysisResult.isPreliminaryCandidate;
       await storage.createDealActivity({
         applicationId,
         activityType: "status_change",
-        title: analysisResult.isApproved ? "Pre-Approval Issued" : "Application Under Review",
+        title: analysisResult.isApproved
+          ? "Pre-Approval Issued"
+          : preliminary
+            ? "Preliminary Mortgage Plan Ready"
+            : "Application Under Review",
         description: analysisResult.isApproved
           ? `Pre-approval issued for up to $${(parseFloat(analysisResult.preApprovalAmount) || 0).toLocaleString()}. Final terms subject to underwriting review.`
+          : preliminary
+            ? "Your self-reported information supports a preliminary mortgage plan. Upload the requested documents so the loan team can verify the figures; no pre-approval has been issued yet."
           : firstReason
             ? `A licensed underwriter will review your application. Flagged for review: ${firstReason}`
             : "A licensed underwriter will review your application.",
@@ -653,11 +731,14 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
           });
         }
       } else {
+        const preliminary = analysisResult.isPreliminaryCandidate;
         await storage.createNotification({
           userId,
           type: "application_under_review",
-          title: "Application Under Review",
-          body: "A licensed underwriter is reviewing your application. Check your dashboard to see what was flagged and what happens next.",
+          title: preliminary ? "Your preliminary mortgage plan is ready" : "Application Under Review",
+          body: preliminary
+            ? "Your self-reported information supports a preliminary plan. Upload the requested documents so your loan team can verify the figures; no pre-approval has been issued yet."
+            : "Your application needs review by the loan team. Check your dashboard to see what was flagged and what happens next.",
           entityType: "loan_application",
           entityId: applicationId,
           status: "unread",
@@ -668,7 +749,7 @@ export async function finalizeIntake(applicationId: string): Promise<void> {
           // generic status_update template stays for staff-driven status
           // changes; this moment needs the action-oriented one.
           sendNotificationEmail({
-            type: "application_under_review",
+            type: preliminary ? "application_preliminary_plan" : "application_under_review",
             recipientEmail: borrower.email,
             data: { borrowerName, applicationId },
           });

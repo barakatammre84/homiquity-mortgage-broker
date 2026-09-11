@@ -15,7 +15,6 @@ import { COMPANY_CONFIG } from "../../config/company";
 import { assertVerifiedForDecisioning, type DataProvenance } from "@shared/dataProvenance";
 import { unlicensedStateRejection } from "@shared/companyIdentity";
 import { routeParams } from "../../http/routeParams";
-import { monthlyPrincipalAndInterestFromFraction } from "@shared/lib/amortization";
 import { occupancyLetterLabel, parseOccupancyType } from "@shared/occupancy";
 
 const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().extend({
@@ -26,21 +25,6 @@ const declarationsValidationSchema = insertBorrowerDeclarationsSchema.partial().
 // derived from the same base schema the funnel validates with client-side — the
 // server rejects exactly what the client rejects, and "not_sure" credit maps to
 // the named CREDIT_SCORE_UNKNOWN_DEFAULT instead of a silent clamp.
-
-// Payment estimates on pre-approval letters use the current advertised
-// 30-year fixed rate — a figure on a borrower-facing document must be
-// reproducible from live pricing, never a hardcoded constant. Falls back to
-// a conservative rate when no advertised rate is synced.
-async function currentAdvertised30YrRate(storage: IStorage): Promise<number> {
-  try {
-    const advertised = await storage.getMortgageRatesByProgram("prog-30yr-fixed");
-    const active = advertised.find((r) => r.isActive && parseFloat(r.rate) > 0);
-    if (active) return parseFloat(active.rate) / 100;
-  } catch (rateErr) {
-    console.error("[Letter] Could not load advertised rate, using fallback:", rateErr);
-  }
-  return 0.07;
-}
 
 async function isPreApprovalLetterDecisionCurrent(
   applicationId: string,
@@ -131,6 +115,7 @@ export function registerLetterRoutes(
           reasons: currentDecision?.reasons ?? currentDecision?.missingItems ?? [],
         });
       }
+      const decisionProductType = currentDecision.resolvedPolicy.loanType === "VA" ? "VA" : "CONV";
 
       const { generatePreApprovalPDF, STANDARD_PRE_APPROVAL_CONDITIONS } = await import("../../services/pdfLetterGenerator");
 
@@ -163,9 +148,9 @@ export function registerLetterRoutes(
       const disclaimers = [
         "This pre-approval is not a commitment to lend. Final approval is subject to satisfactory appraisal, title search, and verification of all information provided.",
         "This letter is valid only for the borrower named above and is non-transferable. Terms are subject to change based on market conditions.",
-        "The pre-approved amount is based on information provided and preliminary underwriting review. The actual loan amount may differ upon full underwriting.",
+        "The pre-approved amount is based on verified information and the current underwriting evaluation. The actual loan amount may differ upon full underwriting.",
         "This pre-approval does not guarantee any specific interest rate. Rate lock is available separately.",
-        "Equal Housing Lender. All loans are subject to credit approval.",
+        "Equal Housing Opportunity. All loans are subject to credit approval.",
       ];
 
       // The caller can be assigned staff. The letter and its notification must
@@ -178,10 +163,12 @@ export function registerLetterRoutes(
       const borrowerName = [borrower.firstName, borrower.lastName].filter(Boolean).join(" ") || "Borrower";
 
       const annualIncome = currentDecision.metrics!.monthlyIncome * 12;
-      const loanAmountNum = parseFloat(loanAmount) || 0;
-      const rate = await currentAdvertised30YrRate(storage);
-      // currentAdvertised30YrRate returns a FRACTION (0.07-style), not a percent.
-      const monthlyPayment = monthlyPrincipalAndInterestFromFraction(loanAmountNum, rate, 360);
+      // A pre-approval amount is the maximum purchase amount supported by the
+      // verified analysis, while the application's purchase price can be a
+      // smaller current target. A payment calculated from that current target
+      // would sit beside the maximum amount and imply the two share a basis.
+      // Do not quote an estimated payment on this non-rate-locked artifact;
+      // product-specific payment figures remain on the Loan Estimate/options.
       const dti = currentDecision.metrics!.dti;
       const dpPercent = purchasePrice > 0 ? ((downPayment / purchasePrice) * 100).toFixed(1) : undefined;
 
@@ -207,7 +194,7 @@ export function registerLetterRoutes(
         letterNumber,
         borrowerName,
         loanAmount,
-        productType: application.isVeteran ? "VA" : "CONV",
+        productType: decisionProductType,
         occupancy,
         loanPurpose: application.loanPurpose || "Purchase",
         companyLegalName: COMPANY_CONFIG.legalName,
@@ -222,7 +209,6 @@ export function registerLetterRoutes(
         downPayment: downPayment > 0 ? String(downPayment) : undefined,
         downPaymentPercent: dpPercent,
         annualIncome: annualIncome > 0 ? String(annualIncome) : undefined,
-        monthlyPaymentEstimate: monthlyPayment > 0 ? String(Math.round(monthlyPayment)) : undefined,
         estimatedDti: dti > 0 ? dti.toFixed(1) : undefined,
         creditScoreRange: creditRange || undefined,
         employmentType: application.employmentType || undefined,
@@ -294,7 +280,7 @@ export function registerLetterRoutes(
           borrowerName,
           applicationId: id,
           loanAmount,
-          productType: application.isVeteran ? "VA" : "CONV",
+          productType: decisionProductType,
           occupancy,
           loanPurpose: application.loanPurpose || "Purchase",
           decisionInputFingerprint: currentDecision.inputsFingerprint,

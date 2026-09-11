@@ -196,14 +196,18 @@ const mocks = vi.hoisted(() => ({
   getAllBorrowerDeclarations: vi.fn(),
   getLatestBankStatementAnalysis: vi.fn(),
   generateLoanEstimate: vi.fn(),
-  computePaymentProjection: vi.fn(),
+  computeDecisionPaymentProjection: vi.fn(),
+  getCurrentDecisionGrade: vi.fn(),
 }));
 
 vi.mock("../server/storage", () => ({ storage: mocks }));
 vi.mock("../server/services/loanEstimate", () => ({
   generateLoanEstimate: mocks.generateLoanEstimate,
   // The engine prices via the compensation-independent projection (WF1-002).
-  computePaymentProjection: mocks.computePaymentProjection,
+  computeDecisionPaymentProjection: mocks.computeDecisionPaymentProjection,
+}));
+vi.mock("../server/services/currentDecisionGrade", () => ({
+  getCurrentDecisionGrade: mocks.getCurrentDecisionGrade,
 }));
 
 import { runInstantDecision } from "../server/services/decisionEngine";
@@ -221,6 +225,7 @@ function makeApp(overrides: Record<string, unknown> = {}) {
     annualIncome: "0",
     monthlyDebts: "0",
     financialDataProvenance: null,
+    preferredLoanType: "conventional",
     ...overrides,
   };
 }
@@ -244,7 +249,7 @@ function primeOrchestrator(app: Record<string, unknown>, data: {
   mocks.generateLoanEstimate.mockResolvedValue({
     projectedPayments: { years1Through5: { estimatedTotal: data.piti ?? 3000 } },
   });
-  mocks.computePaymentProjection.mockResolvedValue({
+  mocks.computeDecisionPaymentProjection.mockResolvedValue({
     estimatedMonthlyTotal: data.piti ?? 3000,
     // B3-6-03 qualifying PITIA — what the DTI and reserves are actually built
     // on. These personas carry no association dues, so it equals the LE figure.
@@ -256,6 +261,7 @@ function primeOrchestrator(app: Record<string, unknown>, data: {
 
 function baseConventionalInput(overrides: Partial<UnderwritingInput> = {}): UnderwritingInput {
   return {
+    requestedLoanProgram: "CONVENTIONAL",
     isVeteran: false,
     baseMonthlyIncome: 40000,
     bonusMonthlyIncome: 0,
@@ -272,6 +278,19 @@ function baseConventionalInput(overrides: Partial<UnderwritingInput> = {}): Unde
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getCurrentDecisionGrade.mockResolvedValue({
+    isDecisionGrade: false,
+    reasons: ["Preliminary fixture"],
+    evidence: {
+      financialMemoId: null,
+      incomeWorkpaperId: null,
+      assetWorkpaperId: null,
+      creditPullId: null,
+      creditPullIsSimulated: false,
+      creditPullIsCurrent: false,
+    },
+    verification: { income: false, assets: false, credit: false },
+  });
 });
 
 describe("Self-employed intake decision gate", () => {
@@ -306,6 +325,91 @@ describe("Self-employed intake decision gate", () => {
     expect(decision.status).toBe("NEEDS_MORE_INFO");
     expect(decision.decision).toBeNull();
     expect(decision.missingItems.join(" ")).toMatch(/complete.*worksheet/i);
+  });
+});
+
+describe("Explicit underwriting program selection", () => {
+  it("keeps the fast intake by evaluating a labeled preliminary conventional candidate", async () => {
+    primeOrchestrator(makeApp({ preferredLoanType: null, annualIncome: "144000" }), { piti: 2200 });
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("DECISION_READY");
+    expect(decision.qualifier).toBe("PRELIMINARY");
+    expect(decision.loanProgram).toBe("CONVENTIONAL");
+    expect(decision.loanProgramSelection).toBe("preliminary_conventional_candidate");
+    expect(mocks.computeDecisionPaymentProjection).toHaveBeenCalledWith("app-1", "conventional");
+  });
+
+  it("requires an application-selected program before a verified decision", async () => {
+    mocks.getCurrentDecisionGrade.mockResolvedValueOnce({
+      isDecisionGrade: true,
+      reasons: [],
+      evidence: {
+        financialMemoId: "memo-1",
+        incomeWorkpaperId: "income-1",
+        assetWorkpaperId: "assets-1",
+        creditPullId: "credit-1",
+        creditPullIsSimulated: false,
+        creditPullIsCurrent: true,
+      },
+      verification: { income: true, assets: true, credit: true },
+    });
+    primeOrchestrator(makeApp({ preferredLoanType: null, annualIncome: "144000" }), { piti: 2200 });
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("NEEDS_MORE_INFO");
+    expect(decision.qualifier).toBe("VERIFIED");
+    expect(decision.loanProgram).toBeNull();
+    expect(decision.loanProgramSelection).toBeNull();
+    expect(decision.missingItems).toContain("Preferred loan program");
+    expect(mocks.computeDecisionPaymentProjection).not.toHaveBeenCalled();
+  });
+
+  it("keeps a veteran's conventional selection on the conventional policy path", async () => {
+    primeOrchestrator(
+      makeApp({ isVeteran: true, preferredLoanType: "conventional", annualIncome: "144000" }),
+      { piti: 2200 },
+    );
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("DECISION_READY");
+    expect(decision.loanProgram).toBe("CONVENTIONAL");
+    expect(decision.loanProgramSelection).toBe("application_selected");
+    expect(decision.missingItems.join(" ")).not.toMatch(/residual income|household size|square footage/i);
+  });
+
+  it.each(["fha", "usda"])(
+    "routes %s to human policy review before a conventional projection can be reused",
+    async (preferredLoanType) => {
+      primeOrchestrator(makeApp({ preferredLoanType, annualIncome: "144000" }), { piti: 2200 });
+
+      const decision = await runInstantDecision("app-1");
+
+      expect(decision.status).toBe("DECISION_READY");
+      expect(decision.decision).toBe("MANUAL_REVIEW");
+      expect(decision.loanProgram).toBe(preferredLoanType.toUpperCase());
+      expect(decision.reasons.join(" ")).toMatch(/not automated.*loan officer/i);
+      expect(decision.resolvedPolicy).toBeNull();
+      expect(mocks.computeDecisionPaymentProjection).not.toHaveBeenCalled();
+    },
+  );
+
+  it("routes a VA selection without a positive eligibility signal to a loan officer", async () => {
+    primeOrchestrator(
+      makeApp({ isVeteran: false, preferredLoanType: "va", annualIncome: "144000" }),
+      { piti: 2200 },
+    );
+
+    const decision = await runInstantDecision("app-1");
+
+    expect(decision.status).toBe("DECISION_READY");
+    expect(decision.decision).toBe("MANUAL_REVIEW");
+    expect(decision.loanProgram).toBe("VA");
+    expect(decision.reasons.join(" ")).toMatch(/confirm VA eligibility/i);
+    expect(mocks.computeDecisionPaymentProjection).not.toHaveBeenCalled();
   });
 });
 
@@ -801,6 +905,7 @@ describe("Persona 4 — Thin-File Physician (FICO 612 @ 90% LTV)", () => {
 // ===========================================================================
 describe("Persona 5 — Reyes family (VA, family of 6, $79,999.50 loan)", () => {
   const reyesBase: Partial<UnderwritingInput> = {
+    requestedLoanProgram: "VA",
     isVeteran: true,
     baseMonthlyIncome: 12_000,
     bonusMonthlyIncome: 0,
@@ -815,7 +920,7 @@ describe("Persona 5 — Reyes family (VA, family of 6, $79,999.50 loan)", () => 
   };
 
   it("FIXED(#1+#3): a VA file missing residual inputs asks for them by name with borrower-safe copy", async () => {
-    primeOrchestrator(makeApp({ isVeteran: true, annualIncome: "144000" }), { piti: 2200 });
+    primeOrchestrator(makeApp({ isVeteran: true, preferredLoanType: "va", annualIncome: "144000" }), { piti: 2200 });
     const d = await runInstantDecision("app-1");
     // Fix #1 reclassified the VA-protocol throw as INPUT_INCOMPLETE (no raw
     // "CRITICAL VA PROTOCOL ERROR" leak); fix #3 plumbs family size / square
@@ -832,7 +937,7 @@ describe("Persona 5 — Reyes family (VA, family of 6, $79,999.50 loan)", () => 
     // (schema-required for veterans), so a complete VA file flows through the
     // orchestrator to a decision instead of dead-ending.
     primeOrchestrator(
-      makeApp({ isVeteran: true, annualIncome: "144000", householdFamilySize: 4, homeSquareFootage: 2800 }),
+      makeApp({ isVeteran: true, preferredLoanType: "va", annualIncome: "144000", householdFamilySize: 4, homeSquareFootage: 2800 }),
       { piti: 2200 },
     );
     const d = await runInstantDecision("app-1");
@@ -847,6 +952,14 @@ describe("Persona 5 — Reyes family (VA, family of 6, $79,999.50 loan)", () => 
     // SOUTH size-5 baseline 1039 + 80 for the sixth member.
     expect(result.requiredResidualIncome).toBe(1119);
     expect(result.decision).toBe("APPROVED");
+    expect(result.resolvedPolicy).toMatchObject({
+      vaResidualExtraMember: 80,
+      vaResidualTaxRate: 0.22,
+      vaUtilityRatePerSqft: 0.14,
+      vaDtiCushionTriggerPct: 41,
+      vaCushionMultiplier: 1.2,
+      vaResidualReductionFactor: 0.95,
+    });
   });
 
   it("FIXED: a $79,999.50 loan resolves in the low band — the $1 gap between VA loan bands is closed", async () => {

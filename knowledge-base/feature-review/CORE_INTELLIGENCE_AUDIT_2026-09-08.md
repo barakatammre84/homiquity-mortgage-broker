@@ -1,9 +1,9 @@
 # Core intelligence audit — Homi, documents, financial analysis and underwriting
 
-**Evidence date:** 2026-09-10
+**Evidence date:** 2026-09-11
 
-**Code reviewed:** production base `2e0a098bc4d362b80adcdcb7b2f95844f5fa846d` plus the current
-financial-evidence and underwriting-freshness candidate
+**Code reviewed:** production base `5f3c086b61d5ad61f80f511367e888c13a9a2e5c` plus the current
+underwriting product-integrity release
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
 
@@ -72,7 +72,7 @@ for the borrowers that a standardized fast lane handles poorly.
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, asset/liability review, append-only workpapers, cited memo and hashed lender package; human-reviewed pay, bank, lease, Schedule C and K-1 figures are frozen into the version and compared with the exact calculation input; mismatches require an officer explanation; bank-statement deposit screening is usable in the staff file; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement eligibility and DSCR rules still require the selected lender's matrices; measured review accuracy on real files is absent | Strong controlled analysis with visible judgment; not yet a measured hands-off result |
-| Underwriting | Deterministic rules, policy/input fingerprints, decision snapshots, tested DTI/pricing calculations, stale AUS/letter blocking, an explicit manual-underwrite path and simulation labels; VERIFIED is re-derived from a current approved memo, current income and asset workpapers, and an unexpired, unarchived real bureau report; a fixed conventional file produces byte-identical results against deployed policy rows | External AUS and real credit are not live and no signed provider findings have been received | Strong internal engine with current-evidence gates; incomplete external decision chain |
+| Underwriting | Deterministic rules, complete resolved-policy/input fingerprints, decision snapshots, tested DTI/pricing calculations, stale AUS/letter blocking, explicit program selection and manual-underwrite routing; fast intake uses a labeled preliminary conventional candidate while verified decisions require the URLA selection; conventional and VA paths are automated and product choice remains intact through options and letters | FHA, USDA and portfolio policy are not automated; external AUS and real credit are not live; no signed provider findings or lender acceptance has been received | Strong product-aware internal engine with current-evidence gates; incomplete program coverage and external decision chain |
 | Delivery | Schema-valid multi-borrower MISMO 3.4, correctly scoped employment/declarations, immutable hashed MISMO, income and dual-AUS findings artifacts, readiness gates and condition tracking | No selected lender's receiver acceptance or correction round trip | Internally complete package builder; delivery remains externally unproven |
 | External evidence | Plaid adapter and production guards exist; private object-storage read/write/delete and survival across a same-build process replacement are proven in production | Real credit, live AUS, current lender pricing and receiver acceptance are not proven | Blocks a real live lifecycle |
 
@@ -114,6 +114,42 @@ Fannie Mae's current Income Calculator reinforces this direction: self-employmen
 analysis can be standardized, but user-entered data does not receive the same data-integrity relief
 as approved-vendor transcript data in DU validation.[4][5] Homiquity therefore needs both correct
 math and a stronger evidence chain.
+
+### Program intent now survives the full internal decision chain
+
+The application already stores conventional, FHA, VA or USDA as a separate answer from veteran
+status. The previous engine ignored that answer: it selected VA for every veteran and conventional
+for everyone else. The payment projection, same-payment offer cache and two preapproval-letter
+fields repeated the inference. This could qualify an FHA offer on conventional rules or label a
+veteran's conventional approval as VA.
+
+The current release makes the evaluated program an explicit required engine input and includes the
+selected value and selection basis in the decision fingerprint. A new fast application still gets
+a preliminary conventional candidate because the short funnel deliberately does not ask a novice
+borrower to choose a program. That candidate is labeled and cannot become a verified decision,
+AUS submission, persisted loan option, pre-approval status/message or outward preapproval letter
+until current evidence is verified and URLA contains the actual selection. Veteran
+status is an eligibility signal only. Each loan-option offer is qualified and cached by both program
+and payment, and the letter product comes from the approved policy result.
+
+Only conventional purchase/fixed and a selected VA fixed-purchase residual screen are automated today. The engine rejects FHA,
+USDA, jumbo, ARM, HELOC and unknown families from the automated path before resolving an unrelated
+matrix. This follows the current policy-authority boundary: Fannie Mae publishes a separate
+conventional eligibility structure, HUD identifies Handbook 4000.1 as its consolidated FHA source,
+VA publishes Pamphlet 26-7 for VA underwriting, and USDA publishes HB-1-3555 for the guaranteed
+program.[17][18][19][20] A policy family is not implemented by changing a label on conventional
+math.
+
+The same pass closed four adjacent integrity gaps. A rejected but otherwise priceable high-DTI
+conventional file retains its PMI instead of showing a lower payment with MI removed. The policy
+snapshot now captures the FICO floor, conforming limit, occupancy LTV cell, VA extra-member value
+and code-level VA residual constants actually used. The maximum-purchase calculator no longer
+reads mutable policy a second time or falls back to a hidden 43% DTI cap, and it does not extrapolate a VA maximum
+with the conventional DTI formula. A below-floor score is no longer described as a borrower
+strength. The evaluated program and its application-selected or preliminary-candidate basis are now
+stored directly on each immutable decision snapshot, including unsupported-product reviews with no
+resolved-policy object. VA runs do not load conventional DTI/LTV rules, and VA refinance or ARM
+requests route to review before fixed-purchase pricing.
 
 ### The schema anticipates the right document model
 
@@ -711,6 +747,23 @@ missed escalation or time to a useful human response.
     study remains deliberately unregistered until the founder approves the exact proactive-invitation
     experience; the operating protocol freezes the required population, assignment, outcomes, power
     analysis and stop rules before enrollment.
+59. Re-audited underwriting program integrity from application selection through payment projection,
+    scenario qualification, decision snapshots and preapproval letters. Removed the veteran-status
+    program override, keyed offer qualification by program plus payment, failed unsupported programs
+    to human review, completed the policy fingerprint values used by the engine and removed the
+    hidden DTI-policy fallback. A rejected but priceable conventional file now retains its PMI, and
+    VA approvals are no longer extrapolated through conventional maximum-purchase math. Internal
+    tests prove these paths; live provider findings and lender acceptance remain external gates.
+60. Repeated the underwriting audit against the borrower-visible state and adjacent product seams.
+    A self-reported preliminary candidate can no longer set `pre_approved`, persist issued options or
+    send pre-approval messages; it produces a clearly labeled preliminary plan and evidence checklist.
+    Changed facts remove stale approval amounts/options and return the file to review without an
+    automated denial. Decision history now stores program and selection basis directly. VA policy is
+    isolated from conventional scalars, VA refinance/ARM routes before fixed-purchase pricing, a
+    non-veteran VA-only filter remains empty instead of becoming all products, and conventional-only
+    veteran scenarios no longer ask for VA residual fields. Non-rate-locked pre-approval letters
+    omit a payment estimate that could use a different amount basis, and Loan Estimates name the
+    product whose payment was priced.
 
 ## Sources
 
@@ -730,3 +783,7 @@ missed escalation or time to a useful human response.
 14. [Anthropic — Mitigate jailbreaks and prompt injections](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks)
 15. [NIST — AI Risk Management Framework core](https://airc.nist.gov/airmf-resources/airmf/5-sec-core/)
 16. [Kohavi et al. — Controlled experiments on the web](https://link.springer.com/article/10.1007/s10618-008-0114-1)
+17. [Fannie Mae — Mortgage eligibility](https://selling-guide.fanniemae.com/sel/b2-1/mortgage-eligibility)
+18. [HUD — FHA Single Family Housing Policy Handbook 4000.1](https://www.hud.gov/hud-partners/single-family-handbook-4000-1)
+19. [U.S. Department of Veterans Affairs — VA Lenders Handbook, Pamphlet 26-7](https://www.benefits.va.gov/WARMS/docs/admin26/m26-07/Lender_Handbook_VA_Pamphlet_Complete.pdf)
+20. [USDA Rural Development — HB-1-3555, Guaranteed Loan Program](https://www.rd.usda.gov/media/file/download/hb-1-3555-consolidated.pdf)

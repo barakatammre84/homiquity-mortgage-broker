@@ -116,7 +116,7 @@ const CANARY_DEFINITIONS: Record<
   },
   underwriting_engine: {
     provider: "Homiquity policy engine",
-    operation: "synthetic_conventional_repeatability",
+    operation: "program_selection_and_repeatability",
   },
 };
 

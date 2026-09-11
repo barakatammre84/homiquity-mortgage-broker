@@ -16,6 +16,7 @@ import {
   consolidatedUnderwritingEngine,
   UnderwritingError,
   type UnderwritingInput,
+  type UnderwritingLoanProgram,
   type UnderwritingResult,
   type AssetProfile,
 } from "../underwritingEngine";
@@ -291,7 +292,12 @@ export function normalizeScenario(
   }
 
   const propertyState = raw.propertyState ?? app.propertyState ?? null;
-  if (app.isVeteran) {
+  const normalizedProductTypes = raw.productTypes?.length ? [...raw.productTypes].sort() : null;
+  const evaluatesVa = app.isVeteran && (
+    normalizedProductTypes === null
+    || normalizedProductTypes.some((type) => underwritingProgramForProduct(type) === "VA")
+  );
+  if (evaluatesVa) {
     // VA residual evaluation needs all three — name the gaps like the
     // instant decision does instead of letting the engine throw.
     if (!propertyState) missing.push("Property state (required for VA residual income)");
@@ -315,7 +321,7 @@ export function normalizeScenario(
       purchasePrice: cents(purchasePrice),
       downPayment: downPayment!,
       downPaymentPercent: cents((downPayment! / purchasePrice) * 100),
-      productTypes: raw.productTypes?.length ? [...raw.productTypes].sort() : null,
+      productTypes: normalizedProductTypes,
       occupancyType,
       propertyType,
       numberOfUnits,
@@ -342,6 +348,61 @@ function normalizeUrlaOccupancy(
   if (/invest|rental|non[-_ ]?owner/.test(t)) return "investment";
   if (/second|vacation/.test(t)) return "second_home";
   return "primary_residence";
+}
+
+/** Convert a rate-sheet family into the explicit program axis the engine audits. */
+export function underwritingProgramForProduct(
+  productType: string,
+  amortizationType?: string | null,
+): UnderwritingLoanProgram {
+  const amortization = (amortizationType ?? "").trim().toUpperCase();
+  if (amortization.includes("ARM") || amortization.includes("ADJUSTABLE")) return "ARM";
+  if (amortization.includes("INTEREST_ONLY")) return "OTHER";
+  const normalized = productType.trim().toUpperCase();
+  switch (normalized) {
+    case "CONV":
+    case "CONFORMING":
+    case "CONVENTIONAL": return "CONVENTIONAL";
+    case "FHA": return "FHA";
+    case "VA": return "VA";
+    case "USDA": return "USDA";
+    case "JUMBO": return "JUMBO";
+    case "ARM": return "ARM";
+    case "HELOC": return "HELOC";
+    default: return "OTHER";
+  }
+}
+
+/**
+ * Resolve the product filter without collapsing an explicitly requested but
+ * ineligible set into "all products". Exported so the VA-only/non-veteran
+ * boundary is pinned without database fixtures.
+ */
+export function resolveEligibleProductFilter(
+  requestedProductTypes: string[] | null,
+  isVeteran: boolean,
+): { productTypes: string[] | undefined; excludedProducts: string[]; explicitFilterEmpty: boolean } {
+  if (isVeteran) {
+    return {
+      productTypes: requestedProductTypes ?? undefined,
+      excludedProducts: [],
+      explicitFilterEmpty: requestedProductTypes !== null && requestedProductTypes.length === 0,
+    };
+  }
+  if (requestedProductTypes === null) {
+    return {
+      productTypes: undefined,
+      excludedProducts: ["VA (borrower is not a veteran)"],
+      explicitFilterEmpty: false,
+    };
+  }
+  const requestedVa = requestedProductTypes.some((type) => underwritingProgramForProduct(type) === "VA");
+  const productTypes = requestedProductTypes.filter((type) => underwritingProgramForProduct(type) !== "VA");
+  return {
+    productTypes,
+    excludedProducts: requestedVa ? ["VA (borrower is not a veteran)"] : [],
+    explicitFilterEmpty: productTypes.length === 0,
+  };
 }
 
 /**
@@ -397,8 +458,10 @@ export async function composeScenario(
 
   const offers = facts.offers.slice(0, MAX_EVALUATED_OFFERS);
   const evaluated: EvaluatedOffer[] = [];
-  // Qualification depends on the offer only through PITI — memoize per cent.
-  const qualCache = new Map<number, OfferQualification>();
+  // Qualification depends on both PITI and program. Caching only by payment
+  // caused a conventional and FHA/VA offer with the same rounded PITI to share
+  // one policy result even though their eligibility rules are different.
+  const qualCache = new Map<string, OfferQualification>();
   const policyFingerprints = new Set<string>();
 
   for (const offer of offers) {
@@ -409,12 +472,10 @@ export async function composeScenario(
     // what-if's PITI/DTI now prices the same matrix the instant decision and
     // the LE price, and matches the offer card's own estimatedMonthlyTotal.
     // (The banded loanCosts card that sat here exceeded the matrix in every
-    // live cell and was deleted with this migration.) Veterans stay MI-free
-    // on every product: the platform routes veterans to VA underwriting
-    // (loanEstimate's isVaLoan; qualifyAtPiti passes isVeteran), so their
-    // what-if prices the way their decision prices — VA guarantee, no
-    // monthly MI.
-    const isVaPriced = app.isVeteran || offer.productType.toUpperCase() === "VA";
+    // live cell and was deleted with this migration.) VA treatment follows the
+    // offer's product family; veteran status never changes another offer into
+    // VA paper.
+    const isVaPriced = offer.productType.toUpperCase() === "VA";
     const monthlyPMI = isVaPriced ? 0 : offer.estimatedMonthlyMI;
     const isFhaPriced = !isVaPriced && offer.productType.toUpperCase() === "FHA";
     // FHA up-front MIP rides the scenario's cash-to-close exactly as it rides
@@ -447,11 +508,15 @@ export async function composeScenario(
     const associationDues = facts.urlaMonthlyAssociationDues ?? 0;
     const piti = cents(offer.estimatedMonthlyPI + monthlyPMI + costs.monthlyEscrow + associationDues);
 
-    const cacheKey = Math.round(piti * 100);
+    const requestedLoanProgram = underwritingProgramForProduct(
+      offer.productType,
+      offer.amortizationType,
+    );
+    const cacheKey = `${requestedLoanProgram}:${Math.round(piti * 100)}`;
     let qualification = qualCache.get(cacheKey);
     if (!qualification) {
       qualification = await qualifyAtPiti(
-        { app, scenario, loanAmount, piti, facts },
+        { app, scenario, loanAmount, piti, facts, requestedLoanProgram },
         evaluate,
       );
       qualCache.set(cacheKey, qualification);
@@ -550,11 +615,13 @@ async function qualifyAtPiti(
     loanAmount: number;
     piti: number;
     facts: ScenarioFacts;
+    requestedLoanProgram: UnderwritingLoanProgram;
   },
   evaluate: EngineEvaluator,
 ): Promise<OfferQualification> {
-  const { app, scenario, loanAmount, piti, facts } = ctx;
+  const { app, scenario, loanAmount, piti, facts, requestedLoanProgram } = ctx;
   const input: UnderwritingInput = {
+    requestedLoanProgram,
     isVeteran: app.isVeteran,
     baseMonthlyIncome: facts.income.primaryMonthlyQualifyingIncome,
     bonusMonthlyIncome: 0,
@@ -570,6 +637,7 @@ async function qualifyAtPiti(
     numberOfUnits: scenario.numberOfUnits ?? undefined,
     propertyType: scenario.propertyType,
     observedPropertyType: scenario.addressContext?.observedPropertyType,
+    loanPurpose: "purchase",
     householdFamilySize: app.householdFamilySize ?? undefined,
     homeSquareFootage: app.homeSquareFootage ?? undefined,
   };
@@ -585,7 +653,7 @@ async function qualifyAtPiti(
     };
   } catch (err) {
     if (err instanceof UnderwritingError) {
-      if (err.kind === "POLICY_OUT_OF_BAND") {
+      if (err.kind === "POLICY_OUT_OF_BAND" || err.kind === "POLICY_UNSUPPORTED") {
         // A profile outside the automated matrices is a decision for a human,
         // not a documentation gap (same routing as the instant decision).
         return {
@@ -702,35 +770,32 @@ export async function runScenario(
   if (scenario) {
     const loanAmount = scenario.purchasePrice - scenario.downPayment;
 
-    // VA products require veteran entitlement — the platform routes VA by
-    // isVeteran (underwritingEngine targetLoanType), so a non-veteran's
-    // scenario never quotes VA paper.
-    let productTypes = scenario.productTypes ?? undefined;
-    if (!appFacts.isVeteran) {
-      const requested = productTypes;
-      if (!requested) {
-        excludedProducts.push("VA (borrower is not a veteran)");
-        productTypes = undefined; // filtered below via offer filter
-      } else if (requested.some((t) => t.toUpperCase() === "VA")) {
-        excludedProducts.push("VA (borrower is not a veteran)");
-        productTypes = requested.filter((t) => t.toUpperCase() !== "VA");
-      }
-    }
+    // VA products require a positive veteran/active-duty eligibility signal.
+    // Product choice remains explicit; the signal only controls whether a VA
+    // offer may be shown and evaluated.
+    const eligibleFilter = resolveEligibleProductFilter(scenario.productTypes, appFacts.isVeteran);
+    const productTypes = eligibleFilter.productTypes;
+    excludedProducts.push(...eligibleFilter.excludedProducts);
 
-    const profile: BorrowerPricingProfile = {
-      creditScore: scenario.fico,
-      loanAmount,
-      propertyValue: scenario.purchasePrice,
-      propertyType: scenario.propertyType,
-      occupancyType: scenario.occupancyType,
-      loanPurpose: "purchase",
-      isFirstTimeHomeBuyer: appFacts.isFirstTimeBuyer,
-      lockTermDays: scenario.lockTermDays,
-      productTypes: productTypes?.length ? productTypes : undefined,
-    };
-    offers = await computeOffers(storage, profile);
-    if (!appFacts.isVeteran) {
-      offers = offers.filter((o) => o.productType.toUpperCase() !== "VA");
+    // Preserve the distinction between "no filter" and "the explicit filter
+    // became empty after eligibility checks". Passing [] as undefined caused a
+    // non-veteran who requested VA-only to receive every unrelated product.
+    if (!eligibleFilter.explicitFilterEmpty) {
+      const profile: BorrowerPricingProfile = {
+        creditScore: scenario.fico,
+        loanAmount,
+        propertyValue: scenario.purchasePrice,
+        propertyType: scenario.propertyType,
+        occupancyType: scenario.occupancyType,
+        loanPurpose: "purchase",
+        isFirstTimeHomeBuyer: appFacts.isFirstTimeBuyer,
+        lockTermDays: scenario.lockTermDays,
+        productTypes,
+      };
+      offers = await computeOffers(storage, profile);
+      if (!appFacts.isVeteran) {
+        offers = offers.filter((o) => o.productType.toUpperCase() !== "VA");
+      }
     }
 
     // FTHB LLPA waiver → lender credit, mirroring generateLoanEstimate.

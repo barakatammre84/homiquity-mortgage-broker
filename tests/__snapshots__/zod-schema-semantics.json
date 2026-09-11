@@ -3572,7 +3572,7 @@
     "missing-status": "reject:loanAmount,missingItems,reasons,status",
     "missing-decision": "reject:loanAmount,missingItems,reasons",
     "missing-qualifier": "reject:loanAmount,missingItems,qualifier,reasons",
-    "missing-dti": "reject:loanAmount,missingItems,reasons",
+    "missing-loanProgram": "reject:loanAmount,missingItems,reasons",
     "wrongtype-applicationId": "reject:applicationId,loanAmount,missingItems,reasons",
     "all-keys-null": "reject:applicationId,qualifier,status,trigger"
   },

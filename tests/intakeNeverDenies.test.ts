@@ -67,10 +67,19 @@ vi.mock("../server/storage", () => ({
       application = { ...application, ...patch };
       return application;
     },
-    createNotification: async () => ({}),
-    createDealActivity: async () => ({}),
+    createNotification: async (notification: Record<string, unknown>) => {
+      lifecycleEvents.push(`notification:${String(notification.title)}`);
+      return {};
+    },
+    createDealActivity: async (activity: Record<string, unknown>) => {
+      lifecycleEvents.push(`activity:${String(activity.title)}`);
+      return {};
+    },
     deleteLoanOptionsByApplication: async () => {},
-    createLoanOption: async () => ({}),
+    createLoanOption: async () => {
+      lifecycleEvents.push("loan_option");
+      return {};
+    },
     createActivity: async () => ({}),
     getPropertyById: async () => null,
     getPropertiesByUser: async () => [],
@@ -87,10 +96,6 @@ vi.mock("../server/storage", () => ({
       return { id: `task_${lifecycleEvents.length}`, ...task };
     },
   },
-}));
-
-vi.mock("../server/services/lookupResolver", () => ({
-  lookupResolver: { getPolicyScalar: async () => 43 },
 }));
 
 vi.mock("../server/services/decisionEngine", () => ({
@@ -129,10 +134,32 @@ function baseApplication(over: Record<string, unknown> = {}) {
 }
 
 /** Every terminal shape the deterministic engine can hand intake. */
+const VERIFIED_APPROVAL = {
+  decision: "APPROVED",
+  status: "DECISION_READY",
+  reasons: [],
+  qualifier: "VERIFIED",
+  loanProgram: "CONVENTIONAL",
+  resolvedPolicy: {
+    loanType: "CONVENTIONAL",
+    conventionalDtiCapPct: 43,
+    conventionalFicoFloor: 640,
+  },
+  metrics: { dti: 30, ltv: 80, monthlyIncome: 10000, monthlyDebts: 500, pmiMonthly: 0 },
+};
+const PRELIMINARY_APPROVAL = {
+  ...VERIFIED_APPROVAL,
+  qualifier: "PRELIMINARY",
+};
+
 const ENGINE_OUTCOMES: Array<{ label: string; decision: unknown }> = [
   {
-    label: "APPROVED",
-    decision: { decision: "APPROVED", status: "COMPLETE", reasons: [], qualifier: "PRELIMINARY", metrics: { dti: 30, ltv: 80 } },
+    label: "VERIFIED APPROVED",
+    decision: VERIFIED_APPROVAL,
+  },
+  {
+    label: "PRELIMINARY APPROVED",
+    decision: PRELIMINARY_APPROVAL,
   },
   {
     label: "REJECTED",
@@ -195,12 +222,13 @@ describe("ECOA §1002.9: automated intake never denies", () => {
   // which would auto-approve every file the engine flagged for a human. Pin the
   // exact mapping the module header documents, in both directions.
   const EXPECTED_MAPPING: Array<[string, unknown, "pre_approved" | "under_review"]> = [
-    ["APPROVED", ENGINE_OUTCOMES[0].decision, "pre_approved"],
-    ["REJECTED", ENGINE_OUTCOMES[1].decision, "under_review"],
-    ["MANUAL_REVIEW", ENGINE_OUTCOMES[2].decision, "under_review"],
-    ["NEEDS_MORE_INFO", ENGINE_OUTCOMES[3].decision, "under_review"],
+    ["VERIFIED APPROVED", VERIFIED_APPROVAL, "pre_approved"],
+    ["PRELIMINARY APPROVED", PRELIMINARY_APPROVAL, "under_review"],
+    ["REJECTED", ENGINE_OUTCOMES[2].decision, "under_review"],
+    ["MANUAL_REVIEW", ENGINE_OUTCOMES[3].decision, "under_review"],
+    ["NEEDS_MORE_INFO", ENGINE_OUTCOMES[4].decision, "under_review"],
     ["null decision", null, "under_review"],
-    ["unknown token", ENGINE_OUTCOMES[6].decision, "under_review"],
+    ["unknown token", ENGINE_OUTCOMES[7].decision, "under_review"],
   ];
 
   it.each(EXPECTED_MAPPING)(
@@ -214,7 +242,7 @@ describe("ECOA §1002.9: automated intake never denies", () => {
   );
 
   it("a REJECTED engine decision routes to human review — the ECOA locus", async () => {
-    decisionResult = ENGINE_OUTCOMES[1].decision;
+    decisionResult = ENGINE_OUTCOMES[2].decision;
     const result = await analyzeIntake(APP_ID);
     // The engine said no. Intake must NOT turn that into a denial; only a human
     // may, via the statusDecisions chokepoint that generates the notice.
@@ -223,7 +251,7 @@ describe("ECOA §1002.9: automated intake never denies", () => {
   });
 
   it("carries the engine's reasons forward as concerns rather than discarding them", async () => {
-    decisionResult = ENGINE_OUTCOMES[1].decision;
+    decisionResult = ENGINE_OUTCOMES[2].decision;
     const result = await analyzeIntake(APP_ID);
     // Routing to review must not silently drop WHY — those reasons are what an
     // underwriter (and any later adverse-action notice) works from.
@@ -262,9 +290,31 @@ describe("ECOA §1002.9: automated intake never denies", () => {
 });
 
 describe("ECOA: an approval must be a coherent approval (#7)", () => {
+  it("does not describe a below-policy credit score as a strength", async () => {
+    application = baseApplication({ creditScore: 620 });
+    decisionResult = {
+      decision: "REJECTED",
+      status: "DECISION_READY",
+      reasons: ["Representative credit score of 620 is below the conventional minimum of 640"],
+      missingItems: [],
+      qualifier: "PRELIMINARY",
+      loanProgram: "CONVENTIONAL",
+      resolvedPolicy: { conventionalFicoFloor: 640 },
+      metrics: { dti: 30, ltv: 80 },
+    };
+
+    const result = await analyzeIntake(APP_ID);
+
+    expect(result.analysis.strengths.join(" ")).not.toMatch(/Credit score/);
+    expect(result.analysis.concerns.join(" ")).toMatch(/below the conventional minimum of 640/);
+  });
+
   it("APPROVED with no usable income routes to review, not a $0 pre-approval", async () => {
     application = baseApplication({ annualIncome: "0" });
-    decisionResult = ENGINE_OUTCOMES[0].decision;
+    decisionResult = {
+      ...VERIFIED_APPROVAL,
+      metrics: { ...VERIFIED_APPROVAL.metrics, monthlyIncome: 0 },
+    };
     const result = await analyzeIntake(APP_ID);
     expect(result.outcome).toBe("under_review");
     expect(result.isApproved).toBe(false);
@@ -283,6 +333,44 @@ describe("ECOA: an approval must be a coherent approval (#7)", () => {
     const result = await analyzeIntake(APP_ID);
     expect(parseFloat(result.preApprovalAmount)).toBeGreaterThanOrEqual(395000);
   });
+
+  it("does not size a VA approval with the conventional DTI formula", async () => {
+    decisionResult = {
+      ...(ENGINE_OUTCOMES[0].decision as Record<string, unknown>),
+      loanProgram: "VA",
+      resolvedPolicy: { loanType: "VA" },
+    };
+
+    const result = await analyzeIntake(APP_ID);
+
+    expect(result.outcome).toBe("pre_approved");
+    expect(result.preApprovalAmount).toBe("400000");
+    expect(result.analysis.recommendations.join(" ")).toMatch(/higher VA.*program-specific review/i);
+  });
+
+  it("does not manufacture a pre-approval amount when the decision omitted its captured DTI cap", async () => {
+    decisionResult = {
+      ...VERIFIED_APPROVAL,
+      resolvedPolicy: { loanType: "CONVENTIONAL" },
+    };
+
+    await expect(analyzeIntake(APP_ID)).rejects.toThrow(/CONVENTIONAL_DTI_CAP.*30%-60%/i);
+  });
+
+  it.each([0, 29.99, 60.01, Number.NaN])(
+    "fails closed when the configured DTI cap is invalid (%s)",
+    async (invalidCap) => {
+      decisionResult = {
+        ...VERIFIED_APPROVAL,
+        resolvedPolicy: {
+          ...(VERIFIED_APPROVAL.resolvedPolicy),
+          conventionalDtiCapPct: invalidCap,
+        },
+      };
+
+      await expect(analyzeIntake(APP_ID)).rejects.toThrow(/CONVENTIONAL_DTI_CAP.*30%-60%/i);
+    },
+  );
 });
 
 describe("finalizeIntake guards (F-015: this function had no executing test)", () => {
@@ -310,6 +398,18 @@ describe("finalizeIntake guards (F-015: this function had no executing test)", (
     expect(lastTaskIndex).toBeGreaterThan(-1);
     expect(settledIndex).toBeGreaterThan(lastTaskIndex);
   });
+
+  it("never turns a preliminary candidate into pre-approval status, options, or issued messaging", async () => {
+    decisionResult = PRELIMINARY_APPROVAL;
+    await finalizeIntake(APP_ID);
+
+    expect(updates.some((patch) => patch.status === "pre_approved")).toBe(false);
+    expect(updates.some((patch) => patch.status === "under_review")).toBe(true);
+    expect(lifecycleEvents).not.toContain("loan_option");
+    expect(lifecycleEvents.some((event) => /Pre-Approval Issued/.test(event))).toBe(false);
+    expect(lifecycleEvents).toContain("activity:Preliminary Mortgage Plan Ready");
+    expect(lifecycleEvents).toContain("notification:Your preliminary mortgage plan is ready");
+  });
 });
 
 describe("URLA preliminary-analysis refresh", () => {
@@ -327,14 +427,16 @@ describe("URLA preliminary-analysis refresh", () => {
     }));
   });
 
-  it("never silently retracts an issued pre-approval when new facts require review", async () => {
+  it("removes stale approval state and amount when new facts require review", async () => {
     application = baseApplication({ status: "pre_approved", preApprovalAmount: "500000" });
-    decisionResult = ENGINE_OUTCOMES[2].decision;
+    decisionResult = ENGINE_OUTCOMES[3].decision;
 
     const result = await refreshEarlyStageIntakeAnalysis(APP_ID, "urla_updated");
 
     expect(result?.outcome).toBe("under_review");
-    expect(updates.some((patch) => patch.status === "under_review")).toBe(false);
-    expect(updates.some((patch) => patch.preApprovalAmount === "0")).toBe(false);
+    expect(updates.some((patch) => patch.status === "under_review")).toBe(true);
+    expect(updates.some((patch) => patch.preApprovalAmount === "0")).toBe(true);
+    expect(lifecycleEvents).toContain("activity:Pre-Approval Needs Review");
+    expect(lifecycleEvents).toContain("notification:Your mortgage plan needs review");
   });
 });

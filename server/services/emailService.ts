@@ -299,6 +299,34 @@ export const emailTemplates = {
     };
   },
 
+  applicationPreliminaryPlan(borrowerName: string, applicationId: string): EmailOptions {
+    return {
+      to: "",
+      subject: "Your Preliminary Mortgage Plan Is Ready",
+      html: baseTemplate(`
+        <h2 style="margin:0 0 16px;color:#0f1729;font-size:20px">Your preliminary plan is ready</h2>
+        <p style="color:#475569;line-height:1.6;margin:0 0 16px">Hi ${borrowerName},</p>
+        <p style="color:#475569;line-height:1.6;margin:0 0 16px">
+          Your self-reported information supports a preliminary mortgage plan. This is a planning result, not a pre-approval. Upload the documents listed in your dashboard so your loan team can verify the figures and move your file forward.
+        </p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:6px;padding:16px;margin:16px 0">
+          <tr>
+            <td style="padding:8px 16px">
+              <p style="margin:0;color:#94a3b8;font-size:12px">APPLICATION ID</p>
+              <p style="margin:4px 0 0;color:#0f1729;font-size:14px;font-weight:600">${applicationId.substring(0, 8).toUpperCase()}</p>
+            </td>
+            <td style="padding:8px 16px" align="right">
+              ${statusBadge("Documents Needed", "#3b82f6")}
+            </td>
+          </tr>
+        </table>
+        <p style="color:#475569;line-height:1.6;margin:16px 0 0;font-size:14px">
+          Open your dashboard for the exact checklist based on how you earn income and the properties you own.
+        </p>
+      `, "Your preliminary plan is ready. Upload the listed documents to verify your figures."),
+    };
+  },
+
   // The single submission email for a file the automated review routed to a
   // human underwriter: acknowledges receipt, says who looks at it next, and
   // points at the dashboard for the specific items. Deliberately names NO
@@ -755,6 +783,7 @@ export const emailTemplates = {
 
 export type NotificationType =
   | "application_submitted"
+  | "application_preliminary_plan"
   | "application_under_review"
   | "application_pre_approved"
   | "application_denied"
@@ -784,6 +813,9 @@ export function sendNotificationEmail(mapping: NotificationEmailMapping): void {
   switch (type) {
     case "application_submitted":
       email = emailTemplates.applicationSubmitted(data.borrowerName, data.applicationId);
+      break;
+    case "application_preliminary_plan":
+      email = emailTemplates.applicationPreliminaryPlan(data.borrowerName, data.applicationId);
       break;
     case "application_under_review":
       email = emailTemplates.applicationUnderReview(data.borrowerName, data.applicationId);

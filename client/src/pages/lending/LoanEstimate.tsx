@@ -27,6 +27,7 @@ import {
 
 interface LoanEstimateData {
   applicationId: string;
+  loanProgram: "CONVENTIONAL" | "FHA" | "VA";
   dateIssued: string;
   expirationDate: string;
   loanTerms: {
@@ -245,6 +246,9 @@ export default function LoanEstimate() {
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
+                      <Badge variant="secondary" data-testid="badge-loan-program">
+                        {le.loanProgram}
+                      </Badge>
                       {/*
                         Three states, not two (ux-30). `null` means the TRID
                         clock never started — no deadline exists yet, so

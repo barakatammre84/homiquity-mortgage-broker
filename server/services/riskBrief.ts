@@ -141,8 +141,8 @@ export async function assembleRiskBriefFacts(applicationId: string): Promise<Ris
       policy: decision.resolvedPolicy
         ? {
             loanType: decision.resolvedPolicy.loanType,
-            dtiCapPct: decision.resolvedPolicy.conventionalDtiCapPct,
-            ltvCapPct: decision.resolvedPolicy.conventionalLtvCapPct,
+            dtiCapPct: decision.resolvedPolicy.conventionalDtiCapPct ?? null,
+            ltvCapPct: decision.resolvedPolicy.conventionalLtvCapPct ?? null,
             fingerprint: decision.resolvedPolicy.fingerprint,
           }
         : null,

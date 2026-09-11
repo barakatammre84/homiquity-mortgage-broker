@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
+const policyScalarCalls = vi.hoisted(() => [] as string[]);
+
 // ---------------------------------------------------------------------------
 // The DTI helper and the deterministic engine both resolve policy scalars from
 // LookupResolverService, which transitively needs a live Postgres connection.
@@ -9,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../server/services/lookupResolver", () => ({
   lookupResolver: {
     getPolicyScalar: async (code: string) => {
+      policyScalarCalls.push(code);
       const scalars: Record<string, number> = {
         CONVENTIONAL_DTI_CAP: 43,
         CONVENTIONAL_STRETCH_DTI: 50,
@@ -22,8 +25,12 @@ vi.mock("../server/services/lookupResolver", () => ({
     },
     // Occupancy max-LTV mirrors the cap above; PMI/LLPA rates are 0 so pricing
     // does not affect the value-guard assertions.
-    resolveMatrixValue: async (query: { matrixCode?: string }) =>
-      query?.matrixCode === "CONVENTIONAL_MAX_LTV" ? 97 : 0,
+    resolveMatrixValue: async (query: { matrixCode?: string }) => {
+      if (query?.matrixCode === "CONVENTIONAL_MAX_LTV") return 97;
+      if (query?.matrixCode === "CONVENTIONAL_PMI") return 0.9;
+      if (query?.matrixCode === "FANNIE_LLPA") return 0.5;
+      return 0;
+    },
   },
 }));
 
@@ -57,6 +64,7 @@ describe("ConsolidatedUnderwritingEngine value guards", () => {
   const engine = new ConsolidatedUnderwritingEngine();
 
   const baseInput: UnderwritingInput = {
+    requestedLoanProgram: "CONVENTIONAL",
     isVeteran: false,
     baseMonthlyIncome: 10000,
     bonusMonthlyIncome: 0,
@@ -97,6 +105,95 @@ describe("ConsolidatedUnderwritingEngine value guards", () => {
   it("still approves a well-qualified conventional file", async () => {
     const result = await engine.evaluate(baseInput);
     expect(result.decision).toBe("APPROVED");
+    expect(result.loanType).toBe("CONVENTIONAL");
     expect(result.calculatedLtv).toBe(80);
+    expect(result.resolvedPolicy).toMatchObject({
+      conventionalFicoFloor: 620,
+      conformingLoanLimit: 806500,
+      conventionalOccupancyMaxLtvPct: 97,
+    });
+    expect(result.resolvedPolicy.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not switch a veteran's requested conventional loan to VA", async () => {
+    const result = await engine.evaluate({ ...baseInput, isVeteran: true });
+    expect(result.decision).toBe("APPROVED");
+    expect(result.loanType).toBe("CONVENTIONAL");
+    expect(result.actualResidualIncome).toBeUndefined();
+  });
+
+  it("keeps PMI in the payment facts when DTI rejects an otherwise priceable file", async () => {
+    const result = await engine.evaluate({
+      ...baseInput,
+      originalLoanAmount: 360000,
+      proposedPiti: 5500,
+    });
+
+    expect(result.decision).toBe("REJECTED");
+    expect(result.rejectionReasons.join(" ")).toMatch(/Debt-to-Income/i);
+    expect(result.resolvedPmiMonthlyPremium).toBeCloseTo(270, 8);
+    expect(result.resolvedPolicy.pmiRatePct).toBe(0.9);
+  });
+
+  it.each(["FHA", "USDA", "JUMBO", "ARM"] as const)(
+    "refuses to apply conventional policy to an unsupported %s program",
+    async (requestedLoanProgram) => {
+      const err = await engine.evaluate({ ...baseInput, requestedLoanProgram }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(UnderwritingError);
+      expect((err as UnderwritingError).kind).toBe("POLICY_UNSUPPORTED");
+      expect((err as UnderwritingError).publicMessage).toMatch(/not automated.*loan officer/i);
+    },
+  );
+
+  it("requires a human eligibility check when VA is selected without a veteran signal", async () => {
+    const err = await engine.evaluate({ ...baseInput, requestedLoanProgram: "VA" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UnderwritingError);
+    expect((err as UnderwritingError).kind).toBe("POLICY_OUT_OF_BAND");
+    expect((err as UnderwritingError).publicMessage).toMatch(/confirm VA eligibility/i);
+  });
+
+  it("evaluates VA without reading unrelated conventional policy rows", async () => {
+    const callStart = policyScalarCalls.length;
+    const result = await engine.evaluate({
+      ...baseInput,
+      requestedLoanProgram: "VA",
+      isVeteran: true,
+      subjectPropertyState: "IL",
+      householdFamilySize: 2,
+      homeSquareFootage: 1600,
+    });
+    const calls = policyScalarCalls.slice(callStart);
+
+    expect(calls).toEqual([
+      "HAIRCUT_STOCK_INVESTMENT",
+      "HAIRCUT_RETIREMENT",
+    ]);
+    expect(result.resolvedPolicy.conventionalDtiCapPct).toBeUndefined();
+    expect(result.resolvedPolicy.conventionalStretchDtiPct).toBeUndefined();
+    expect(result.resolvedPolicy.conventionalLtvCapPct).toBeUndefined();
+  });
+
+  it.each([
+    ["refinance", { loanPurpose: "refinance" }],
+    ["adjustable", { amortizationType: "adjustable" }],
+  ] as const)("routes a VA %s outside the automated purchase/fixed scope", async (_label, overrides) => {
+    const result = await engine.evaluate({
+      ...baseInput,
+      ...overrides,
+      requestedLoanProgram: "VA",
+      isVeteran: true,
+      subjectPropertyState: "IL",
+      householdFamilySize: 2,
+      homeSquareFootage: 1600,
+    });
+
+    expect(result.decision).toBe("MANUAL_REVIEW");
+    expect(result.reviewReasons.join(" ")).toMatch(/review|not automated/i);
   });
 });

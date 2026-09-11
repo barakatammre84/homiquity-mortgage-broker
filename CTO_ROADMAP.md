@@ -1,10 +1,10 @@
 # Homiquity CTO roadmap
 
-**Last evidence review:** 2026-09-10
+**Last evidence review:** 2026-09-11
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `315845ac67ef2427483b08ad7daf426add1e4c83` on 2026-09-10.
+**Audited production baseline:** `5f3c086b61d5ad61f80f511367e888c13a9a2e5c` on 2026-09-11.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -52,8 +52,8 @@ route returned successfully, and the service reported SendGrid email configured.
 has a strict required test gate, automatic production migrations and post-deploy commit
 verification. On that exact build, a borrower-data-free sweep passed Homi's grounded status turn,
 the real image-only pay-statement extraction path with page evidence, private object-storage
-write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 4.104 s,
-9.403 s, 0.699 s, 0.006 s and 0.925 s. The Homi check uses the production prompt and context
+write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 5.167 s,
+9.269 s, 0.728 s, 0.008 s and 0.976 s. The Homi check uses the production prompt and context
 builder, requires the real status tool schema, grounds the reply in fixed server truth and passes
 outbound compliance lint without reading a borrower file.
 
@@ -65,6 +65,22 @@ calculation actually uses. A difference is visible to the reviewer and must be a
 reason; it cannot be accepted silently. Staff can create an append-only bank-statement analysis
 from reviewed deposit evidence while explicitly removing transfers, refunds, duplicates and other
 ineligible deposits.
+
+The underwriting release now keeps the mortgage program explicit from URLA through pricing,
+qualification, decision fingerprints, loan-option comparisons and preapproval letters. The fast
+application still produces a clearly identified preliminary conventional candidate without asking
+a novice borrower to select a program. That self-reported candidate remains a preliminary plan: it
+cannot set pre-approval status, persist issued options or send pre-approval messages. A verified
+decision requires the application-selected program. Veteran status can establish possible VA eligibility but cannot silently convert another
+program to VA. Conventional and VA are the only automated policy families; FHA, USDA, jumbo, ARM,
+HELOC and unknown products route to a loan officer before a conventional result can be reused.
+Every mutable eligibility threshold used by a conventional or VA decision is now retained in the
+policy snapshot, while the evaluated program and its selection basis are first-class decision-history
+fields even when no policy JSON exists. Conventional maximum sizing uses the cap already captured by
+the decision rather than reading mutable policy twice. VA maximum sizing is not extrapolated with
+the conventional DTI calculator, and a VA evaluation no longer loads unrelated conventional policy.
+The current VA automation is limited to a fixed-purchase residual screen; VA refinance and ARM
+requests route to review before fixed-purchase pricing.
 
 Every binding or customer-visible verified status is now recalculated from current proof. Pricing,
 loan options, Homi, approval statuses and underwriting advancement require a current approved
@@ -126,7 +142,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
 | Review complicated income | **Built · exact evidence lineage, reconciliation and production engine repeatability proven** | Populate the protected extraction benchmark; then a licensed reviewer must reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
-| Explain options and decisions | **Built · stale and simulated evidence fails closed** | Real credit, asset, employment, property, AUS and pricing evidence supports the decision and the first lender accepts the result. |
+| Explain options and decisions | **Built · product intent, stale evidence and unsupported policy fail closed** | Implement cited FHA/USDA policy only after a selected lender requires it; real credit, verification, AUS and pricing evidence must support the decision and the first lender must accept the result. |
 | Operate the file | **Live · Proven internally** | Named staff complete claim, processing, underwriting, closing and handoff on a real file. |
 | Deliver to a lender | **Built · XSD proven internally** | One approved lender accepts the multi-borrower MISMO, income and final AUS artifacts and completes an acknowledgement/correction exchange. |
 | Close, fund and service | **Built** | One real closing, funding record, borrower update sequence and post-close handoff. |
@@ -170,6 +186,12 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    underwriting against deployed policy rows. Current workpapers cite the reviewed numeric facts,
    reconcile them to the calculation inputs, and invalidate downstream decisions when evidence
    changes. Pricing, options, approval and stage advancement independently re-resolve that proof.
+   Program intent now remains explicit across the same chain: a preliminary conventional candidate
+   preserves fast intake, verified/outward decisions require the URLA selection, veteran status
+   cannot switch the product, equal-payment offers remain policy-distinct, and unsupported product
+   families route to review. The policy fingerprint captures the FICO floor, conforming limit,
+   occupancy LTV cell and VA constants actually used. Implement a new automated family only from
+   its current governing handbook and a lender-backed acceptance matrix.
    This does not replace a live credit report, AUS result, rate sheet or lender acknowledgement.
 4. **Activate one live stack:** production storage, real credit and verification, current approved
    pricing, required AUS, and one lender receiver.

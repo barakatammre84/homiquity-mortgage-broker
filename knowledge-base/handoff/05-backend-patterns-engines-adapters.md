@@ -34,7 +34,7 @@ live borrower.
 ```mermaid
 flowchart TD
   A["request"] --> B["app.ts middleware - CSRF, limiters, PII-allowlist logger"]
-  B --> C["registerRoutes - 40 registrars in fixed order"]
+  B --> C["registerRoutes - 42 registrars in fixed order"]
   C --> D{"domain is a directory?"}
   D -- "borrower, lending, underwriting, agent-broker" --> E["index.ts - ORIGINAL order = Express matching order"]
   D -- "no" --> F["flat server/routes/domain.ts"]
@@ -56,7 +56,7 @@ flowchart TD
   R --> S[("Postgres via Drizzle")]
   G --> T["logAudit - fire and forget, swallows its own errors"]
   G --> U["typed JSON"]
-  V[".github/workflows/cron-jobs.yml - 7 schedules"] -- "Bearer CRON_SECRET" --> X["/api/jobs/* - dual-trigger auth"]
+  V[".github/workflows/cron-jobs.yml - 8 schedules"] -- "Bearer CRON_SECRET" --> X["/api/jobs/* - dual-trigger auth"]
   X --> K
 ```
 
@@ -64,10 +64,10 @@ flowchart TD
 
 - **The shape is written down in the skill.** `.claude/skills/api-routes/SKILL.md:3` names
   "the route→Zod→service→adapter→Drizzle→typed-JSON pattern". Two of its facts are stale: `:24`
-  "~523 endpoints" vs `grep -rnE 'app\.(get|post|put|patch|delete)\(' server/routes | wc -l` → `558`
-  (579 across all of `server/`), and `:20` "New status pools use `pgEnum`" vs one `pgEnum` in the
+  "~523 endpoints" vs `grep -rnE 'app\.(get|post|put|patch|delete)\(' server/routes | wc -l` → `582`
+  (603 across all of `server/`), and `:20` "New status pools use `pgEnum`" vs one `pgEnum` in the
   whole schema.
-- **The canonical route.** `server/routes/lending/applications.ts:37` `POST /api/loan-applications`:
+- **The canonical route.** `server/routes/lending/applications.ts:38` `POST /api/loan-applications`:
   `safeParse` `:42` → `unlicensedStateRejection` `:52` → draft consumption through
   `updatePipelineStage` `:103` → `logAudit` `:105,110` → role promotion `:134-145` → `res.status(201)`
   `:279` → `finalizeIntake` after the response `:294`. `grep -c "non-fatal" server/routes/lending/applications.ts`
@@ -88,13 +88,13 @@ flowchart TD
 - **The two-wave `inArray` pattern.** `server/routes/lending/dashboard.ts:45` (wave 1: five
   storage reads in a `Promise.all`) and `:88-139` (wave 2: six Drizzle selects scoped with
   `inArray(table.applicationId, ids)`); the comment at `:53-56` says it replaced "8 + ~13×N serial
-  queries". `grep -rn "inArray(" server --include='*.ts' | wc -l` → `56`.
+  queries". `grep -rn "inArray(" server --include='*.ts' | wc -l` → `84`.
 - **Six transactions in the whole backend.** `grep -rn "\.transaction(" server --include='*.ts'`
   → `storage/leases.ts:209`, `storage/pricingPolicy.ts:147`, `routes/admin/pricingPolicy.ts:141`,
   `services/creditAuditChain.ts:120`, `services/taxDocumentIntelligence.ts:194`,
   `services/borrowerEntityResolution.ts:257`. Intake and stage changes are best-effort sequences.
-- **`logAudit` is 26 lines, 138 call sites (133 in routes), and swallows its own errors.**
-  `server/auditLog.ts:23-25`; `grep -rn "logAudit(" server | wc -l` → `138`.
+- **`logAudit` is 26 lines, 155 call sites, and swallows its own errors.**
+  `server/auditLog.ts:23-25`; `grep -rn "logAudit(" server | wc -l` → `155`.
 - **The underwriting engine.** `server/underwritingEngine.ts:295` `ConsolidatedUnderwritingEngine`,
   singleton `:728`; the contract at `:289-293`: "intentionally isolated from any external/AI
   decisioning path (Fair Lending / Reg B) … resolved at runtime from the dynamic lookup matrices
@@ -149,7 +149,7 @@ flowchart TD
   dev-only local shim (`localObjectStorage.ts:7-20`); multer is memory-only for exactly one
   consumer, the public lease extractor, followed by magic-byte verification of 7 signatures because
   the declared MIME type is spoofable (`server/routes/utils.ts:9-15`, `:35`, `:56`).
-- **The single status writer.** `server/pipelineEngine.ts:594` `updatePipelineStage` — "Direct
+- **The single status writer.** `server/pipelineEngine.ts:849` `updatePipelineStage` — "Direct
   storage.updateLoanApplication calls with a status field are forbidden (see
   tests/statusVocabulary.test.ts)" (`:587-593`). Chapter 04 has the callers and the one
   sanctioned bypass.
@@ -160,9 +160,9 @@ flowchart TD
 - **The borrower graph is advisory.** `server/services/borrowerGraph.ts:31` trust tiers 1–3;
   `:421-425` — "it feeds coaching, prediction, lender matching and scenarios, never the binding
   decision path."
-- **Jobs.** `server/routes/jobs.ts:28` `isCronRequest` — `Bearer $CRON_SECRET` or an admin
+- **Jobs.** `server/routes/jobs.ts:61` `isCronRequest` — `Bearer $CRON_SECRET` or an admin
   session; unset secret degrades to admin-only, never open (`:30`). `.github/workflows/cron-jobs.yml:29-35`
-  is THE scheduler (7 schedules; an unmapped expression fails the run, `:78-81`; it curls the
+  is THE scheduler (8 schedules; an unmapped expression fails the run, `:78-81`; it curls the
   Railway origin, `:104`). Pinned by `tests/cronSchedules.test.ts:30-40`.
 - **The MCP server.** `server/mcp/index.ts` registers 3 tools (`:134` `run_soft_credit_pull`,
   `:365` `get_best_execution_rates`, `:497` `retrieve_property_valuation`); agent identity is

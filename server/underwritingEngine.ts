@@ -23,6 +23,9 @@ import {
  *                       uncovered family size). NOT a gap in the borrower's
  *                       file — it is a decision the automated path cannot make,
  *                       so it must route to a human, never loop for documents.
+ *  - POLICY_UNSUPPORTED : the requested product family has no complete policy
+ *                       implementation in this engine. Route to a human before
+ *                       applying a different program's rules.
  *
  * `publicMessage` is a borrower-safe explanation; `message` keeps the internal
  * audit detail. Missing/expired *policy scalar* matrices are a system
@@ -32,7 +35,8 @@ import {
 export type UnderwritingErrorKind =
   | "INPUT_INCOMPLETE"
   | "INPUT_INVALID"
-  | "POLICY_OUT_OF_BAND";
+  | "POLICY_OUT_OF_BAND"
+  | "POLICY_UNSUPPORTED";
 
 export class UnderwritingError extends Error {
   constructor(
@@ -57,14 +61,23 @@ export class UnderwritingError extends Error {
  */
 export interface ResolvedPolicy {
   loanType: "CONVENTIONAL" | "VA";
-  conventionalDtiCapPct: number;
-  conventionalStretchDtiPct: number;
-  conventionalLtvCapPct: number;
+  conventionalDtiCapPct?: number;
+  conventionalStretchDtiPct?: number;
+  conventionalLtvCapPct?: number;
+  conventionalFicoFloor?: number;
+  conformingLoanLimit?: number;
+  conventionalOccupancyMaxLtvPct?: number;
   haircutStockInvestment: number;
   haircutRetirement: number;
   pmiRatePct?: number;
   llpaRatePct?: number;
   vaRequiredResidualIncome?: number;
+  vaResidualExtraMember?: number;
+  vaResidualTaxRate?: number;
+  vaUtilityRatePerSqft?: number;
+  vaDtiCushionTriggerPct?: number;
+  vaCushionMultiplier?: number;
+  vaResidualReductionFactor?: number;
   fingerprint: string;
 }
 
@@ -72,6 +85,22 @@ export interface AssetProfile {
   type: "CHECKING_SAVINGS" | "STOCK_INVESTMENT" | "RETIREMENT_IRA_401K";
   balance: number;
 }
+
+/**
+ * Product family the caller is asking this engine to evaluate. Keeping this
+ * explicit prevents borrower eligibility (for example, veteran status) from
+ * silently selecting a different mortgage program than the application or
+ * rate-sheet offer requested.
+ */
+export type UnderwritingLoanProgram =
+  | "CONVENTIONAL"
+  | "FHA"
+  | "VA"
+  | "USDA"
+  | "JUMBO"
+  | "ARM"
+  | "HELOC"
+  | "OTHER";
 
 /**
  * Normalizes the free-text occupancy string written across the app
@@ -165,6 +194,8 @@ export function reconcileSubjectProperty(input: {
 }
 
 export interface UnderwritingInput {
+  /** The application or offer's actual product family; never inferred from borrower traits. */
+  requestedLoanProgram: UnderwritingLoanProgram;
   isVeteran: boolean;
   isActiveDuty?: boolean;
   hasExchangeAccess?: boolean; // Commissary eligibility discount
@@ -302,12 +333,46 @@ export class ConsolidatedUnderwritingEngine {
     // MANUAL_REVIEW explanations (jumbo routing, subject-property mismatch) —
     // kept separate from `reasons`, which drive a REJECTED decision.
     const reviewReasons: string[] = [];
-    const targetLoanType = input.isVeteran ? "VA" : "CONVENTIONAL";
+    let conventionalPricingEligible = true;
+    const targetLoanType = input.requestedLoanProgram;
 
-    // Step 1: Process dynamic values from Postgres lookup tables
-    const dtiCap = (await this.resolver.getPolicyScalar("CONVENTIONAL_DTI_CAP")) / 100;
-    const stretchDti = (await this.resolver.getPolicyScalar("CONVENTIONAL_STRETCH_DTI")) / 100;
-    const ltvCap = await this.resolver.getPolicyScalar("CONVENTIONAL_LTV_CAP");
+    // Only these two policy families are currently encoded end to end. FHA,
+    // USDA and portfolio products have materially different eligibility,
+    // insurance/guarantee and AUS requirements. Applying the conventional
+    // matrices to one of those products is a false approval, so reject the
+    // automated path before resolving any unrelated policy row.
+    if (targetLoanType !== "CONVENTIONAL" && targetLoanType !== "VA") {
+      throw new UnderwritingError(
+        "POLICY_UNSUPPORTED",
+        `AUTOMATED POLICY COVERAGE ERROR: ${targetLoanType} is not implemented by the deterministic underwriting engine.`,
+        `${targetLoanType} underwriting is not automated yet. A loan officer must review this program using its current governing guidance before eligibility can be determined.`,
+      );
+    }
+
+    // Selecting VA requires an eligibility signal; veteran status alone never
+    // selects VA, and a missing/negative signal cannot be treated as evidence
+    // of entitlement. Route the contradiction to a human instead of switching
+    // the file to conventional behind the borrower's back.
+    if (targetLoanType === "VA" && !input.isVeteran) {
+      throw new UnderwritingError(
+        "POLICY_OUT_OF_BAND",
+        "VA PROGRAM ELIGIBILITY ERROR: The requested program is VA but the application does not indicate veteran or active-duty eligibility.",
+        "A loan officer must confirm VA eligibility before this program can be evaluated.",
+      );
+    }
+
+    // Step 1: Process dynamic values from Postgres lookup tables. Product-
+    // specific policy is loaded only for that product. A VA evaluation must
+    // remain reproducible and available even if an unrelated conventional row
+    // is being changed or repaired.
+    let dtiCap: number | undefined;
+    let stretchDti: number | undefined;
+    let ltvCap: number | undefined;
+    if (targetLoanType === "CONVENTIONAL") {
+      dtiCap = (await this.resolver.getPolicyScalar("CONVENTIONAL_DTI_CAP")) / 100;
+      stretchDti = (await this.resolver.getPolicyScalar("CONVENTIONAL_STRETCH_DTI")) / 100;
+      ltvCap = await this.resolver.getPolicyScalar("CONVENTIONAL_LTV_CAP");
+    }
     const haircutStock = (await this.resolver.getPolicyScalar("HAIRCUT_STOCK_INVESTMENT")) / 100;
     const haircutRetirement = (await this.resolver.getPolicyScalar("HAIRCUT_RETIREMENT")) / 100;
 
@@ -348,8 +413,9 @@ export class ConsolidatedUnderwritingEngine {
     // Step 3: Enforce the conventional maximum LTV ceiling. The scalar is
     // CONVENTIONAL_LTV_CAP by definition — VA loans are guaranteed to 100% LTV
     // ($0 down), so the cap must not reject the VA path.
-    if (targetLoanType === "CONVENTIONAL" && preciseLtv > ltvCap) {
+    if (targetLoanType === "CONVENTIONAL" && preciseLtv > ltvCap!) {
       reasons.push(`Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds policy ceiling of ${ltvCap}%`);
+      conventionalPricingEligible = false;
     }
 
     // Step 4: Process and aggregate assets using haircuts to determine verified reserves
@@ -382,6 +448,10 @@ export class ConsolidatedUnderwritingEngine {
     // Captured for the reproducibility snapshot (ResolvedPolicy).
     let resolvedPmiRatePct: number | undefined;
     let resolvedLlpaRatePct: number | undefined;
+    let resolvedConventionalFicoFloor: number | undefined;
+    let resolvedConformingLoanLimit: number | undefined;
+    let resolvedConventionalOccupancyMaxLtvPct: number | undefined;
+    let resolvedVaExtraMember: number | undefined;
 
     let actualResidualIncome: number | undefined;
     let requiredResidualIncome: number | undefined;
@@ -394,10 +464,12 @@ export class ConsolidatedUnderwritingEngine {
       // otherwise miss a cell and surface as a generic out-of-band review
       // instead of a specific, adverse-action-grade credit rejection.
       const conventionalFicoFloor = await this.resolver.getPolicyScalar("CONVENTIONAL_FICO_FLOOR");
+      resolvedConventionalFicoFloor = conventionalFicoFloor;
       if (input.representativeFico < conventionalFicoFloor) {
         reasons.push(
           `Representative credit score of ${input.representativeFico} is below the conventional minimum of ${conventionalFicoFloor}`,
         );
+        conventionalPricingEligible = false;
       }
 
       // Conforming loan-limit awareness: this engine prices the conforming
@@ -405,10 +477,12 @@ export class ConsolidatedUnderwritingEngine {
       // Route it to jumbo review (not a decline) instead of silently approving
       // it on the conforming grids.
       const conformingLimit = await this.resolver.getPolicyScalar("CONFORMING_LOAN_LIMIT");
+      resolvedConformingLoanLimit = conformingLimit;
       if (input.originalLoanAmount > conformingLimit) {
         reviewReasons.push(
           `Loan amount of $${Math.round(input.originalLoanAmount).toLocaleString()} exceeds the conforming limit of $${Math.round(conformingLimit).toLocaleString()} — jumbo product review required`,
         );
+        conventionalPricingEligible = false;
       }
 
       // B2-1.3-02 / B2-1.3-03: the maximum LTV, CLTV and HCLTV ratios for a
@@ -427,6 +501,7 @@ export class ConsolidatedUnderwritingEngine {
         reviewReasons.push(
           `Loan purpose "${purpose}" is not a purchase — refinance LTV ceilings come from the Fannie Mae Eligibility Matrix (B2-1.3-02 / B2-1.3-03), which this system does not yet encode. Manual review required.`,
         );
+        conventionalPricingEligible = false;
       }
 
       // B3-6-04, Qualifying Payment Requirements: the qualifying rate is the note
@@ -441,6 +516,7 @@ export class ConsolidatedUnderwritingEngine {
         reviewReasons.push(
           `Adjustable-rate loan: B3-6-04 requires qualifying at the greater of the note rate plus the first rate-change cap or the fully indexed rate, not the initial rate. The ARM terms needed to compute that (index, margin, caps) are not captured, so this file cannot be qualified automatically. Manual review required.`,
         );
+        conventionalPricingEligible = false;
       }
 
       // B3-5.3-07, Significant Derogatory Credit Events. Every one of these
@@ -456,14 +532,14 @@ export class ConsolidatedUnderwritingEngine {
       // Subject-property reconciliation: a declared property type that conflicts
       // with the declared unit count (or with a looked-up descriptor, when
       // available) is a potential misrepresentation — route to human review.
-      reviewReasons.push(
-        ...reconcileSubjectProperty({
+      const subjectPropertyReasons = reconcileSubjectProperty({
           propertyType: input.propertyType,
           numberOfUnits: input.numberOfUnits,
           observedPropertyType: input.observedPropertyType,
           observedNumberOfUnits: input.observedNumberOfUnits,
-        }),
-      );
+        });
+      reviewReasons.push(...subjectPropertyReasons);
+      if (subjectPropertyReasons.length > 0) conventionalPricingEligible = false;
 
       // Occupancy/units LTV eligibility (Fannie Eligibility Matrix). The agency
       // max LTV depends on both occupancy and unit count — an investment 2-4
@@ -477,24 +553,27 @@ export class ConsolidatedUnderwritingEngine {
         { matrixCode: "CONVENTIONAL_MAX_LTV", dim1Value: units, dim3Identifier: occupancy.code },
         "occupancy/units LTV eligibility",
       );
+      resolvedConventionalOccupancyMaxLtvPct = occupancyMaxLtv;
       if (preciseLtv > occupancyMaxLtv) {
         reasons.push(
           `Calculated LTV of ${preciseLtv.toFixed(2)}% exceeds the ${occupancyMaxLtv}% maximum for a ${units}-unit ${occupancy.label} property`,
         );
+        conventionalPricingEligible = false;
       }
 
-      if (calculatedDti > stretchDti * 100) {
+      const stretchDtiPct = stretchDti! * 100;
+      if (calculatedDti > stretchDtiPct) {
         reasons.push(
-          `Debt-to-Income ratio (${calculatedDti.toFixed(2)}%) exceeds the system's hard stretch ceiling of ${(stretchDti * 100).toFixed(0)}%`,
+          `Debt-to-Income ratio (${calculatedDti.toFixed(2)}%) exceeds the system's hard stretch ceiling of ${stretchDtiPct.toFixed(0)}%`,
         );
       }
 
-      // Price only an eligible file. If any rejection reason is already present
-      // (LTV over the ceiling, sub-floor credit, or a stretch-DTI breach), skip
-      // the PMI/LLPA matrices — they intentionally do not cover out-of-policy
-      // coordinates, so querying them would throw and lose the rejection we
-      // already have. The decline is returned cleanly below.
-      if (reasons.length === 0) {
+      // Price whenever the loan's product/FICO/LTV coordinates are priceable.
+      // DTI can reject an otherwise priceable file and does not change its PMI
+      // or LLPA. The prior `reasons.length === 0` gate removed PMI from exactly
+      // those rejected payment scenarios. Coordinate failures still skip the
+      // matrices because no valid pricing cell exists for them.
+      if (conventionalPricingEligible) {
         // Query standard Monthly BPMI rate matrix if LTV > 80%
         if (calculatedLtv > 80.0) {
           const pmiRate = await this.resolveOrOutOfBand(
@@ -522,8 +601,23 @@ export class ConsolidatedUnderwritingEngine {
         resolvedLlpafUpfrontFee = input.originalLoanAmount * (llpaAdjustmentRate / 100);
       }
 
-      // VA Veteran Loan Path
+      // VA Veteran Loan Path. The implemented automation is a purchase/fixed
+      // residual-income screen. VA refinance and ARM eligibility/payment rules
+      // are materially different and are not encoded here, so keep the useful
+      // residual analysis but route the overall result to a loan officer.
     } else {
+      const purpose = (input.loanPurpose ?? "purchase").toLowerCase().trim();
+      if (purpose !== "purchase" && purpose !== "") {
+        reviewReasons.push(
+          `VA loan purpose "${purpose}" is outside the automated purchase screen. VA refinance eligibility and fee rules require program-specific review.`,
+        );
+      }
+      const amortization = (input.amortizationType ?? "fixed").toLowerCase().trim();
+      if (amortization === "adjustable" || amortization === "arm") {
+        reviewReasons.push(
+          "VA adjustable-rate qualification is not automated because the index, margin, and rate caps needed to calculate the qualifying payment are not captured. Manual review required.",
+        );
+      }
       if (!input.subjectPropertyState || !input.householdFamilySize || !input.homeSquareFootage) {
         throw new UnderwritingError(
           "INPUT_INCOMPLETE",
@@ -575,6 +669,7 @@ export class ConsolidatedUnderwritingEngine {
         // eighth person and beyond are not considered (26-7 Ch. 4, Topic 9, Item 43).
         const countableMembers = Math.min(familySize, VA_EXTRA_MEMBER_FAMILY_CAP);
         const extraPerMember = await this.resolver.getPolicyScalar("VA_RESIDUAL_EXTRA_MEMBER");
+        resolvedVaExtraMember = extraPerMember;
         requiredResidualIncome += (countableMembers - 5) * extraPerMember;
       }
 
@@ -621,21 +716,30 @@ export class ConsolidatedUnderwritingEngine {
       // Jumbo routing or a subject-property mismatch: a human must look, but it
       // is not a decline.
       decision = "MANUAL_REVIEW";
-    } else if (targetLoanType === "CONVENTIONAL" && calculatedDti > dtiCap * 100) {
+    } else if (targetLoanType === "CONVENTIONAL" && calculatedDti > dtiCap! * 100) {
       // DTI between baseline (43%) and stretch (50%) moves to Manual Review
       decision = "MANUAL_REVIEW";
     }
 
     const resolvedPolicy = buildResolvedPolicy({
       loanType: targetLoanType,
-      conventionalDtiCapPct: dtiCap * 100,
-      conventionalStretchDtiPct: stretchDti * 100,
+      conventionalDtiCapPct: dtiCap === undefined ? undefined : dtiCap * 100,
+      conventionalStretchDtiPct: stretchDti === undefined ? undefined : stretchDti * 100,
       conventionalLtvCapPct: ltvCap,
+      conventionalFicoFloor: resolvedConventionalFicoFloor,
+      conformingLoanLimit: resolvedConformingLoanLimit,
+      conventionalOccupancyMaxLtvPct: resolvedConventionalOccupancyMaxLtvPct,
       haircutStockInvestment: haircutStock,
       haircutRetirement: haircutRetirement,
       pmiRatePct: resolvedPmiRatePct,
       llpaRatePct: resolvedLlpaRatePct,
       vaRequiredResidualIncome: requiredResidualIncome,
+      vaResidualExtraMember: resolvedVaExtraMember,
+      vaResidualTaxRate: targetLoanType === "VA" ? RESIDUAL_TAX_RATE : undefined,
+      vaUtilityRatePerSqft: targetLoanType === "VA" ? VA_UTILITY_RATE_PER_SQFT : undefined,
+      vaDtiCushionTriggerPct: targetLoanType === "VA" ? VA_DTI_CUSHION_TRIGGER * 100 : undefined,
+      vaCushionMultiplier: targetLoanType === "VA" ? VA_CUSHION_MULTIPLIER : undefined,
+      vaResidualReductionFactor: targetLoanType === "VA" ? VA_RESIDUAL_REDUCTION_FACTOR : undefined,
     });
 
     return {

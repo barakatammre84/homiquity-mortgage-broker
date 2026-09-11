@@ -12,6 +12,8 @@ import { monthlyPrincipalAndInterest } from "@shared/lib/amortization";
 
 export interface LoanEstimateData {
   applicationId: string;
+  /** The selected product family whose terms and insurance were priced. */
+  loanProgram: "CONVENTIONAL" | "FHA" | "VA";
   dateIssued: Date;
   expirationDate: Date;
   
@@ -254,12 +256,13 @@ async function resolveActualFeesFor(applicationId: string): Promise<ActualFeeMap
  */
 interface PricingDerivation {
   application: LoanApplication;
+  loanProgram: LoanEstimateData["loanProgram"];
   purchasePrice: number;
   downPayment: number;
   loanAmount: number;
   ltv: number;
   isVaLoan: boolean;
-  /** FHA-priced (preferredLoanType "fha" and not VA-routed): MIP applies. */
+  /** Selected FHA product: MIP applies. */
   isFhaLoan: boolean;
   llpaResult: Awaited<ReturnType<typeof calculateLLPA>>;
   interestRate: number;
@@ -276,9 +279,9 @@ interface PricingDerivation {
  * These shadow the application's own values for ONE derivation and are never
  * written back — the borrower asking "what if I put more down?" must not mutate
  * their file. Deliberately limited to the three levers a borrower actually
- * controls; loan PROGRAM is not overridable because it interacts with veteran
- * status and underwriting routing (`isVaLoan` below), which is an LO
- * conversation, not a self-serve toggle.
+ * controls; loan PROGRAM is not overridable because changing the selected
+ * mortgage product requires a new product evaluation, not a payment-only
+ * self-serve calculation.
  *
  * The disclosable Loan Estimate path never passes these, so the byte-identical
  * parity with computePaymentProjection (F-047) is preserved by construction:
@@ -293,6 +296,7 @@ export interface PricingOverrides {
 async function derivePricing(
   applicationId: string,
   overrides?: PricingOverrides,
+  decisionLoanProgram?: "conventional" | "fha" | "va" | "usda",
 ): Promise<PricingDerivation> {
   const application = await storage.getLoanApplication(applicationId);
   if (!application) {
@@ -321,11 +325,31 @@ async function derivePricing(
   }
 
   const ltv = (loanAmount / purchasePrice) * 100;
-  const isVeteran = application.isVeteran || false;
-  const loanType = application.preferredLoanType || "conventional";
-  // VA pricing path: veterans route to VA underwriting (see underwritingEngine),
-  // so price them as VA even when preferredLoanType was never set at intake.
-  const isVaLoan = isVeteran || loanType === "va";
+  const loanType = (decisionLoanProgram ?? application.preferredLoanType)?.trim().toLowerCase();
+  if (!loanType) {
+    throw new Error("Preferred loan program is required to generate a loan estimate");
+  }
+  if (loanType === "usda") {
+    throw new Error("USDA pricing is not automated yet; loan officer review is required");
+  }
+  if (loanType !== "conventional" && loanType !== "fha" && loanType !== "va") {
+    throw new Error(`Pricing is not automated for loan program "${loanType}"; loan officer review is required`);
+  }
+  const amortizationType = (application.amortizationType ?? "fixed").trim().toLowerCase();
+  if (amortizationType === "adjustable" || amortizationType === "arm") {
+    throw new Error(
+      "Adjustable-rate pricing is not automated because the index, margin, and rate caps are not captured; loan officer review is required",
+    );
+  }
+  // Program selection comes from the application. Veteran status establishes
+  // possible eligibility for VA; it does not silently change a conventional,
+  // FHA or USDA request into a VA loan.
+  const isVaLoan = loanType === "va";
+  if (isVaLoan && !application.isVeteran) {
+    throw new Error("VA eligibility must be confirmed before VA terms can be priced");
+  }
+  const loanProgram: LoanEstimateData["loanProgram"] =
+    isVaLoan ? "VA" : loanType === "fha" ? "FHA" : "CONVENTIONAL";
 
   let baseRate = 6.875;
   if (isVaLoan) baseRate = 6.250;
@@ -372,9 +396,8 @@ async function derivePricing(
   // VA carries no monthly MI (the stub above already prices 0), and FHA
   // charges annual MIP at ALL LTVs (the matrix figure was standing in for
   // MIP: $0 at ≤80 LTV where MIP is still owed, and the wrong rate above it
-  // — the same F-077 defect class, for FHA borrowers). isVaLoan wins over
-  // preferredLoanType — a veteran's file routes to VA underwriting — so the
-  // EFFECTIVE product is what gets priced.
+  // — the same F-077 defect class, for FHA borrowers). The effective product is
+  // always the product selected on the application.
   const effectiveProduct = isVaLoan ? "va" : loanType;
   const isFhaLoan = effectiveProduct === "fha";
   const monthlyPMI = offerMonthlyMI({
@@ -392,6 +415,7 @@ async function derivePricing(
 
   return {
     application,
+    loanProgram,
     purchasePrice,
     downPayment,
     loanAmount,
@@ -524,13 +548,13 @@ export function evaluateTridDeliveryWindow(
   return complianceCheckDate.getTime() <= endOfDueDay.getTime();
 }
 
-export async function computePaymentProjection(
+async function computePaymentProjectionInternal(
   applicationId: string,
-  /** ARC-3 what-if inputs. Omitted by the engine and the LE — see PricingOverrides. */
   overrides?: PricingOverrides,
+  decisionLoanProgram?: "conventional" | "fha" | "va" | "usda",
 ): Promise<PaymentProjection> {
   const { application, purchasePrice, loanAmount, interestRate, monthlyPandI, monthlyPMI } =
-    await derivePricing(applicationId, overrides);
+    await derivePricing(applicationId, overrides, decisionLoanProgram);
   const { monthlyEscrow } = estimateMonthlyEscrow({ purchasePrice });
 
   // B3-6-03, Monthly Housing Expense: PITIA includes "any owners' association
@@ -565,9 +589,30 @@ export async function computePaymentProjection(
   };
 }
 
+export async function computePaymentProjection(
+  applicationId: string,
+  /** ARC-3 what-if inputs. Omitted by the engine and the LE — see PricingOverrides. */
+  overrides?: PricingOverrides,
+): Promise<PaymentProjection> {
+  return computePaymentProjectionInternal(applicationId, overrides);
+}
+
+/**
+ * Internal decision-only projection for the fast application's labeled program
+ * candidate. This keeps the public borrower what-if surface unable to switch
+ * programs while avoiding a fabricated persisted preference.
+ */
+export async function computeDecisionPaymentProjection(
+  applicationId: string,
+  decisionLoanProgram: "conventional" | "fha" | "va" | "usda",
+): Promise<PaymentProjection> {
+  return computePaymentProjectionInternal(applicationId, undefined, decisionLoanProgram);
+}
+
 export async function generateLoanEstimate(applicationId: string): Promise<LoanEstimateData> {
   const {
     application,
+    loanProgram,
     purchasePrice,
     downPayment,
     loanAmount,
@@ -685,6 +730,7 @@ export async function generateLoanEstimate(applicationId: string): Promise<LoanE
   
   return {
     applicationId,
+    loanProgram,
     dateIssued,
     expirationDate,
     
