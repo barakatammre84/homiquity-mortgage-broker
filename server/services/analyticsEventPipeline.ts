@@ -223,6 +223,7 @@ export async function getHomiOutcomeMetrics(daysBack = 30): Promise<HomiOutcomeM
     db.select({
       eventName: analyticsEvents.eventName,
       userId: analyticsEvents.userId,
+      actorRole: analyticsEvents.actorRole,
       payload: analyticsEvents.payload,
       numericValue: analyticsEvents.numericValue,
     }).from(analyticsEvents).where(and(
@@ -272,11 +273,13 @@ export async function getHomiOutcomeMetrics(daysBack = 30): Promise<HomiOutcomeM
     daysBack: boundedDays,
     turns: turnEvents.filter((event) => event.eventName === "homi_turn_completed").map((event) => ({
       userId: event.userId,
+      userRole: event.actorRole,
       payload: event.payload,
       responseMs: event.numericValue === null ? null : Number(event.numericValue),
     })),
     failedTurns: turnEvents.filter((event) => event.eventName === "homi_turn_failed").map((event) => ({
       userId: event.userId,
+      userRole: event.actorRole,
       payload: event.payload,
       responseMs: event.numericValue === null ? null : Number(event.numericValue),
     })),

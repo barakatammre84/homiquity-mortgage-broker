@@ -11,6 +11,7 @@ import {
 function currentTurn(overrides: Partial<HomiTurnMetricRow> = {}): HomiTurnMetricRow {
   return {
     userId: "borrower-1",
+    userRole: "active_buyer",
     responseMs: 4_000,
     payload: buildHomiTurnOutcomePayload({
       repeatedQuestion: false,
@@ -144,6 +145,7 @@ describe("buildHomiOutcomeMetrics", () => {
       daysBack: 30,
       turns: [{
         userId: "borrower-legacy",
+        userRole: "active_buyer",
         responseMs: 5_000,
         payload: {
           completionDelta: 90,
@@ -153,6 +155,7 @@ describe("buildHomiOutcomeMetrics", () => {
       }],
       failedTurns: [{
         userId: "borrower-failed",
+        userRole: "active_buyer",
         responseMs: 2_000,
         payload: buildHomiTurnFailurePayload({ code: "timeout", streamOpened: true }),
       }],
@@ -165,11 +168,13 @@ describe("buildHomiOutcomeMetrics", () => {
     expect(metrics.turnAttempts).toBe(2);
     expect(metrics.failedTurns).toBe(1);
     expect(metrics.turnSuccessRate).toBe(50);
+    expect(metrics.uniqueBorrowers).toBe(2);
+    expect(metrics.measuredUniqueBorrowers).toBe(0);
     expect(metrics.completionMeasuredTurns).toBe(0);
     expect(metrics.completionImprovedTurns).toBe(0);
     expect(metrics.serverTruthTurns).toBe(1);
     expect(metrics.serverActionTurns).toBe(0);
-    expect(metrics.exactRepeatedQuestionRate).toBe(100);
+    expect(metrics.exactRepeatedQuestionRate).toBe(0);
     expect(metrics.measurement.status).toBe("collecting");
     expect(metrics.measurement.canClaimReducedFriction).toBe(false);
   });
@@ -267,6 +272,107 @@ describe("buildHomiOutcomeMetrics", () => {
     expect(metrics.pastDueWithoutRecordedStaffResponse).toBe(1);
   });
 
+  it("never counts one later staff message as the response to several handoffs", () => {
+    const tasks = [
+      handoff({
+        id: "task-completed-without-message",
+        status: "COMPLETED",
+        completedAt: new Date("2026-09-10T12:10:00.000Z"),
+      }),
+      handoff({
+        id: "task-second",
+        createdAt: new Date("2026-09-10T12:20:00.000Z"),
+      }),
+      handoff({
+        id: "task-overlapping-history",
+        createdAt: new Date("2026-09-10T12:25:00.000Z"),
+      }),
+    ];
+
+    const metrics = buildHomiOutcomeMetrics({
+      daysBack: 30,
+      turns: [],
+      handoffs: tasks,
+      staffMessages: [staffMessage({ createdAt: new Date("2026-09-10T12:30:00.000Z") })],
+      now: new Date("2026-09-10T20:00:00.000Z"),
+    });
+
+    expect(metrics.recordedStaffResponses).toBe(1);
+    expect(metrics.recordedStaffResponseRate).toBe(33.33);
+    expect(metrics.completedWithoutRecordedStaffResponse).toBe(1);
+  });
+
+  it("requires distinct borrowers with current server-measured turns for the sample floor", () => {
+    const turns = Array.from({ length: 30 }, () => currentTurn({ userId: "borrower-measured" }));
+    const failedTurns = Array.from({ length: 9 }, (_, index) => ({
+      userId: `borrower-failed-${index}`,
+      userRole: "active_buyer",
+      responseMs: 1_000,
+      payload: buildHomiTurnFailurePayload({ code: "timeout", streamOpened: true }),
+    }));
+
+    const metrics = buildHomiOutcomeMetrics({
+      daysBack: 30,
+      turns,
+      failedTurns,
+      handoffs: [],
+      staffMessages: [],
+    });
+
+    expect(metrics.uniqueBorrowers).toBe(10);
+    expect(metrics.measuredUniqueBorrowers).toBe(1);
+    expect(metrics.measurement.status).toBe("collecting");
+    expect(metrics.measurement.blockers).toContain(
+      "Collect server-measured outcomes from 9 more distinct borrowers.",
+    );
+  });
+
+  it("does not mix legacy repeat flags into the current exact-repeat rate", () => {
+    const metrics = buildHomiOutcomeMetrics({
+      daysBack: 30,
+      turns: [
+        currentTurn(),
+        {
+          userId: "borrower-legacy",
+          userRole: "active_buyer",
+          responseMs: 1_000,
+          payload: { repeatedQuestion: true },
+        },
+      ],
+      handoffs: [],
+      staffMessages: [],
+    });
+
+    expect(metrics.exactRepeatedQuestions).toBe(0);
+    expect(metrics.exactRepeatedQuestionRate).toBe(0);
+    expect(metrics.legacyTurns).toBe(1);
+  });
+
+  it("excludes staff and unknown-role turns from borrower evidence", () => {
+    const metrics = buildHomiOutcomeMetrics({
+      daysBack: 30,
+      turns: [
+        currentTurn({ userId: "borrower" }),
+        currentTurn({ userId: "staff", userRole: "admin" }),
+        currentTurn({ userId: "legacy-without-role", userRole: null }),
+      ],
+      failedTurns: [{
+        userId: "loan-officer",
+        userRole: "lo",
+        responseMs: 500,
+        payload: buildHomiTurnFailurePayload({ code: "timeout", streamOpened: true }),
+      }],
+      handoffs: [],
+      staffMessages: [],
+    });
+
+    expect(metrics.turnAttempts).toBe(1);
+    expect(metrics.turns).toBe(1);
+    expect(metrics.uniqueBorrowers).toBe(1);
+    expect(metrics.measuredUniqueBorrowers).toBe(1);
+    expect(metrics.excludedNonBorrowerTurnAttempts).toBe(3);
+  });
+
   it("shows observational evidence at the sample floor but still refuses a causal claim", () => {
     const turns = Array.from({ length: 30 }, (_, index) => currentTurn({
       userId: `borrower-${index % 10}`,
@@ -283,8 +389,10 @@ describe("buildHomiOutcomeMetrics", () => {
     expect(metrics.measurement.status).toBe("observational_only");
     expect(metrics.measurement.canClaimReducedFriction).toBe(false);
     expect(metrics.measurement.blockers).toContain(
-      "Define a pre-registered comparison cohort before claiming that Homi reduced friction.",
+      "Register the comparison study before enrollment; the 30-turn/10-borrower floor proves measurement coverage, not causation.",
     );
+    expect(metrics.measurement.comparisonStudy.status).toBe("not_registered");
+    expect(metrics.measuredUniqueBorrowers).toBe(10);
     expect(metrics.invalidTurnLatencyRows).toBe(1);
     expect(metrics.p95TurnResponseMs).toBe(28_000);
     expect(metrics.averageTurnResponseMs).toBe(15_000);

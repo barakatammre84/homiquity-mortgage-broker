@@ -68,7 +68,7 @@ for the borrowers that a standardized fast lane handles poorly.
 
 | Capability | What works now | Main gap | Assessment |
 |---|---|---|---|
-| Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Collect the 30-turn/10-borrower floor, pre-register a comparison cohort and explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
+| Homi | Server-grounded status, checklist, task and bounded document-evidence tools; prompt lineage; PII input guard; bounded turns; streaming; safe offline guidance; real staff-task handoff; current server-snapshot outcome measures; provider canary ledger; a successful grounded production status-turn proof; and a mortgage regression/attack suite | Complete the 30-turn/10-eligible-borrower instrumentation pilot, decide the proactive-invitation treatment, then register and power the comparison study before enrollment; explicitly account for phone/off-platform work | Strong assistant foundation; Homi can distinguish machine-read, human-verified and fully approved financial evidence without receiving raw OCR or private identifiers, while production usefulness remains unproven |
 | Simple document extraction | Claude reads pay stubs, W-2s, bank statements and leases; every page is classified and normalized; mixed packets become logical documents routed to specialized extractors; low-confidence facts are blocked; durable leased jobs recover after restart; staff can review boxes, boundaries and fields beside the page; a verified text-free raster pay statement and its provider-before-persist restart recovery pass in production | No completed protected human-labeled accuracy run spanning representative born-digital and scanned/raster inputs | Safe, reviewable evidence pipeline; hands-off accuracy remains unproven |
 | Tax-package intelligence | Consent-gated durable processing, provider-use/revocation ordering, serialized final persistence, multi-form classification, non-overlapping excerpts capped at 25 pages, original-page evidence remapping, an independent serial tax worker, entity resolution, tie-outs, review triage and a borrower snapshot derived from the same result; a real provider-classified 100-page packet recovers across two production deployments and persists one exact grounded graph | Protected labeled accuracy across representative born-digital and scanned returns is not yet recorded | Strong complex-income logic with deployed capacity, recovery and one visual evidence model |
 | Financial analysis | Self-employment worksheets, rental treatment, asset/liability review, append-only workpapers, cited memo and hashed lender package; human-reviewed pay, bank, lease, Schedule C and K-1 figures are frozen into the version and compared with the exact calculation input; mismatches require an officer explanation; bank-statement deposit screening is usable in the staff file; the mixed W-2, Schedule C and two-rental canary is repeatable in production | Capital gains, non-taxable gross-up, continuance and asset depletion wait on governing agency references; bank-statement eligibility and DSCR rules still require the selected lender's matrices; measured review accuracy on real files is absent | Strong controlled analysis with visible judgment; not yet a measured hands-off result |
@@ -421,8 +421,17 @@ chat capture from a second server file snapshot, then records that exact before/
 separates server-truth reads from assistant-only tools, records actual saved-field counts, failed
 turns, exact repeated wording, bounded response latency and degraded/lint-replaced turns.
 `request_human_help` creates or reuses a real loan-officer task and will not claim success until
-that write succeeds. The staff report measures the first later secure staff message to the same
-borrower and file; task completion is no longer mislabeled as a human response.
+that write succeeds. The staff report measures the first secure staff message to the same borrower
+and file while the request is open; task completion is no longer mislabeled as a human response.
+
+**Corrected in the 2026-09-10 re-audit:** failed-turn users could previously pad the 10-borrower
+floor, the shared authenticated Homi launcher allowed staff turns into the borrower report, legacy
+rows could enter the current exact-repeat rate and one later staff message could count against
+multiple historical handoffs. The borrower floor now counts only client-role people with a current
+turn and two valid server snapshots; staff and unknown-role attempts are excluded and reported
+separately. Staff messages are consumed one-to-one, and messages after task completion do not
+retroactively become evidence of a response. The staff UI calls the metric a post-request message
+because timing does not prove that its content answered the Homi request.
 
 **Built in this release:** `get_document_evidence` re-authorizes the current workable application,
 then reads only current, non-rejected documents and a bounded allowlist of server-persisted numeric
@@ -447,11 +456,15 @@ route to the real checklist. The post-fix live Sonnet grounding run again called
 and repeated all four synthetic mixed-income figures with the correct review labels and no
 approval claim.
 
-**Production proof still required:** collect at least 30 current-format turns across 10 distinct
-borrowers, define a comparison cohort before reading its result and compare completion,
-exact-repeat, handoff and response-time measures. Phone calls and work outside secure Messages need
-an explicit disposition because the current report cannot see them. A regression pass and an
-observational dashboard prove operability; neither proves that borrowers finish faster.
+**Production proof still required:** collect at least 30 current-format turns across 10 eligible
+borrowers as an instrumentation pilot. Then approve the treatment, register the assignment and
+analysis before enrollment, calculate the sample from the baseline and run the comparison described
+in the [Homi outcome protocol](HOMI_OUTCOME_STUDY_2026-09-10.md). Phone calls and work outside secure
+Messages need an explicit disposition because the current report cannot see them. A regression
+pass, the 30/10 pilot and an observational dashboard prove operability; none proves that borrowers
+finish faster. NIST calls for documented evaluation under deployment-like conditions, uncertainty,
+benchmark comparison and human oversight.[15] Controlled-experiment literature also treats power
+and sample size as inputs to the study design.[16]
 
 ## Build order and exit gates
 
@@ -689,6 +702,15 @@ missed escalation or time to a useful human response.
     protocol, private-workspace templates and a guarded command that binds labels to the manifest
     without error-prone circular hash edits. The remaining evidence gap is still external: populate
     the protected corpus with representative reviewed documents and run it.
+58. Re-audited Homi's outcome measurement before treating its first production cohort as evidence.
+    Failed or legacy-only users no longer satisfy the eligible-borrower floor, staff and unknown-role
+    turns are excluded from borrower evidence, legacy repeat flags no longer enter the current repeat
+    rate, and each secure staff message can match at most one still-open Homi handoff. The staff
+    screen now distinguishes a timed post-request message from a proven answer and states that 30
+    turns/10 borrowers validates instrumentation rather than a treatment effect. The comparison
+    study remains deliberately unregistered until the founder approves the exact proactive-invitation
+    experience; the operating protocol freezes the required population, assignment, outcomes, power
+    analysis and stop rules before enrollment.
 
 ## Sources
 
@@ -706,3 +728,5 @@ missed escalation or time to a useful human response.
 12. [Anthropic — Citations](https://docs.anthropic.com/en/docs/build-with-claude/citations)
 13. [Fannie Mae — Technology integration resources](https://singlefamily.fanniemae.com/technology-integration/technology-integration-resources)
 14. [Anthropic — Mitigate jailbreaks and prompt injections](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks)
+15. [NIST — AI Risk Management Framework core](https://airc.nist.gov/airmf-resources/airmf/5-sec-core/)
+16. [Kohavi et al. — Controlled experiments on the web](https://link.springer.com/article/10.1007/s10618-008-0114-1)

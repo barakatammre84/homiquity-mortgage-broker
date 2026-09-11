@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `2e0a098bc4d362b80adcdcb7b2f95844f5fa846d` on 2026-09-10.
+**Audited production baseline:** `315845ac67ef2427483b08ad7daf426add1e4c83` on 2026-09-10.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -52,8 +52,8 @@ route returned successfully, and the service reported SendGrid email configured.
 has a strict required test gate, automatic production migrations and post-deploy commit
 verification. On that exact build, a borrower-data-free sweep passed Homi's grounded status turn,
 the real image-only pay-statement extraction path with page evidence, private object-storage
-write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 5.467 s,
-9.388 s, 0.652 s, 0.006 s and 0.853 s. The Homi check uses the production prompt and context
+write/read/delete, mixed W-2/business/rental analysis and deterministic underwriting in 4.104 s,
+9.403 s, 0.699 s, 0.006 s and 0.925 s. The Homi check uses the production prompt and context
 builder, requires the real status tool schema, grounds the reply in fixed server truth and passes
 outbound compliance lint without reading a borrower file.
 
@@ -122,7 +122,7 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
 | Capability | State | Proof still required |
 |---|---|---|
 | Discover and begin | **Live** | Measure qualified start, completion and abandonment in production. |
-| Guide the borrower with Homi | **Live · production canary and bounded document-evidence read proven** | Collect at least 30 server-measured turns across 10 borrowers, define the comparison cohort in advance and prove that guidance reduces incomplete work, exact repeated questions or time to a recorded staff reply. |
+| Guide the borrower with Homi | **Live · production canary and bounded document-evidence read proven** | Complete the 30-turn/10-eligible-borrower instrumentation pilot, then register and power the comparison study before enrollment. The pilot floor cannot prove a treatment effect. |
 | Build one accurate application | **Live · Proven** | A real borrower completes without staff rekeying or contradictory figures. |
 | Collect and correct evidence | **Built · ordinary raster, durable raster restart and 100-page tax recovery live** | Run pilot upload → page/box review → correction → authorized download; populate and run the protected evaluator across born-digital and real scanned documents. |
 | Review complicated income | **Built · exact evidence lineage, reconciliation and production engine repeatability proven** | Populate the protected extraction benchmark; then a licensed reviewer must reproduce and approve a real client's calculation from accepted evidence and reconcile it with the pilot lender. |
@@ -185,10 +185,14 @@ licensed loan officer, processor, underwriter and closer also remain unproven.
    rejected. Evidence and shared file reads are bounded and reused within a turn, and a file with
    more documents than the response window is labeled as a bounded view so Homi cannot mistake an
    omitted older return, statement or lease for an absent document. The staff report separates
-   legacy turns, measurement coverage and operational
-   exceptions and refuses a reduced-friction claim without at least 30 measured turns across 10
-   borrowers and a comparison cohort defined in advance. Collect that cohort; change guidance only
-   when the measured journey shows less borrower or loan-officer effort.
+   legacy turns, measurement coverage and operational exceptions. The borrower floor now counts
+   only client-role people with a current turn and two valid server snapshots; failed/legacy users
+   cannot pad it, and staff/unknown-role turns are reported separately. A staff message is matched
+   to one open Homi handoff at most and cannot be counted after task completion. Complete the
+   30-turn/10-eligible-borrower instrumentation pilot, then use the
+   [Homi outcome study protocol](knowledge-base/feature-review/HOMI_OUTCOME_STUDY_2026-09-10.md) to
+   register and power the comparison before enrollment. Change guidance only when the measured
+   journey shows less borrower or loan-officer effort without worse safety outcomes.
 
 The dated [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md)
 contains the evidence and acceptance tests. This order is part of Phase 0 and Phase 1; it does not

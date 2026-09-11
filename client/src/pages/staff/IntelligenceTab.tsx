@@ -57,8 +57,10 @@ interface HomiOutcomeMetrics {
   turnAttempts: number;
   turns: number;
   failedTurns: number;
+  excludedNonBorrowerTurnAttempts: number;
   turnSuccessRate: number;
   uniqueBorrowers: number;
+  measuredUniqueBorrowers: number;
   serverTruthTurns: number;
   serverActionTurns: number;
   exactRepeatedQuestions: number;
@@ -91,6 +93,12 @@ interface HomiOutcomeMetrics {
     canClaimReducedFriction: false;
     minimumMeasuredTurns: number;
     minimumUniqueBorrowers: number;
+    comparisonStudy: {
+      status: "not_registered";
+      registrationId: null;
+      assignmentUnit: null;
+      comparisonCohort: null;
+    };
     blockers: string[];
   };
 }
@@ -505,7 +513,10 @@ export default function IntelligenceTab() {
               ) : (
                 <div className="space-y-4">
                   <div className="rounded-lg border bg-muted p-3 text-sm text-foreground" data-testid="homi-claim-boundary">
-                    These measures describe observed work. They do not yet prove that Homi reduced friction; that claim needs the minimum sample and a pre-registered comparison cohort.
+                    These measures describe observed work. The 30-turn, 10-borrower floor checks whether measurement works; it cannot prove that Homi reduced friction without a comparison study registered before enrollment.
+                    <p className="mt-2 font-medium" data-testid="homi-study-status">
+                      Comparison study: not registered. No cohort has been enrolled.
+                    </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg border p-3">
@@ -520,7 +531,7 @@ export default function IntelligenceTab() {
                     <div className="rounded-lg border p-3">
                       <p className="text-xs text-muted-foreground">Exact repeated wording</p>
                       <p className="text-xl font-semibold">{homiOutcomes.exactRepeatedQuestionRate.toFixed(1)}%</p>
-                      <p className="text-xs text-muted-foreground">{homiOutcomes.exactRepeatedQuestions} of {homiOutcomes.turns} turns</p>
+                      <p className="text-xs text-muted-foreground">{homiOutcomes.exactRepeatedQuestions} of {Math.max(0, homiOutcomes.turns - homiOutcomes.legacyTurns)} current-format turns</p>
                     </div>
                     <div className="rounded-lg border p-3">
                       <p className="text-xs text-muted-foreground">Average response</p>
@@ -532,7 +543,7 @@ export default function IntelligenceTab() {
                       </p>
                     </div>
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Recorded staff replies</p>
+                      <p className="text-xs text-muted-foreground">Post-request staff messages</p>
                       <p className="text-xl font-semibold">
                         {homiOutcomes.humanHelpRequests === 0 ? "—" : `${homiOutcomes.recordedStaffResponseRate.toFixed(1)}%`}
                       </p>
@@ -549,26 +560,26 @@ export default function IntelligenceTab() {
                       </p>
                     </div>
                     <div className="rounded-lg border p-3 text-sm">
-                      <p className="font-medium">Recorded human response</p>
+                      <p className="font-medium">Recorded human follow-up signal</p>
                       <p className="mt-1 text-muted-foreground">
                         {homiOutcomes.medianRecordedStaffResponseMinutes === null
-                          ? "No staff reply in secure Messages is recorded after a Homi request."
-                          : `Median first staff reply: ${homiOutcomes.medianRecordedStaffResponseMinutes} minutes; average ${homiOutcomes.averageRecordedStaffResponseMinutes} minutes.`}
+                          ? "No staff message in secure Messages is recorded while a Homi request is open."
+                          : `Median first staff message: ${homiOutcomes.medianRecordedStaffResponseMinutes} minutes; average ${homiOutcomes.averageRecordedStaffResponseMinutes} minutes.`}
                       </p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.openHumanHelpRequests} open · {homiOutcomes.pastDueWithoutRecordedStaffResponse} past due without a secure-message reply · {homiOutcomes.completedWithoutRecordedStaffResponse} completed without a secure-message reply
+                        Each message counts toward one request only. Message content, calls and work outside secure Messages are not measured. {homiOutcomes.openHumanHelpRequests} open · {homiOutcomes.pastDueWithoutRecordedStaffResponse} past due without a message · {homiOutcomes.completedWithoutRecordedStaffResponse} completed without a message
                       </p>
                     </div>
                     <div className="rounded-lg border p-3 text-sm">
                       <p className="font-medium">Measurement coverage</p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.completionMeasuredTurns} of {homiOutcomes.turns} turns ({homiOutcomes.completionMeasurementCoverageRate.toFixed(1)}%) have two server file snapshots across {homiOutcomes.uniqueBorrowers} borrowers. {homiOutcomes.legacyTurns} turns use the earlier metric format.
+                        {homiOutcomes.completionMeasuredTurns} of {homiOutcomes.turns} turns ({homiOutcomes.completionMeasurementCoverageRate.toFixed(1)}%) have two server file snapshots across {homiOutcomes.measuredUniqueBorrowers} eligible borrowers. {homiOutcomes.uniqueBorrowers} borrowers made an attempt; {homiOutcomes.legacyTurns} turns use the earlier metric format.
                       </p>
                     </div>
                     <div className="rounded-lg border p-3 text-sm">
                       <p className="font-medium">Quality exceptions</p>
                       <p className="mt-1 text-muted-foreground">
-                        {homiOutcomes.turns} of {homiOutcomes.turnAttempts} attempts completed ({homiOutcomes.turnSuccessRate.toFixed(1)}%) · {homiOutcomes.failedTurns} failed · {homiOutcomes.degradedTurns} offline-guidance turns · {homiOutcomes.lintReplacedTurns} compliance replacements · {homiOutcomes.completionRegressedTurns} measured regressions · {homiOutcomes.invalidTurnLatencyRows} invalid latency rows
+                        {homiOutcomes.turns} of {homiOutcomes.turnAttempts} borrower attempts completed ({homiOutcomes.turnSuccessRate.toFixed(1)}%) · {homiOutcomes.failedTurns} failed · {homiOutcomes.excludedNonBorrowerTurnAttempts} staff/unknown-role attempts excluded · {homiOutcomes.degradedTurns} offline-guidance turns · {homiOutcomes.lintReplacedTurns} compliance replacements · {homiOutcomes.completionRegressedTurns} measured regressions · {homiOutcomes.invalidTurnLatencyRows} invalid latency rows
                       </p>
                     </div>
                   </div>

@@ -69,8 +69,10 @@ function renderTab(homiOverrides: Record<string, unknown> = {}) {
     turnAttempts: 0,
     turns: 0,
     failedTurns: 0,
+    excludedNonBorrowerTurnAttempts: 0,
     turnSuccessRate: 0,
     uniqueBorrowers: 0,
+    measuredUniqueBorrowers: 0,
     serverTruthTurns: 0,
     serverActionTurns: 0,
     exactRepeatedQuestions: 0,
@@ -103,7 +105,13 @@ function renderTab(homiOverrides: Record<string, unknown> = {}) {
       canClaimReducedFriction: false,
       minimumMeasuredTurns: 30,
       minimumUniqueBorrowers: 10,
-      blockers: ["Define a pre-registered comparison cohort before claiming that Homi reduced friction."],
+      comparisonStudy: {
+        status: "not_registered",
+        registrationId: null,
+        assignmentUnit: null,
+        comparisonCohort: null,
+      },
+      blockers: ["Register the comparison study before enrollment; the 30-turn/10-borrower floor proves measurement coverage, not causation."],
     },
     ...homiOverrides,
   });
@@ -143,6 +151,7 @@ describe("IntelligenceTab", () => {
       failedTurns: 2,
       turnSuccessRate: 80,
       uniqueBorrowers: 3,
+      measuredUniqueBorrowers: 3,
       serverTruthTurns: 5,
       serverActionTurns: 2,
       exactRepeatedQuestions: 1,
@@ -167,9 +176,11 @@ describe("IntelligenceTab", () => {
     await userEvent.click(screen.getByTestId("tab-homi-outcomes"));
 
     expect(screen.getByTestId("homi-measurement-status").textContent).toContain("Collecting evidence");
-    expect(screen.getByTestId("homi-claim-boundary").textContent).toContain("do not yet prove");
+    expect(screen.getByTestId("homi-claim-boundary").textContent).toContain("cannot prove");
+    expect(screen.getByTestId("homi-study-status").textContent).toContain("not registered");
     expect(screen.getByText("Exact repeated wording")).toBeTruthy();
-    expect(screen.getByText("Recorded staff replies")).toBeTruthy();
-    expect(screen.getByText(/Median first staff reply: 18 minutes/)).toBeTruthy();
+    expect(screen.getByText("Post-request staff messages")).toBeTruthy();
+    expect(screen.getByText(/Median first staff message: 18 minutes/)).toBeTruthy();
+    expect(screen.getByText(/Each message counts toward one request only/)).toBeTruthy();
   });
 });
