@@ -163,15 +163,12 @@ export function registerLetterRoutes(
       const borrowerName = [borrower.firstName, borrower.lastName].filter(Boolean).join(" ") || "Borrower";
 
       const annualIncome = currentDecision.metrics!.monthlyIncome * 12;
-      // Use the same selected-program projection that produced the current
-      // verified decision. A generic conventional advertised rate (and its old
-      // hardcoded fallback) could put a conventional payment on a VA letter.
-      const { computeDecisionPaymentProjection } = await import("../../services/loanEstimate");
-      const projection = await computeDecisionPaymentProjection(
-        id,
-        currentDecision.resolvedPolicy.loanType === "VA" ? "va" : "conventional",
-      );
-      const monthlyPayment = projection.monthlyPrincipalAndInterest;
+      // A pre-approval amount is the maximum purchase amount supported by the
+      // verified analysis, while the application's purchase price can be a
+      // smaller current target. A payment calculated from that current target
+      // would sit beside the maximum amount and imply the two share a basis.
+      // Do not quote an estimated payment on this non-rate-locked artifact;
+      // product-specific payment figures remain on the Loan Estimate/options.
       const dti = currentDecision.metrics!.dti;
       const dpPercent = purchasePrice > 0 ? ((downPayment / purchasePrice) * 100).toFixed(1) : undefined;
 
@@ -212,7 +209,6 @@ export function registerLetterRoutes(
         downPayment: downPayment > 0 ? String(downPayment) : undefined,
         downPaymentPercent: dpPercent,
         annualIncome: annualIncome > 0 ? String(annualIncome) : undefined,
-        monthlyPaymentEstimate: monthlyPayment > 0 ? String(Math.round(monthlyPayment)) : undefined,
         estimatedDti: dti > 0 ? dti.toFixed(1) : undefined,
         creditScoreRange: creditRange || undefined,
         employmentType: application.employmentType || undefined,

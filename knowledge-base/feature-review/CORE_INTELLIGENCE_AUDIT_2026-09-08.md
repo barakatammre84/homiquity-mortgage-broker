@@ -761,8 +761,9 @@ missed escalation or time to a useful human response.
     automated denial. Decision history now stores program and selection basis directly. VA policy is
     isolated from conventional scalars, VA refinance/ARM routes before fixed-purchase pricing, a
     non-veteran VA-only filter remains empty instead of becoming all products, and conventional-only
-    veteran scenarios no longer ask for VA residual fields. Formal-letter payment comes from the
-    verified selected-program projection, and Loan Estimates name the priced product.
+    veteran scenarios no longer ask for VA residual fields. Non-rate-locked pre-approval letters
+    omit a payment estimate that could use a different amount basis, and Loan Estimates name the
+    product whose payment was priced.
 
 ## Sources
 

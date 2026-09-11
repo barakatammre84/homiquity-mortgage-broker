@@ -6,7 +6,8 @@ Can the current build evaluate a borrower's selected mortgage program without ch
 borrowing another program's rules, losing payment components, or producing a result that cannot be
 reconstructed?
 
-**Audited production base:** `5f3c086b61d5ad61f80f511367e888c13a9a2e5c`  
+**Audited production base:** `5f3c086b61d5ad61f80f511367e888c13a9a2e5c`
+
 **Release candidate:** `codex/underwriting-product-intent`
 
 The answer after this pass is **yes for the internally automated conventional fixed purchase and
@@ -31,7 +32,7 @@ still external dependencies, so this is not evidence of an issued lender approva
 | VA policy isolation | VA evaluation loaded three conventional policy scalars first | Unrelated conventional policy maintenance could stop or change the availability of a VA result |
 | Scenario filter | Removing VA from a non-veteran's VA-only request converted the empty list to “all products” | The user received products they did not request |
 | VA input gate | Every veteran needed VA residual inputs even for a conventional-only scenario | Conventional comparison was blocked by irrelevant household fields |
-| Letter payment | A generic conventional advertised rate with a hardcoded fallback priced every formal letter | A VA-labeled letter could carry a conventional payment estimate with no decision lineage |
+| Letter payment | A generic conventional advertised rate with a hardcoded fallback priced every formal letter | A VA-labeled letter could carry a conventional payment estimate with no decision lineage; a first repair then exposed that the maximum approval and current-target payment could use different amounts |
 
 ## Implemented decision contract
 
@@ -62,8 +63,9 @@ Decision snapshots now store the evaluated program and selection basis as first-
 including manual-review outcomes that have no resolved-policy JSON. VA runs load only the shared
 asset-haircut policy plus VA residual rules; conventional DTI/LTV policy is not a VA dependency.
 VA refinance and adjustable-rate requests route to manual review before fixed-purchase pricing.
-Formal letters calculate payment from the current verified decision's selected-program projection,
-and the Loan Estimate response and screen name the product that was priced.
+Formal pre-approval letters do not quote an estimated payment because they are not rate locked and
+the approved maximum can differ from the application's current target. Product-specific payment
+figures remain on the Loan Estimate and loan-option surfaces, which name the product that was priced.
 
 ## Current support boundary
 
@@ -85,7 +87,7 @@ same-payment cross-program offers, product-aware veteran pricing, rejected-file 
 failure, invalid DTI policy, VA amount sizing, resolved-floor credit language, letter integrity and
 production-canary behavior. The second pass adds executable gates for verified-versus-preliminary
 approval state, stale pre-approval removal, product-scoped legacy options, VA/conventional policy
-isolation, explicit-empty scenario filters, program-specific letter payment and labeled Loan
+isolation, explicit-empty scenario filters, removal of ambiguous non-rate-locked letter payments and labeled Loan
 Estimates. TypeScript and the focused 358-test lane pass.
 
 The production canary has also been strengthened. Its underwriting operation must now prove explicit
