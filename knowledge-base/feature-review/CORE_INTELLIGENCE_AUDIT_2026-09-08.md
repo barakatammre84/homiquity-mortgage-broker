@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-09-11
 
-**Code reviewed:** production base `4bc1a880581a921b30ea951dbd788f089b9d705e` plus the current
+**Code reviewed:** production commit `50b496ddbc5c118bc260cbb93f26e51445f7b6a1`, including the
 underwriting product-integrity release
 
 **Decision:** keep the existing architecture; harden the document-to-evidence path before adding more borrower-facing intelligence
@@ -110,7 +110,7 @@ structured value used by the calculation. A match is visible; a variance or unli
 be acknowledged and explained by the reviewer. The system never silently replaces an application
 or worksheet value with OCR output.
 
-The release candidate closes three additional evidence shortcuts. Business liquidity must match
+The current production build closes three additional evidence shortcuts. Business liquidity must match
 reviewed Schedule L assets, liabilities and inventory. Every current/prior self-employment year in
 the worksheet must match reviewed Schedule C net profit or K-1 ordinary income. Bank-statement
 analysis requires reviewed deposit totals and start/end dates covering the complete selected 12 or

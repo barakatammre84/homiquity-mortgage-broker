@@ -4,7 +4,7 @@
 
 **Product direction:** one Homiquity application with Core capabilities inside it
 
-**Audited production baseline:** `4bc1a880581a921b30ea951dbd788f089b9d705e` on 2026-09-11.
+**Audited production baseline:** `50b496ddbc5c118bc260cbb93f26e51445f7b6a1` on 2026-09-11.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
 deployment pointer.
 
@@ -66,7 +66,7 @@ reason; it cannot be accepted silently. Staff can create an append-only bank-sta
 from reviewed deposit evidence while explicitly removing transfers, refunds, duplicates and other
 ineligible deposits.
 
-The current release candidate extends that evidence chain across a complicated household. It
+The current production build extends that evidence chain across a complicated household. It
 keeps credit, employment and other income attributed to the correct borrower; carries real-estate
 owned, housing costs and subordinate financing through the decision; and records tax treatment,
 continuance and virtual-currency exclusions for other income. Business liquidity must tie its
@@ -74,8 +74,9 @@ current assets, current liabilities and inventory to reviewed Schedule L facts. 
 prior self-employment year must tie to reviewed Schedule C or K-1 income. A 12- or 24-month
 bank-statement analysis cannot be saved or approved until reviewed, dated statements prove the
 selected consecutive period. Plaid-normalized withdrawals cannot be mistaken for large deposits.
-These changes are locally proven and remain **Built** until this release is deployed and its exact
-production commit passes the same gates.
+These changes passed the complete local and GitHub release gates, all eight production migrations,
+and exact-commit deployment verification. They remain **Built** where the capability map requires
+real borrower, provider, licensed-reviewer or lender proof beyond deployment.
 
 The underwriting release now keeps the mortgage program explicit from URLA through pricing,
 qualification, decision fingerprints, loan-option comparisons and preapproval letters. The fast
