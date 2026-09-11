@@ -313,12 +313,12 @@ describe("Reg Z §1026.22: every displayed APR comes from the actuarial engine",
     expect(loanEstimate).toMatch(/prepaidFinanceCharges/);
   });
 
-  it("pre-approval letters use the decision's selected-program projection, not a generic or constant rate", () => {
+  it("non-rate-locked pre-approval letters do not quote a rate-derived payment", () => {
     const lending = read("server/routes/lending/letters.ts");
     expect(lending).not.toMatch(/return 0\.0(65|7)/);
     expect(lending).not.toMatch(/currentAdvertised30YrRate/);
-    expect(lending).toMatch(/computeDecisionPaymentProjection/);
-    expect(lending).toMatch(/resolvedPolicy\.loanType === "VA" \? "va" : "conventional"/);
+    expect(lending).not.toMatch(/computeDecisionPaymentProjection/);
+    expect(lending).not.toMatch(/monthlyPaymentEstimate:/);
   });
 });
 
