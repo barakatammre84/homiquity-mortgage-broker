@@ -292,10 +292,11 @@ describe.sequential("document extraction restart recovery", () => {
     const { claimNextDocumentExtractionJobForLane } = await import(
       "../server/services/documentExtractionJobs"
     );
-    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package", claimAt);
+    const claimScope = { requestedByUserId: userId, documentId };
+    const taxClaim = await claimNextDocumentExtractionJobForLane("tax_package", claimAt, claimScope);
     expect(taxClaim).toMatchObject({ id: taxLaneJobId, mode: "tax_package", status: "processing" });
 
-    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary", claimAt);
+    const ordinaryClaim = await claimNextDocumentExtractionJobForLane("ordinary", claimAt, claimScope);
     expect(ordinaryClaim).toMatchObject({ id: jobId, mode: "standard", status: "processing" });
 
     await pool.query(

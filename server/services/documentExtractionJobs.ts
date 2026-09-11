@@ -332,6 +332,7 @@ async function claimNextJob(
   now = new Date(),
   proofJob: "exclude" | "only" | "tax_canary" | "tax_restart" = "exclude",
   lane: DocumentExtractionWorkerLane = "ordinary",
+  scope?: { requestedByUserId?: string; documentId?: string },
 ): Promise<DocumentExtractionJob | null> {
   return db.transaction(async (transaction) => {
     const [candidate] = await transaction
@@ -352,6 +353,12 @@ async function claimNextJob(
         lane === "tax_package"
           ? eq(documentExtractionJobs.mode, "tax_package")
           : ne(documentExtractionJobs.mode, "tax_package"),
+        scope?.requestedByUserId
+          ? eq(documentExtractionJobs.requestedByUserId, scope.requestedByUserId)
+          : undefined,
+        scope?.documentId
+          ? eq(documentExtractionJobs.documentId, scope.documentId)
+          : undefined,
         lt(documentExtractionJobs.attemptCount, documentExtractionJobs.maxAttempts),
         or(
           and(
@@ -395,8 +402,9 @@ async function claimNextJob(
 export async function claimNextDocumentExtractionJobForLane(
   lane: DocumentExtractionWorkerLane,
   now = new Date(),
+  scope?: { requestedByUserId?: string; documentId?: string },
 ): Promise<DocumentExtractionJob | null> {
-  return claimNextJob(now, "exclude", lane);
+  return claimNextJob(now, "exclude", lane, scope);
 }
 
 async function expireExhaustedLeases(now = new Date()): Promise<void> {
