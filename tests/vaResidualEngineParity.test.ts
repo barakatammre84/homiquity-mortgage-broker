@@ -139,6 +139,7 @@ const SCENARIOS: Scenario[] = [
 
 function engineInput(s: Scenario): UnderwritingInput {
   return {
+    requestedLoanProgram: "VA",
     isVeteran: true,
     isActiveDuty: s.isActiveDuty ?? false,
     hasExchangeAccess: s.hasExchangeAccess ?? false,

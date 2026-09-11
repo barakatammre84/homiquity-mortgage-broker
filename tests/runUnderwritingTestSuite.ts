@@ -203,6 +203,7 @@ async function run() {
   const engine = new ConsolidatedUnderwritingEngine();
 
   const baseVaInput = (): UnderwritingInput => ({
+    requestedLoanProgram: "VA",
     isVeteran: true,
     baseMonthlyIncome: 8000,
     bonusMonthlyIncome: 0,
@@ -256,6 +257,7 @@ async function run() {
   // High-DTI 20% cushion FAIL: residual clears the base requirement but not the
   // 1.2x buffer required above 41% DTI. SOUTH size-2 >=$80k base = 738.
   const cushionFail = await engine.evaluate({
+    requestedLoanProgram: "VA",
     isVeteran: true,
     baseMonthlyIncome: 5000,
     bonusMonthlyIncome: 0,
@@ -282,6 +284,7 @@ async function run() {
   // High-DTI 20% cushion PASS: DTI > 41% but residual clears the 1.2x buffer.
   // MIDWEST size-1 >=$80k base = 441, buffer = 529.2.
   const cushionPass = await engine.evaluate({
+    requestedLoanProgram: "VA",
     isVeteran: true,
     baseMonthlyIncome: 6000,
     bonusMonthlyIncome: 0,

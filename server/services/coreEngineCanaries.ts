@@ -1,5 +1,9 @@
 import type { EmploymentHistory, SelfEmploymentWorksheet } from "@shared/schema";
-import { consolidatedUnderwritingEngine, type UnderwritingInput } from "../underwritingEngine";
+import {
+  consolidatedUnderwritingEngine,
+  UnderwritingError,
+  type UnderwritingInput,
+} from "../underwritingEngine";
 import {
   computeIncomePaths,
   incomeEvaluationFingerprint,
@@ -135,6 +139,7 @@ export function financialAnalysisCanaryPasses(): boolean {
 }
 
 const SYNTHETIC_UNDERWRITING_INPUT: UnderwritingInput = {
+  requestedLoanProgram: "CONVENTIONAL",
   isVeteran: false,
   baseMonthlyIncome: 10_000,
   bonusMonthlyIncome: 0,
@@ -160,11 +165,27 @@ const SYNTHETIC_UNDERWRITING_INPUT: UnderwritingInput = {
 export async function underwritingCanaryPasses(): Promise<boolean> {
   const first = await consolidatedUnderwritingEngine.evaluate(SYNTHETIC_UNDERWRITING_INPUT);
   const second = await consolidatedUnderwritingEngine.evaluate(SYNTHETIC_UNDERWRITING_INPUT);
+  const veteranChoosingConventional = await consolidatedUnderwritingEngine.evaluate({
+    ...SYNTHETIC_UNDERWRITING_INPUT,
+    isVeteran: true,
+  });
+  const unsupported = await consolidatedUnderwritingEngine.evaluate({
+    ...SYNTHETIC_UNDERWRITING_INPUT,
+    requestedLoanProgram: "FHA",
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
   return first.decision === "APPROVED" &&
+    first.loanType === "CONVENTIONAL" &&
     first.calculatedLtv === 80 &&
     first.calculatedDti === 25 &&
     first.rejectionReasons.length === 0 &&
     first.reviewReasons.length === 0 &&
+    veteranChoosingConventional.loanType === "CONVENTIONAL" &&
+    veteranChoosingConventional.actualResidualIncome === undefined &&
+    unsupported instanceof UnderwritingError &&
+    unsupported.kind === "POLICY_UNSUPPORTED" &&
     /^[0-9a-f]{64}$/.test(first.resolvedPolicy.fingerprint) &&
     JSON.stringify(first) === JSON.stringify(second);
 }

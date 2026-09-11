@@ -56,6 +56,7 @@ let decisionResult: unknown;
 let decisionThrows: Error | null = null;
 const updates: Array<Record<string, unknown>> = [];
 const lifecycleEvents: string[] = [];
+const policyMocks = vi.hoisted(() => ({ getPolicyScalar: vi.fn() }));
 
 vi.mock("../server/storage", () => ({
   storage: {
@@ -90,7 +91,7 @@ vi.mock("../server/storage", () => ({
 }));
 
 vi.mock("../server/services/lookupResolver", () => ({
-  lookupResolver: { getPolicyScalar: async () => 43 },
+  lookupResolver: { getPolicyScalar: policyMocks.getPolicyScalar },
 }));
 
 vi.mock("../server/services/decisionEngine", () => ({
@@ -132,7 +133,7 @@ function baseApplication(over: Record<string, unknown> = {}) {
 const ENGINE_OUTCOMES: Array<{ label: string; decision: unknown }> = [
   {
     label: "APPROVED",
-    decision: { decision: "APPROVED", status: "COMPLETE", reasons: [], qualifier: "PRELIMINARY", metrics: { dti: 30, ltv: 80 } },
+    decision: { decision: "APPROVED", status: "COMPLETE", reasons: [], qualifier: "PRELIMINARY", loanProgram: "CONVENTIONAL", metrics: { dti: 30, ltv: 80 } },
   },
   {
     label: "REJECTED",
@@ -160,6 +161,7 @@ beforeEach(() => {
   decisionThrows = null;
   updates.length = 0;
   lifecycleEvents.length = 0;
+  policyMocks.getPolicyScalar.mockReset().mockResolvedValue(43);
 });
 
 describe("ECOA §1002.9: automated intake never denies", () => {
@@ -262,6 +264,25 @@ describe("ECOA §1002.9: automated intake never denies", () => {
 });
 
 describe("ECOA: an approval must be a coherent approval (#7)", () => {
+  it("does not describe a below-policy credit score as a strength", async () => {
+    application = baseApplication({ creditScore: 620 });
+    decisionResult = {
+      decision: "REJECTED",
+      status: "DECISION_READY",
+      reasons: ["Representative credit score of 620 is below the conventional minimum of 640"],
+      missingItems: [],
+      qualifier: "PRELIMINARY",
+      loanProgram: "CONVENTIONAL",
+      resolvedPolicy: { conventionalFicoFloor: 640 },
+      metrics: { dti: 30, ltv: 80 },
+    };
+
+    const result = await analyzeIntake(APP_ID);
+
+    expect(result.analysis.strengths.join(" ")).not.toMatch(/Credit score/);
+    expect(result.analysis.concerns.join(" ")).toMatch(/below the conventional minimum of 640/);
+  });
+
   it("APPROVED with no usable income routes to review, not a $0 pre-approval", async () => {
     application = baseApplication({ annualIncome: "0" });
     decisionResult = ENGINE_OUTCOMES[0].decision;
@@ -283,6 +304,37 @@ describe("ECOA: an approval must be a coherent approval (#7)", () => {
     const result = await analyzeIntake(APP_ID);
     expect(parseFloat(result.preApprovalAmount)).toBeGreaterThanOrEqual(395000);
   });
+
+  it("does not size a VA approval with the conventional DTI formula", async () => {
+    decisionResult = {
+      ...(ENGINE_OUTCOMES[0].decision as Record<string, unknown>),
+      loanProgram: "VA",
+    };
+
+    const result = await analyzeIntake(APP_ID);
+
+    expect(result.outcome).toBe("pre_approved");
+    expect(result.preApprovalAmount).toBe("400000");
+    expect(result.analysis.recommendations.join(" ")).toMatch(/higher VA.*program-specific review/i);
+    expect(policyMocks.getPolicyScalar).not.toHaveBeenCalled();
+  });
+
+  it("does not manufacture a pre-approval amount when the policy store is unavailable", async () => {
+    decisionResult = ENGINE_OUTCOMES[0].decision;
+    policyMocks.getPolicyScalar.mockRejectedValueOnce(new Error("policy store unavailable"));
+
+    await expect(analyzeIntake(APP_ID)).rejects.toThrow(/policy store unavailable/i);
+  });
+
+  it.each([0, 29.99, 60.01, Number.NaN])(
+    "fails closed when the configured DTI cap is invalid (%s)",
+    async (invalidCap) => {
+      decisionResult = ENGINE_OUTCOMES[0].decision;
+      policyMocks.getPolicyScalar.mockResolvedValueOnce(invalidCap);
+
+      await expect(analyzeIntake(APP_ID)).rejects.toThrow(/CONVENTIONAL_DTI_CAP.*30%-60%/i);
+    },
+  );
 });
 
 describe("finalizeIntake guards (F-015: this function had no executing test)", () => {

@@ -39,6 +39,7 @@ const application = {
   downPayment: "32000", // → $368k loan, 92% LTV — the register's worked example
   creditScore: 700,
   isVeteran: false,
+  preferredLoanType: "conventional",
   isFirstTimeBuyer: false,
   propertyType: "single_family",
   propertyState: "IL",
@@ -98,7 +99,7 @@ describe("payment projection MI comes from the CONVENTIONAL_PMI matrix (F-077)",
     vi.mocked(storage.getLoanApplication).mockResolvedValueOnce({
       ...application,
       isVeteran: true,
-      loanType: "va",
+      preferredLoanType: "va",
     } as never);
 
     const projection = await computePaymentProjection("app-f077");
@@ -147,11 +148,11 @@ describe("FHA monthly MI is annual MIP, not the conventional matrix (F-077 FHA l
     expect(projection.monthlyMortgageInsurance).toBe(272);
   });
 
-  it("keeps VA routing dominant — a veteran selecting FHA still prices as VA, zero MI", async () => {
+  it("keeps the selected FHA pricing for a veteran instead of silently switching to VA", async () => {
     await mockApplicationOnce({ ...fhaApplication, isVeteran: true });
     const projection = await computePaymentProjection("app-f077");
 
-    expect(projection.monthlyMortgageInsurance).toBe(0);
+    expect(projection.monthlyMortgageInsurance).toBe(245.33);
   });
 
   it("is deterministic — same FHA inputs, same projection (mortgage-calculations house rule)", async () => {

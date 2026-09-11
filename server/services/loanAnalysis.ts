@@ -325,9 +325,15 @@ export async function analyzeIntake(
   const concerns: string[] = [];
   const recommendations: string[] = [];
 
-  if (creditScore > 0) {
+  const conventionalFicoFloor = decision?.resolvedPolicy?.conventionalFicoFloor;
+  if (
+    creditScore > 0 &&
+    decision?.loanProgram === "CONVENTIONAL" &&
+    typeof conventionalFicoFloor === "number" &&
+    creditScore >= conventionalFicoFloor
+  ) {
     strengths.push(
-      `Credit score: ${creditScore} (620 minimum for conforming eligibility, Fannie Mae Eligibility Matrix)`,
+      `Credit score: ${creditScore} (${conventionalFicoFloor} minimum resolved for this conventional decision)`,
     );
   }
   if (purchasePrice > 0 && downPayment > 0) {
@@ -382,19 +388,30 @@ export async function analyzeIntake(
 
   let preApprovalAmount = "0";
   if (isApproved && monthlyIncome > 0) {
-    const rawCap = await lookupResolver.getPolicyScalar("CONVENTIONAL_DTI_CAP").catch(() => 43);
-    // Sanity floor: a corrupt/zero matrix scalar must not silently drive the
-    // affordability math to zero. Fall back to the platform's own conservative
-    // baseline if wild — 43 is OUR overlay (ledger: platform-conv-dti-cap-43),
-    // stricter than B3-6-02's 50% DU maximum. It is not an ATR/QM cap: the
-    // 43% general-QM DTI limit was replaced by the price-based threshold.
-    const dtiCapPct = Number.isFinite(rawCap) && rawCap >= 30 && rawCap <= 60 ? rawCap : 43;
-    if (dtiCapPct !== rawCap) {
-      console.warn(`[loanAnalysis] CONVENTIONAL_DTI_CAP out of range (${rawCap}); using ${dtiCapPct}`);
+    if (decision?.loanProgram === "CONVENTIONAL") {
+      const dtiCapPct = await lookupResolver.getPolicyScalar("CONVENTIONAL_DTI_CAP");
+      // A missing or corrupt policy row is a system fault. Substituting 43 here
+      // used to produce a borrower-facing amount with a rule that was absent from
+      // the decision's policy record. Fail loudly so the recovery loop retries
+      // after policy service is restored.
+      if (!Number.isFinite(dtiCapPct) || dtiCapPct < 30 || dtiCapPct > 60) {
+        throw new Error(
+          `CRITICAL COMPLIANCE ERROR: CONVENTIONAL_DTI_CAP is outside the permitted 30%-60% range (${dtiCapPct})`,
+        );
+      }
+      const maxPrice = maxQualifyingPurchase(dtiCapPct, monthlyIncome, monthlyDebts, downPayment, creditScore);
+      // Never issue less than the price the engine just approved.
+      preApprovalAmount = String(Math.max(maxPrice, purchasePrice));
+    } else {
+      // The VA engine evaluates the requested loan, including residual income,
+      // but the maximum-purchase calculator is conventional-only. Preserve the
+      // approved request without extrapolating a larger VA amount through a
+      // conventional DTI formula.
+      preApprovalAmount = String(purchasePrice);
+      recommendations.push(
+        "The requested VA purchase was evaluated; a higher VA pre-approval amount requires program-specific review by the loan team.",
+      );
     }
-    const maxPrice = maxQualifyingPurchase(dtiCapPct, monthlyIncome, monthlyDebts, downPayment, creditScore);
-    // Never issue less than the price the engine just approved.
-    preApprovalAmount = String(Math.max(maxPrice, purchasePrice));
   }
 
   // A pre-approval must be for a positive amount. If the engine approved but the

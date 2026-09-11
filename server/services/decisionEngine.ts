@@ -3,8 +3,15 @@ import { eq, desc } from "drizzle-orm";
 import type { BorrowerDeclarations } from "@shared/schema";
 import { storage } from "../storage";
 import { db } from "../db";
-import { consolidatedUnderwritingEngine, UnderwritingError, type UnderwritingInput, type AssetProfile, type ResolvedPolicy } from "../underwritingEngine";
-import { computePaymentProjection } from "./loanEstimate";
+import {
+  consolidatedUnderwritingEngine,
+  UnderwritingError,
+  type UnderwritingInput,
+  type UnderwritingLoanProgram,
+  type AssetProfile,
+  type ResolvedPolicy,
+} from "../underwritingEngine";
+import { computeDecisionPaymentProjection } from "./loanEstimate";
 import { isExcludedAsPaidByOtherParty, type PaidByOtherPartyFacts } from "@shared/liabilityExclusions";
 import { decisionSnapshots, incomePathEvaluations, type LoanApplication, type IncomeSourceEntry } from "@shared/schema";
 import {
@@ -44,6 +51,10 @@ export type Decision = "APPROVED" | "REJECTED" | "MANUAL_REVIEW";
 export interface InstantDecision {
   status: DecisionStatus;
   decision: Decision | null;
+  /** Product family evaluated here; see loanProgramSelection for its source. */
+  loanProgram: UnderwritingLoanProgram | null;
+  /** Whether the program was selected in URLA or is an early preliminary candidate. */
+  loanProgramSelection: "application_selected" | "preliminary_conventional_candidate" | null;
   /** PRELIMINARY (self-reported data) vs VERIFIED (document/credit-backed). */
   qualifier: "PRELIMINARY" | "VERIFIED";
   isVerified: boolean;
@@ -82,7 +93,20 @@ export interface InstantDecision {
   } | null;
 }
 
-const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v2";
+const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v3";
+
+/** Map the persisted URLA vocabulary to the engine's explicit program axis. */
+export function requestedUnderwritingProgram(
+  value: string | null | undefined,
+): UnderwritingLoanProgram | null {
+  switch ((value ?? "").trim().toLowerCase()) {
+    case "conventional": return "CONVENTIONAL";
+    case "fha": return "FHA";
+    case "va": return "VA";
+    case "usda": return "USDA";
+    default: return null;
+  }
+}
 
 function decisionInputFingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -348,6 +372,16 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   const currentGrade = await getCurrentDecisionGrade(app);
   const isVerified = currentGrade.isDecisionGrade;
   const qualifier: InstantDecision["qualifier"] = isVerified ? "VERIFIED" : "PRELIMINARY";
+  const selectedLoanProgram = requestedUnderwritingProgram(app.preferredLoanType);
+  // The fast application deliberately does not ask a novice borrower to pick a
+  // program. Preserve a fast PRELIMINARY result by evaluating a conventional
+  // candidate, but never use that fallback for a verified/outward decision.
+  const requestedLoanProgram = selectedLoanProgram ?? (isVerified ? null : "CONVENTIONAL");
+  const loanProgramSelection: InstantDecision["loanProgramSelection"] = selectedLoanProgram
+    ? "application_selected"
+    : requestedLoanProgram
+      ? "preliminary_conventional_candidate"
+      : null;
 
   const fin = await aggregateBorrowerFinancials(app, isVerified);
 
@@ -367,6 +401,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       propertyState: app.propertyState,
       propertyType: app.propertyType,
       loanPurpose: app.loanPurpose,
+      preferredLoanType: app.preferredLoanType,
       amortizationType: app.amortizationType,
       isVeteran: app.isVeteran,
       householdFamilySize: app.householdFamilySize,
@@ -384,15 +419,21 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       isDecisionGrade: currentGrade.isDecisionGrade,
       evidence: currentGrade.evidence,
     },
+    underwritingProgram: {
+      evaluated: requestedLoanProgram,
+      selection: loanProgramSelection,
+    },
   };
   const prePricingInputsFingerprint = decisionInputFingerprint(decisionEvidence);
 
   // Every decision (including NEEDS_MORE_INFO) carries the income evaluation
   // that produced its income figure, so recalculateDecision can persist it and
   // link it to the snapshot.
-  const base: Pick<InstantDecision, "qualifier" | "isVerified" | "income" | "inputsFingerprint"> = {
+  const base: Pick<InstantDecision, "qualifier" | "isVerified" | "income" | "inputsFingerprint" | "loanProgram" | "loanProgramSelection"> = {
     qualifier,
     isVerified,
+    loanProgram: requestedLoanProgram,
+    loanProgramSelection,
     inputsFingerprint: prePricingInputsFingerprint,
     income: {
       result: fin.income,
@@ -426,6 +467,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     );
   }
   if (!app.creditScore) missing.push("Credit score");
+  if (!requestedLoanProgram) missing.push("Preferred loan program");
   if (!purchasePrice || purchasePrice <= 0) missing.push("Purchase price");
   if (isNaN(downPayment) || downPayment < 0) missing.push("Down payment");
   // A down payment at or above the price leaves a zero/negative loan amount,
@@ -436,13 +478,43 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   if (!app.propertyState) missing.push("Property state");
   // VA path: the residual-income evaluation needs both of these — surface them
   // as named gaps here instead of letting the engine throw its protocol error.
-  if (app.isVeteran) {
+  if (requestedLoanProgram === "VA" && app.isVeteran) {
     if (!app.householdFamilySize) missing.push("Household size (required for VA residual income)");
     if (!app.homeSquareFootage) missing.push("Home square footage (required for VA residual income)");
   }
 
   if (missing.length > 0) {
     return { status: "NEEDS_MORE_INFO", decision: null, reasons: [], missingItems: missing, metrics: null, resolvedPolicy: null, ...base };
+  }
+
+  // Product selection is part of the decision, not a hint. The current engine
+  // has cited deterministic policy for conventional and VA only. FHA and USDA
+  // therefore route to a loan officer before any conventional/VA projection
+  // can be mistaken for an automated eligibility result.
+  if (requestedLoanProgram === "FHA" || requestedLoanProgram === "USDA") {
+    return {
+      status: "DECISION_READY",
+      decision: "MANUAL_REVIEW",
+      reasons: [
+        `${requestedLoanProgram} underwriting is not automated yet. A loan officer must review this program using its current governing guidance before eligibility can be determined.`,
+      ],
+      missingItems: [],
+      metrics: null,
+      resolvedPolicy: null,
+      ...base,
+    };
+  }
+
+  if (requestedLoanProgram === "VA" && !app.isVeteran) {
+    return {
+      status: "DECISION_READY",
+      decision: "MANUAL_REVIEW",
+      reasons: ["A loan officer must confirm VA eligibility before this program can be evaluated."],
+      missingItems: [],
+      metrics: null,
+      resolvedPolicy: null,
+      ...base,
+    };
   }
 
   // Price the loan to get a proposed PITI — the loan-estimate service's
@@ -456,7 +528,10 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
   // input (price, down payment, credit score, state) still gap honestly here.
   let monthlyPiti: number;
   try {
-    const projection = await computePaymentProjection(applicationId);
+    const projection = await computeDecisionPaymentProjection(
+      applicationId,
+      requestedLoanProgram!.toLowerCase() as "conventional" | "fha" | "va" | "usda",
+    );
 
     // B3-6-03: owners' association and co-op dues belong inside the qualifying
     // housing expense. On a condo, co-op, PUD or townhouse we cannot treat an
@@ -508,6 +583,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
 
   // Run the deterministic engine on the aggregated, multi-borrower figures.
   const input: UnderwritingInput = {
+    requestedLoanProgram: requestedLoanProgram!,
     isVeteran: app.isVeteran ?? false,
     baseMonthlyIncome: fin.baseMonthlyIncome,
     bonusMonthlyIncome: fin.variableMonthlyIncome,
@@ -560,7 +636,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       // DECISION, not a documentation gap: route it to a human as MANUAL_REVIEW
       // so it lands in the queue with an auditable reason instead of crashing or
       // looping forever asking for documents that would never resolve it.
-      if (err.kind === "POLICY_OUT_OF_BAND") {
+      if (err.kind === "POLICY_OUT_OF_BAND" || err.kind === "POLICY_UNSUPPORTED") {
         return { status: "DECISION_READY", decision: "MANUAL_REVIEW", reasons: [err.publicMessage], missingItems: [], metrics: null, resolvedPolicy: null, ...base, inputsFingerprint: pricedInputsFingerprint };
       }
     }

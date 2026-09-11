@@ -131,6 +131,7 @@ export function registerLetterRoutes(
           reasons: currentDecision?.reasons ?? currentDecision?.missingItems ?? [],
         });
       }
+      const decisionProductType = currentDecision.resolvedPolicy.loanType === "VA" ? "VA" : "CONV";
 
       const { generatePreApprovalPDF, STANDARD_PRE_APPROVAL_CONDITIONS } = await import("../../services/pdfLetterGenerator");
 
@@ -207,7 +208,7 @@ export function registerLetterRoutes(
         letterNumber,
         borrowerName,
         loanAmount,
-        productType: application.isVeteran ? "VA" : "CONV",
+        productType: decisionProductType,
         occupancy,
         loanPurpose: application.loanPurpose || "Purchase",
         companyLegalName: COMPANY_CONFIG.legalName,
@@ -294,7 +295,7 @@ export function registerLetterRoutes(
           borrowerName,
           applicationId: id,
           loanAmount,
-          productType: application.isVeteran ? "VA" : "CONV",
+          productType: decisionProductType,
           occupancy,
           loanPurpose: application.loanPurpose || "Purchase",
           decisionInputFingerprint: currentDecision.inputsFingerprint,

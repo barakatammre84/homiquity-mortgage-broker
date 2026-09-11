@@ -191,7 +191,7 @@ describe.sequential("core provider canary ledger", () => {
     });
     expect(underwriting).toMatchObject({
       provider: "Homiquity policy engine",
-      operation: "synthetic_conventional_repeatability",
+      operation: "program_selection_and_repeatability",
       status: "success",
       failureClass: null,
     });
