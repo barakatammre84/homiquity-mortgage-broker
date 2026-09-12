@@ -69,16 +69,32 @@
   --card: 0 0% 100%;
   --card-foreground: 165 45% 8%;
   --card-border: 160 14% 90%;
-  /* Sidebar: green-black navigation container #17302A (was royal blue ~#122A6B) */
-  --sidebar: 165 35% 14%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 165 25% 24%;
-  /* Active nav item: light pill on the green-black sidebar */
-  --sidebar-primary: 210 40% 98%;
-  --sidebar-primary-foreground: 165 45% 8%;
-  --sidebar-accent: 165 28% 22%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 160 84% 39%;
+  /* Sidebar: WHITE navigation container, separated from the canvas by the
+     standard hairline rather than by a change of ground.
+
+     Founder decision 2026-09-12, stage two of the design change: routine dark
+     sections are retired (log: knowledge-base/logs/2026-09-12-one-application.md).
+     This was green-black #17302A, and royal blue ~#122A6B before that.
+
+     This block drives all three dark surfaces in the app — the nav
+     (components/ui/sidebar.tsx), the footer (components/Footer.tsx) and the
+     renter CTA card (pages/borrower/RenterHome.tsx) — so they invert together
+     from here, with no edit to any component and none to the vendored primitive.
+
+     Every pair below is re-struck for a light ground, not merely lightened:
+     foreground and accent-foreground flip to the type colour, the active nav
+     pill becomes the black primary carrying white text (the inverse of the
+     light-pill-on-dark it replaces), and the ring follows --primary off emerald. */
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 165 45% 8%;
+  --sidebar-border: 160 14% 90%;
+  /* Active nav item: the black primary pill, white text — 19.5:1 */
+  --sidebar-primary: 165 45% 8%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  /* Hover/selected wash: the one mint tint, same as --secondary */
+  --sidebar-accent: 155 40% 94%;
+  --sidebar-accent-foreground: 165 45% 8%;
+  --sidebar-ring: 165 45% 8%;
   --popover: 0 0% 100%;
   --popover-foreground: 165 45% 8%;
   --popover-border: 160 14% 87%;
