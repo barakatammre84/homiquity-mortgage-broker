@@ -1,0 +1,8 @@
+{
+  "$comment": "Recorded UI contrast findings. A finding here does not fail the run; a new one does. Each needs an owner and a target before it counts as accepted — recording is not fixing. Re-record with pnpm ui:contrast --update after a deliberate change, and delete entries as they are fixed.",
+  "recorded": "2026-09-12",
+  "base": "http://localhost:5001",
+  "routes": 18,
+  "textElementsExamined": 2822,
+  "findings": []
+}

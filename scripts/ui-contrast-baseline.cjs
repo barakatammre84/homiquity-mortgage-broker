@@ -147,7 +147,13 @@ function connect(wsUrl) {
       pending.delete(msg.id);
       msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
     } else if (msg.method) {
-      for (const fn of listeners.get(msg.method) || []) fn(msg.params);
+      // In flattened target mode CDP puts sessionId at the TOP level of the
+      // message, not inside params. Dropping it here silently broke every
+      // per-session check downstream: load events never matched, so each page
+      // burned the full navigation timeout, and console errors and failed
+      // requests were attributed to nothing and never recorded at all.
+      const params = msg.sessionId ? { ...msg.params, sessionId: msg.sessionId } : msg.params;
+      for (const fn of listeners.get(msg.method) || []) fn(params);
     }
   });
   return {
@@ -214,6 +220,7 @@ const CONTRAST_AUDIT = `(() => {
     return (el.tagName.toLowerCase() + id + cls).slice(0, 80);
   };
   const out = new Map();
+  let examined = 0;
   for (const el of document.querySelectorAll("body *")) {
     const text = Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join(" ").trim();
     if (!text) continue;
@@ -225,6 +232,7 @@ const CONTRAST_AUDIT = `(() => {
     if (!fg || fg.a === 0) continue;
     const bg = bgOf(el);
     if (bg.image || !bg.colour) continue;
+    examined += 1;
     const size = parseFloat(s.fontSize);
     const weight = parseInt(s.fontWeight, 10) || 400;
     const large = size >= 24 || (size >= 18.66 && weight >= 700);
@@ -241,34 +249,47 @@ const CONTRAST_AUDIT = `(() => {
       sample: text.slice(0, 40),
     });
   }
-  return Array.from(out.values());
+  return { examined, findings: Array.from(out.values()) };
 })()`;
 
 /**
- * Poll until the page has actually painted text. A fixed sleep is the wrong
- * tool: when it under-waits the audit measures an empty document, finds
- * nothing, and the ratchet reports every previously-recorded finding on that
- * page as FIXED — silently deleting coverage on the next --update.
+ * Poll until the page is genuinely ready to be measured.
+ *
+ * "Has content" is not enough. An early version settled on a stable element
+ * count and measured a document holding two elements — the toast container,
+ * mounted before the app. Every page came back with zero contrast findings and
+ * the run reported clean. A contrast harness that measures an unstyled document
+ * does not under-report; it reports the opposite of the truth.
+ *
+ * So readiness is defined by the design tokens being live: a stylesheet
+ * attached, `--primary` resolving on the root, and a body with real content.
+ * If those never arrive we throw, because a page we could not style is a page
+ * we did not measure.
  */
-async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
+async function waitForReady(cdp, sessionId, deadlineMs) {
   const started = Date.now();
-  let stable = 0, lastCount = -1;
+  let last = null;
   while (Date.now() - started < deadlineMs) {
     const res = await cdp.send("Runtime.evaluate", {
-      expression: "document.readyState + '|' + document.querySelectorAll('body *').length",
+      expression: `JSON.stringify({
+        sheets: document.styleSheets.length,
+        token: getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
+        nodes: document.querySelectorAll('body *').length,
+        state: document.readyState
+      })`,
       returnByValue: true,
     }, sessionId).catch(() => null);
-    const [state, countRaw] = String(res?.result?.value ?? "|0").split("|");
-    const count = Number(countRaw) || 0;
-    if (state === "complete" && count > 0) {
-      // Two consecutive equal counts means the client has settled.
-      if (count === lastCount && ++stable >= 2) return true;
-      if (count !== lastCount) stable = 0;
-      lastCount = count;
+    try { last = JSON.parse(res?.result?.value ?? "{}"); } catch { last = null; }
+    if (last && last.state === "complete" && last.sheets > 0 && last.token && last.nodes > 10) {
+      // Let late layout settle now that the tokens are demonstrably applied.
+      await new Promise((r) => setTimeout(r, 600));
+      return last;
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 300));
   }
-  return lastCount > 0;
+  const seen = last ? `stylesheets=${last.sheets} --primary="${last.token}" bodyNodes=${last.nodes} readyState=${last.state}` : "no response from the page";
+  throw new Error(`not ready to measure after ${deadlineMs}ms — ${seen}. ` +
+    `A page whose design tokens never loaded cannot be measured for contrast; refusing to record a false clean.`);
 }
 
 // ------------------------------------------------------------------- run ---
@@ -284,6 +305,7 @@ async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
   const cdp = connect(wsUrl);
   await cdp.ready;
   let checked = 0;
+  let examinedTotal = 0;
 
   // One listener each, dispatching through a mutable cursor. Registering inside
   // the per-route loop leaked a handler per page and made attribution depend on
@@ -299,9 +321,21 @@ async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
     const text = (p.args || []).map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 120);
     if (text) add({ route: cursor.route, viewport: cursor.viewport, kind: "console", id: text.slice(0, 80), detail: text });
   });
+  // Third-party hosts are deliberately excluded. A blocked CDN or font host is
+  // a property of wherever this runs — it differs between a laptop, this
+  // container and CI — so recording it makes the baseline drift for reasons
+  // that have nothing to do with the product. We record failures of our own
+  // origin, which is the only thing a change here can break.
+  const requestUrls = new Map();
+  cdp.on("Network.requestWillBeSent", (p) => {
+    if (p.requestId && p.request && p.request.url) requestUrls.set(p.requestId, p.request.url);
+  });
   cdp.on("Network.loadingFailed", (p) => {
     if (!cursor || p.sessionId !== cursor.sessionId || p.canceled) return;
-    add({ route: cursor.route, viewport: cursor.viewport, kind: "request", id: p.type || "request", detail: `${p.type}: ${p.errorText}` });
+    const url = requestUrls.get(p.requestId) || "";
+    if (url && !url.startsWith(BASE)) return;
+    const where = url ? new URL(url).pathname : (p.type || "request");
+    add({ route: cursor.route, viewport: cursor.viewport, kind: "request", id: `${p.type || "request"} ${where}`, detail: `${p.type}: ${p.errorText} (${where})` });
   });
   const waitForLoad = (sessionId) => new Promise((resolve) => {
     const t = setTimeout(() => { loadWaiters.delete(sessionId); resolve(); }, TIMEOUT_MS);
@@ -328,14 +362,23 @@ async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
         // sleeping a fixed interval: a fixed sleep measured an empty document
         // on a slow load and then reported every finding on that page as FIXED,
         // which is the one failure mode a ratchet must never have.
-        const painted = await waitForPaint(cdp, sessionId);
-        if (!painted) throw new Error(`${route.path} (${viewport.name}) rendered no body content within ${TIMEOUT_MS}ms`);
+        try {
+          await waitForReady(cdp, sessionId, TIMEOUT_MS);
+        } catch (e) {
+          throw new Error(`${route.path} (${viewport.name}): ${e.message}`);
+        }
 
         const res = await cdp.send("Runtime.evaluate", {
           expression: CONTRAST_AUDIT, returnByValue: true, awaitPromise: false,
         }, sessionId);
         if (res.exceptionDetails) throw new Error(`${route.path}: ${res.exceptionDetails.text}`);
-        for (const v of res.result.value || []) {
+        const audit = res.result.value || { examined: 0, findings: [] };
+        // Coverage is reported alongside the verdict, always. "0 findings" and
+        // "looked at nothing" are indistinguishable without it, and this
+        // harness has already produced the second while reporting the first.
+        if (audit.examined === 0) throw new Error(`${route.path} (${viewport.name}): the audit examined 0 text elements — refusing to record a clean result from an empty measurement`);
+        examinedTotal += audit.examined;
+        for (const v of audit.findings) {
           add({
             route: route.path, viewport: viewport.name, kind: "contrast",
             id: `${v.selector}|${v.fg}on${v.bg}`,
@@ -363,9 +406,10 @@ async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
       recorded: new Date().toISOString().slice(0, 10),
       base: BASE,
       routes: routes.length,
+      textElementsExamined: examinedTotal,
       findings,
     }, null, 2) + "\n");
-    console.log(`Recorded ${findings.length} finding(s) from ${checked} page load(s) to tests/ui/contrast-baseline.json`);
+    console.log(`Recorded ${findings.length} finding(s) from ${checked} page load(s), ${examinedTotal} text element(s) examined.`);
     return;
   }
 
@@ -388,7 +432,7 @@ async function waitForPaint(cdp, sessionId, deadlineMs = 15000) {
     process.exitCode = 1;
     return;
   }
-  console.log(`PASS  ${routes.length} route(s) x ${VIEWPORTS.length} viewport(s) = ${checked} load(s); ${findings.length} recorded finding(s), 0 new.`);
+  console.log(`PASS  ${routes.length} route(s) x ${VIEWPORTS.length} viewport(s) = ${checked} load(s); ${examinedTotal} text element(s) examined; ${findings.length} recorded finding(s), 0 new.`);
   console.log("Measured: AA text contrast, console errors, failed requests. NOT an accessibility audit (no axe).");
 })().catch((error) => {
   console.error(`ui-contrast-baseline: ${error.message}`);
