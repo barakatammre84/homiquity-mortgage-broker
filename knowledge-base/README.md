@@ -21,7 +21,7 @@ doc-drift bug to fix):
 
 ## Sections
 
-- [Core integration](specs/CORE_INTEGRATION.md) — founder-approved sequence for bringing Core review and evidence capabilities into the existing Homiquity app.
+- [Core integration](specs/CORE_INTEGRATION.md) — **superseded 2026-09-11**: Homiquity-Core is the product and this repository is the legacy reference (founder decision 2026-09-11). Retained as a dated record of the five integrations that landed here; do not act on its direction.
 
 ### Handbook — how the system is built · [`handbook/`](handbook/)
 - [FEATURE_MAP.md](handbook/FEATURE_MAP.md) — **what has actually been built**: all 41 shipped
