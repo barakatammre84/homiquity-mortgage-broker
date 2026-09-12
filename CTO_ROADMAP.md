@@ -2,7 +2,7 @@
 
 **Last evidence review:** 2026-09-11
 
-**Product direction:** **Homiquity-Core** (`barakatammre84/Homiquity-Core`) is the product; this repository is the legacy reference and source library — founder decision 2026-09-11, standing record D-001 in [Core DECISION_LOG](https://github.com/barakatammre84/Homiquity-Core/blob/main/DECISION_LOG.md). The phase gates below are retained until they are re-sequenced under Core's roadmap; no new product surface starts here.
+**Product direction:** one Homiquity application with Core capabilities inside it. Confirmed 2026-09-12: Homiquity-Core is being archived and its remaining value merged here; the 2026-09-11 decision that made Core the product was reversed the next day (knowledge-base/logs/2026-09-12-one-application.md).
 
 **Audited production baseline:** `50b496ddbc5c118bc260cbb93f26e51445f7b6a1` on 2026-09-11.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
@@ -29,8 +29,8 @@ It should win where a broker can create more value: self-employed, multi-busines
 income and other complicated returns, combined with a choice of wholesale lenders and high-touch
 human service.
 
-Core is the product (founder decision 2026-09-11). This repository's proven engines, tests and
-operating evidence are ported into Core under Core's migration rule, never copied wholesale.
+Core remains part of Homiquity. A separate Core product would duplicate identity, applications and
+uploads while leaving the real lender, provider and operating gaps unresolved — confirmed 2026-09-12.
 
 ## How status is reported
 
@@ -378,7 +378,8 @@ The next decisions are:
 
 ## Evidence and maintenance
 
-Current evidence: [core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md) ·
+Current evidence: [Core integration](knowledge-base/specs/CORE_INTEGRATION.md) ·
+[core intelligence audit](knowledge-base/feature-review/CORE_INTELLIGENCE_AUDIT_2026-09-08.md) ·
 [complex borrower and loan-officer walk](knowledge-base/feature-review/journey-walks/2026-09-07-complex-borrower-lo-loop.md) ·
 [mixed-income analysis walk](knowledge-base/feature-review/journey-walks/2026-09-08-mixed-income-analysis-loop.md) ·
 [production acceptance test](knowledge-base/runbooks/PROD_ACCEPTANCE_TEST.md) ·

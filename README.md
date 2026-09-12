@@ -62,7 +62,7 @@ Two axes of authority:
 | [handbook/app-guide/](knowledge-base/handbook/app-guide/) | The 12-chapter subsystem handbook. Start at [01-start-here](knowledge-base/handbook/app-guide/01-start-here.md). |
 | [governance/ASSUMPTIONS.md](knowledge-base/governance/ASSUMPTIONS.md) | The fact/assumption register: what is simulated, pending, or verified-when. |
 
-Product direction (2026-09-11): **Homiquity-Core is the product**; this repository is the legacy reference and source library. The earlier [Core capabilities inside Homiquity](knowledge-base/specs/CORE_INTEGRATION.md) spec is superseded and retained as a dated record.
+Core integration direction and acceptance gates: [Core capabilities inside Homiquity](knowledge-base/specs/CORE_INTEGRATION.md). Confirmed 2026-09-12: this repository is the product; the Homiquity-Core repository is being archived and its remaining value merged here.
 
 ### Tier 2 — Doctrine (decisions; change deliberately, never casually)
 
