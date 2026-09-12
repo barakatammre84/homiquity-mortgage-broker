@@ -44,6 +44,10 @@ resolve — its content moved to [L1](knowledge-base/L1_VISION_AND_SCOPE.md); do
 Regulatory source binaries stay in **[`docs/`](docs/)**; app-data (not docs) in
 `data/regulatory/`.
 
+**Starting work?** Read [AGENTS.md](AGENTS.md), then
+[knowledge-base/ACTIVE_CONTEXT.md](knowledge-base/ACTIVE_CONTEXT.md) — the short entry point and
+the current state of the system. Everything below is what they route into.
+
 Two axes of authority:
 
 - **Precedence** (which doc wins on intent): **L1 → L2 → L3** —
