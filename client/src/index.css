@@ -43,9 +43,11 @@
    Neutrals (brand-tinted, NOT slate): canvas #FFFFFF, tint #EAF6F1, app ground
    #F2F8F5, hairlines #E2E9E7, micro-copy #5A726C, type green-black #0B1E19.
    Dark surfaces (sidebar, footer, hero gradients): green-black #17302A.
-   Conversion green: emerald — #047857 (700) for solid fills so white text clears
-   WCAG AA (5.49:1; raw #10B981 is only 2.49:1), #059669 (600) for rings, #10B981
-   (500) reserved for status/success accents.
+   Primary action: green-black #0B1E19 — the type colour (founder decision
+   2026-09-12; replaced emerald #047857, which passed AA at 5.49:1 and was
+   retired by decision, not defect). Emerald survives ONLY as a status hue:
+   #10B981 (500) for success/Day 1 Certainty. It is no longer an action colour,
+   so do not reintroduce it on a button.
    Warm accent: `--flare` (orange, hue 24deg) — a FILL colour with hard contrast
    limits. Read its token comment below before using it; the mistake it exists to
    prevent is treating it as a text colour. */
@@ -80,9 +82,24 @@
   --popover: 0 0% 100%;
   --popover-foreground: 165 45% 8%;
   --popover-border: 160 14% 87%;
-  /* Layer 2: conversion action = Emerald #047857 (green means "Go";
-     700-depth so white button text passes AA) */
-  --primary: 163 94% 24%;
+  /* Layer 2: primary action = the type colour, green-black #0B1E19.
+     Founder decision 2026-09-12 (knowledge-base/logs/2026-09-12-one-application.md):
+     black is the primary action colour, adopted from the Homiquity-Core design
+     direction before that repository was archived.
+
+     This REPLACES emerald #047857 and the "green means Go" rationale that stood
+     here from 2026-08-20. That reasoning was sound and the colour passed AA at
+     5.49:1; it is retired by decision, not by defect.
+
+     The value is `--foreground`, not pure #000000, deliberately: this system's
+     whole neutral ramp carries the brand hue (see the block comment above), and
+     a pure-black button against brand-tinted neutrals reads as a rendering
+     fault. It is black to the eye and it matches body type, which is what the
+     adopted direction asks for — one black for content and action alike.
+     White button text on it is 19.5:1, up from 5.49:1.
+
+     To go to pure black instead, set `0 0% 0%` here; nothing else needs to move. */
+  --primary: 165 45% 8%;
   --primary-foreground: 0 0% 100%;
   /* Secondary surfaces: the mint tint #EAF6F1 (was a slate-100 chip) */
   --secondary: 155 40% 94%;
@@ -185,8 +202,11 @@
      comments only, and moving it is a visible restyle of every input border.
      Founder call. */
   --input: 213 27% 84%;
-  /* Focus ring: emerald-600 #059669 (3.77:1 on white — passes UI 3:1) */
-  --ring: 161 94% 30%;
+  /* Focus ring: follows the primary to green-black #0B1E19 (19.5:1 on white,
+     far past the 3:1 UI minimum). It tracked emerald-600 #059669 at 3.77:1
+     while the action colour was emerald; leaving a green ring against black
+     buttons would have been the only emerald left on the page. */
+  --ring: 165 45% 8%;
   /* Charts: colorblind-safe CATEGORICAL set (max hue separation). Deliberately
      does NOT reuse success/warning hues so a green series never reads as
      "good". For a single ordered metric use the slate value ramp
