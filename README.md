@@ -1,5 +1,20 @@
 # Homiquity
 
+> **Repository identity — read this first if you are an agent or new here.**
+> This is `barakatammre84/homiquity-mortgage-broker`, and it is **the product**. It serves
+> <https://www.homiquity.com> and deploys from `main` on every merge.
+>
+> Two sibling repositories exist and are **not** this one:
+>
+> | Repository | What it is |
+> |---|---|
+> | `barakatammre84/Homiquity-Core` | A rebuild, **retired** by founder decision 2026-09-12. Do not build there. It cannot be deployed: it binds to loopback, has no hosting configuration, and destroys uploaded documents on restart ([log](knowledge-base/logs/2026-09-12-one-application.md)) |
+> | `barakatammre84/homiquity-acquisitions` | A **separate business** in Python, becoming a Realiquity sub-product. Unrelated to the mortgage platform despite the name |
+>
+> Everything called "Homiquity" that is not this repository is one of those two. If a document,
+> a saved project or an agent points somewhere else, it is pointing at the wrong place.
+> Working here? Start at **[AGENTS.md](AGENTS.md)**.
+
 An AI-native mortgage **brokerage** platform: borrower intake (digital 1003), document
 collection, deterministic underwriting, MISMO 3.4 packaging, and delivery of complete
 loan files to wholesale lenders. Deployed at <https://www.homiquity.com> (Railway — one persistent
