@@ -1,0 +1,23 @@
+{
+  "$comment": "Routes driven by scripts/ui-contrast-baseline.cjs. Public, unauthenticated surfaces only — the ones a borrower or referral partner sees first, and the ones a colour change touches hardest. Authenticated staff screens are deliberately absent until the harness can sign in; adding them without that would report a login page 15 times and call it coverage. Add a route here and re-record the baseline in the same PR.",
+  "routes": [
+    { "path": "/", "note": "landing or waitlist depending on the prelaunch flag" },
+    { "path": "/login" },
+    { "path": "/signup" },
+    { "path": "/forgot-password" },
+    { "path": "/learn" },
+    { "path": "/faq" },
+    { "path": "/glossary" },
+    { "path": "/privacy" },
+    { "path": "/terms" },
+    { "path": "/disclosures" },
+    { "path": "/rates" },
+    { "path": "/calculators" },
+    { "path": "/calculators/affordability" },
+    { "path": "/calculators/mortgage" },
+    { "path": "/calculators/rent-vs-buy" },
+    { "path": "/resources" },
+    { "path": "/for-cpas" },
+    { "path": "/rent-reporting" }
+  ]
+}

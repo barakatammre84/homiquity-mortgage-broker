@@ -10,12 +10,12 @@ export function Footer() {
   // mode, where primary becomes Paper) — the footer shares the sidebar's
   // "navigation container" stop on the ramp.
   return (
-    <footer className="bg-sidebar text-sidebar-foreground">
+    <footer className="border-t border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
             <Link href="/" className="touch-target flex items-center gap-2">
-              <Logo size="md" tone="onDark" data-testid="logo-footer" />
+              <Logo size="md" tone="brand" data-testid="logo-footer" />
             </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-sidebar-foreground/70">
               Clarity for every stage of homeownership. Pre-approval, property search, and AI guidance from Homi — all in one place.

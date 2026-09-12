@@ -2,9 +2,10 @@
 
 The single home for all Homiquity documentation. Every `.md` here is indexed below — an
 unindexed doc is an unread doc (enforced by `scripts/kb-index-guard.cjs` via `pnpm checkup`).
-Three living docs live outside this tree, deliberately: **`CLAUDE.md`** (Claude Code auto-loads
+Four living docs live outside this tree, deliberately: **`AGENTS.md`** (the agent
+entry point; read it first), **`CLAUDE.md`** (Claude Code auto-loads
 it from repo root), **`README.md`** (the repo landing page), and **`CTO_ROADMAP.md`** (the live
-work queue). A fourth, **`PRODUCT_SPINE.md`**, is a one-line pointer stub retained only so old
+work queue). A fifth, **`PRODUCT_SPINE.md`**, is a one-line pointer stub retained only so old
 links resolve — its content moved to [L1](L1_VISION_AND_SCOPE.md). Regulatory source binaries
 stay in **`docs/`** (fannie-mae / nmls / nmls-safe). App-data (not docs) lives in
 **`data/regulatory/`**.
@@ -19,9 +20,13 @@ doc-drift bug to fix):
 - **L3 — Feature specs** — [`specs/`](specs/), template [`specs/_TEMPLATE.md`](specs/_TEMPLATE.md) —
   each cites its L1 loop + L2 invariants.
 
+## Where we are right now
+
+- [ACTIVE_CONTEXT.md](ACTIVE_CONTEXT.md) — what is deployed, what the readiness verdict is, which provider is real versus simulated, the unverified production settings, the open founder decisions, and the known gaps between the docs and the code. Facts only, never rules. Read it after [AGENTS.md](../AGENTS.md) and before anything else.
+
 ## Sections
 
-- [Core integration](specs/CORE_INTEGRATION.md) — founder-approved sequence for bringing Core review and evidence capabilities into the existing Homiquity app.
+- [Core integration](specs/CORE_INTEGRATION.md) — founder-approved sequence for bringing Core review and evidence capabilities into the existing Homiquity app; the five integrations landed. Current as of 2026-09-12, when the brief reversal of 2026-09-11 was itself reversed and Core was set for archive.
 
 ### Handbook — how the system is built · [`handbook/`](handbook/)
 - [FEATURE_MAP.md](handbook/FEATURE_MAP.md) — **what has actually been built**: all 41 shipped
