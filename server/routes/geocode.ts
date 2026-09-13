@@ -4,6 +4,23 @@ import { firstQueryValue } from "./queryParams";
 const autocompleteCache = new Map<string, { data: any; expires: number }>();
 const detailsCache = new Map<string, { data: any; expires: number }>();
 
+type MapsEnv = Partial<Pick<NodeJS.ProcessEnv,
+  "NODE_ENV" | "GOOGLE_MAPS_SERVER_API_KEY" | "GOOGLE_MAPS_BROWSER_API_KEY" | "GOOGLE_MAPS_API_KEY"
+>>;
+
+// Production uses two separately restricted keys. The legacy single key is
+// accepted only outside production so existing local setups do not break while
+// preventing an unrestricted browser-visible key from reaching a live deploy.
+export function getGoogleMapsServerApiKey(env: MapsEnv = process.env): string | undefined {
+  return env.GOOGLE_MAPS_SERVER_API_KEY ||
+    (env.NODE_ENV !== "production" ? env.GOOGLE_MAPS_API_KEY : undefined);
+}
+
+export function getGoogleMapsBrowserApiKey(env: MapsEnv = process.env): string | undefined {
+  return env.GOOGLE_MAPS_BROWSER_API_KEY ||
+    (env.NODE_ENV !== "production" ? env.GOOGLE_MAPS_API_KEY : undefined);
+}
+
 function getCached(cache: Map<string, { data: any; expires: number }>, key: string) {
   const entry = cache.get(key);
   if (entry && entry.expires > Date.now()) return entry.data;
@@ -22,7 +39,8 @@ function setCache(cache: Map<string, { data: any; expires: number }>, key: strin
 }
 
 export function registerGeocodeRoutes(app: Express) {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const serverApiKey = getGoogleMapsServerApiKey();
+  const browserApiKey = getGoogleMapsBrowserApiKey();
 
   app.get("/api/geocode/autocomplete", async (req: Request, res: Response) => {
     const input = (firstQueryValue(req.query.input) || "").trim();
@@ -30,8 +48,8 @@ export function registerGeocodeRoutes(app: Express) {
     if (input.length < 3) {
       return res.json([]);
     }
-    if (!apiKey) {
-      return res.status(503).json({ error: "Google Maps API key not configured" });
+    if (!serverApiKey) {
+      return res.status(503).json({ error: "Google Maps server API key not configured" });
     }
 
     const cacheKey = `${mode}:${input.toLowerCase()}`;
@@ -46,7 +64,7 @@ export function registerGeocodeRoutes(app: Express) {
       const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
         method: "POST",
         headers: {
-          "X-Goog-Api-Key": apiKey,
+          "X-Goog-Api-Key": serverApiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -83,15 +101,15 @@ export function registerGeocodeRoutes(app: Express) {
     if (!placeId) {
       return res.status(400).json({ error: "placeId is required" });
     }
-    if (!apiKey) {
-      return res.status(503).json({ error: "Google Maps API key not configured" });
+    if (!serverApiKey) {
+      return res.status(503).json({ error: "Google Maps server API key not configured" });
     }
 
     const cached = getCached(detailsCache, placeId);
     if (cached) return res.json(cached);
 
     try {
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(placeId)}&key=${apiKey}`;
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(placeId)}&key=${serverApiKey}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -142,8 +160,8 @@ export function registerGeocodeRoutes(app: Express) {
     if (!address) {
       return res.status(400).json({ error: "address is required" });
     }
-    if (!apiKey) {
-      return res.status(503).json({ error: "Google Maps API key not configured" });
+    if (!serverApiKey) {
+      return res.status(503).json({ error: "Google Maps server API key not configured" });
     }
 
     try {
@@ -151,7 +169,7 @@ export function registerGeocodeRoutes(app: Express) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Goog-Api-Key": apiKey,
+          "X-Goog-Api-Key": serverApiKey,
         },
         body: JSON.stringify({
           address: { addressLines: [address] },
@@ -193,9 +211,9 @@ export function registerGeocodeRoutes(app: Express) {
   });
 
   app.get("/api/config/maps-key", (_req: Request, res: Response) => {
-    if (!apiKey) {
-      return res.status(503).json({ error: "Google Maps API key not configured" });
+    if (!browserApiKey) {
+      return res.status(503).json({ error: "Google Maps browser API key not configured" });
     }
-    return res.json({ key: apiKey });
+    return res.json({ key: browserApiKey });
   });
 }
