@@ -14,9 +14,14 @@ router into it, not a replacement. Where the two disagree, CLAUDE.md wins.
 - `barakatammre84/Homiquity-Core` is **retired — do not build there** (founder decision
   2026-09-12, `knowledge-base/logs/2026-09-12-one-application.md`). It is not yet archived on
   GitHub and is still writable, so "nobody can commit there" is not a protection you have.
+  Archiving is a pending founder action and does not change its visibility: it stays private.
   Taking its remaining value across is in progress, not done.
-- `barakatammre84/homiquity-acquisitions` is a **separate business** in Python, becoming a
-  Realiquity sub-product. Despite the name it has nothing to do with the mortgage platform.
+- `barakatammre84/aquistionbyrealiquity` (the repository's real spelling) is a **separate
+  business** in Python, becoming a Realiquity sub-product. It has nothing to do with the mortgage
+  platform.
+- On the founder's machine the one checkout to work from is `~/Developer/homiquity`. Every other
+  local copy is a recovery source, not a workspace. Never work from a copy under `~/Documents`:
+  that folder is iCloud Drive and evicts file contents, so reads and `git status` hang there.
 - Work on a branch cut from `main`. One session, one worktree, one branch
   (TEAM_PRACTICES §4). Never commit to `main`.
 - **Name the branch for the agent that owns it**: `claude/<slice>` or `codex/<slice>`. Both are in
@@ -33,9 +38,10 @@ which has already happened, and cost a day.
 1. `git fetch origin && git status -sb` — if behind, dirty, or carrying changes this task did not
    create, STOP and report. Do not tidy it.
 2. `git config core.hooksPath .githooks` — arms this clone's pre-push gate. That setting lives in
-   `.git/config`, which is per-clone and untracked, so **a fresh clone or a new worktree starts
-   with the gate silently off**. `node scripts/hooks-installed-guard.cjs` checks it; `pnpm checkup`
-   and `pnpm preflight` both run that check.
+   `.git/config`, which is per-clone and untracked, so **a fresh clone starts with the gate
+   silently off**. Linked worktrees (`git worktree add`) share the clone's config and inherit the
+   setting. `node scripts/hooks-installed-guard.cjs` checks it; `pnpm checkup` and `pnpm preflight`
+   both run that check.
 3. **Find out who else is working, strongest signal first:**
    1. `origin/main` — what already landed.
    2. **Open pull requests.** A file with an open PR against it is claimed by that PR whether or not

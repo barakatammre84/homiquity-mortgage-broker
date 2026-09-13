@@ -59,5 +59,7 @@ Both reversals came from deciding before checking. The 2026-09-11 decision reste
 of which local folder was authoritative; nobody had asked whether the newer codebase could be
 deployed at all. The reversal came thirty minutes after somebody read its server startup code.
 
-Core is to be archived **public**, because the reuse record in `specs/CORE_INTEGRATION.md` carries
-five permalinks into it that would otherwise break.
+Core is to be archived with its **current private visibility**; archiving makes it read-only and
+does not change who can see it. The reuse record in `specs/CORE_INTEGRATION.md` carries two
+permalinks into it; they keep resolving for anyone with access to that repository. Copying the two
+referenced files into this repository's docs is the follow-up that makes the record self-contained.

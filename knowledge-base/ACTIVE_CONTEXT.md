@@ -18,8 +18,9 @@ lives in [logs/](logs/) and is never rewritten.
 - **Company licensure:** Homiquity Mortgage Corporation, NMLS 427468, Illinois Residential Mortgage
   License 3423789. **Illinois only** — `LICENSED_STATES` rejects out-of-state property at the
   pre-approval letter.
-- **One codebase.** Homiquity-Core is archived as of 2026-09-12; this repository is the product.
-  See [logs/2026-09-12-one-application.md](logs/2026-09-12-one-application.md).
+- **One codebase.** Homiquity-Core was retired by founder decision on 2026-09-12; this repository
+  is the product. Archiving Core on GitHub is pending and leaves it private. See
+  [logs/2026-09-12-one-application.md](logs/2026-09-12-one-application.md).
 
 ## Readiness verdict
 
@@ -83,9 +84,8 @@ It correctly will not write an adverse-action notice it cannot make truthful.
   table to two decimal places. `scripts/browser-probe.cjs` and `guard:ui` both say in their own
   headers that they measure no contrast and are not an accessibility audit.
 - **The design direction is mid-change.** A founder decision of 2026-09-12 adopts a black primary
-  action colour in place of emerald `#047857`, and removal of dark chrome. Neither has landed.
-  Removing dark grounds will eliminate the only two contrast-legal uses of `--flare` as text, so the
-  files using it need auditing before that stage.
+  action colour in place of emerald `#047857`, and removal of dark chrome. Neither has landed on
+  `main`; both are in an open pull request together with a browser contrast harness.
 - `governance/ASSUMPTIONS.md` rows for SendGrid, object storage and the prelaunch fail-safe were
   written before the current Railway configuration and understate what is now present.
 - Phase 0 evidence table holds only its example row; no gate has retained evidence.

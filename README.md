@@ -9,7 +9,7 @@
 > | Repository | What it is |
 > |---|---|
 > | `barakatammre84/Homiquity-Core` | A rebuild, **retired** by founder decision 2026-09-12. Do not build there. It cannot be deployed: it binds to loopback, has no hosting configuration, and destroys uploaded documents on restart ([log](knowledge-base/logs/2026-09-12-one-application.md)) |
-> | `barakatammre84/homiquity-acquisitions` | A **separate business** in Python, becoming a Realiquity sub-product. Unrelated to the mortgage platform despite the name |
+> | `barakatammre84/aquistionbyrealiquity` | A **separate business** in Python, becoming a Realiquity sub-product. Unrelated to the mortgage platform |
 >
 > Everything called "Homiquity" that is not this repository is one of those two. If a document,
 > a saved project or an agent points somewhere else, it is pointing at the wrong place.
