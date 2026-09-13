@@ -231,7 +231,7 @@ like a broken feature if you don't know:
 | Plaid (asset/income linking) | throws `Plaid is not configured` ([`server/plaid.ts`](../../server/plaid.ts)) | none; contained to Plaid routes |
 | Document extraction / AI Coach | coach degrades to labelled offline guidance | `EXTRACTION_SIMULATE=true` for a deterministic extraction path |
 | Outbound email | printed to the console, and `sendEmail()` still reports success | none needed — this is the desired local behaviour |
-| Maps | degrade without `GOOGLE_MAPS_API_KEY` | optional |
+| Maps | degrade without `GOOGLE_MAPS_SERVER_API_KEY` + `GOOGLE_MAPS_BROWSER_API_KEY`; legacy `GOOGLE_MAPS_API_KEY` works locally only | optional |
 
 Credit, AVM and GSE vendors are deterministic simulations by design, so those paths work fully
 offline — that is the architecture, not a local limitation.

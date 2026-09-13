@@ -193,7 +193,8 @@ Full detail in [ROLLBACK.md](./ROLLBACK.md). Short version:
   secret** of the same name — see the scheduler below), plus optional
   `ANTHROPIC_API_KEY` (all AI surfaces —
   coach, extraction; `AI_INTEGRATIONS_ANTHROPIC_API_KEY` overrides it for
-  extraction — the Gemini/OpenAI keys are retired), `GOOGLE_MAPS_API_KEY`,
+  extraction — the Gemini/OpenAI keys are retired), `GOOGLE_MAPS_SERVER_API_KEY`,
+  `GOOGLE_MAPS_BROWSER_API_KEY`,
   `RAPIDAPI_KEY` (property data), and for document storage
   `GCS_SERVICE_ACCOUNT_KEY`, `PRIVATE_OBJECT_DIR`, `PUBLIC_OBJECT_SEARCH_PATHS`.
   The full contract is `.env.example` — a var that isn't there doesn't exist.

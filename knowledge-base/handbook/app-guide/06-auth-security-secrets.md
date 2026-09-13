@@ -149,7 +149,9 @@ app won't boot or a core feature dies without it.
 | `EXTRACTION_SIMULATE` | Set `true` to run deterministic simulated extraction with no Anthropic key (dev/test) |
 | `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` | Income/employment/asset verification |
 | `GCS_SERVICE_ACCOUNT_KEY`, `PRIVATE_OBJECT_DIR`, `PUBLIC_OBJECT_SEARCH_PATHS` | Document storage (GCS) |
-| `GOOGLE_MAPS_API_KEY` | Address autocomplete/geocoding/maps |
+| `GOOGLE_MAPS_SERVER_API_KEY` | Server-side Places, Geocoding, and Address Validation calls; IP/API restricted |
+| `GOOGLE_MAPS_BROWSER_API_KEY` | Browser Maps JavaScript and Street View; HTTP-referrer/API restricted |
+| `GOOGLE_MAPS_API_KEY` | Local-development compatibility only; ignored in production |
 | `RAPIDAPI_KEY` | Property listings + live rate lookups |
 | `SMTP_HOST/PORT/USER/PASS`, `SENDGRID_API_KEY`, `FROM_EMAIL`, `FROM_NAME` | Outbound email (console-logged if unset) |
 | `APPLE_CLIENT_ID/KEY_ID/TEAM_ID/PRIVATE_KEY` | Apple Sign-In |
