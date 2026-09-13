@@ -1,5 +1,12 @@
 # Core capabilities inside Homiquity
 
+> **Status note, 2026-09-12.** This document is current again, with one correction. A founder
+> decision of 2026-09-11 briefly made Homiquity-Core the product and this repository a legacy
+> reference; that decision was **reversed on 2026-09-12** once it was established that Core has
+> no path to public deployment. Core is being archived and its remaining value merged here.
+> The 2026-09-04 direction below therefore stands: **this application is the product host.**
+> See [knowledge-base/logs/2026-09-12-one-application.md](../logs/2026-09-12-one-application.md).
+
 Founder direction, 2026-09-04: the existing Homiquity application remains the product host. Bring Core capabilities into that application, preserving useful existing journeys and infrastructure. This replaces the earlier proposal to rebuild every surrounding feature in a separate app. It does not waive data-access, financial-policy, human-review, or deployment controls.
 
 This implements the L1 borrower-to-officer loop under the L2 provenance, deterministic analysis and human-decision invariants. No Selling Guide policy asserted or altered: the first integration records internal review progress without changing eligibility, income calculations, credit decisions or lender delivery.
