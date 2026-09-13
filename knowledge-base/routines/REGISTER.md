@@ -93,7 +93,7 @@ When your intended work meets a live claim, the answer is rarely "stop":
 
 | routine / session | target | worktree | branch | claimed (UTC) | intent |
 |---|---|---|---|---|---|
-| Codex coordination ledger (Phase A) | `shared/{schema.ts,workWaits.ts,schema/workWaits.ts}`, `server/{routes.ts,routes/work-waits.ts,services/workWaits.ts}`, `migrations/{0086_work_waits.sql,meta/_journal.json}`, `tests/workWaits*.test.ts`, `vitest{,.integration}.config.ts`, `knowledge-base/handbook/app-guide/04-api-routes.md` | `.worktrees/coordination-ledger` | `codex/coordination-ledger` | 2026-09-13 07:08Z | Observation-only task wait ledger, staff-scoped recording/closure, timing and retry safety. Additive register-only adjacency to #805; no other claimed files touched. |
+| Codex coordination ledger (Phase A) | `shared/{schema.ts,workWaits.ts,schema/workWaits.ts}`, `server/{routes.ts,routes/work-waits.ts,services/workWaits.ts}`, `migrations/{0086_work_waits.sql,meta/_journal.json}`, `tests/workWaits*.test.ts`, `vitest{,.integration}.config.ts`, `shared/vocabularies/REGISTRY.tsv`, `knowledge-base/handbook/app-guide/04-api-routes.md` | `.worktrees/coordination-ledger` | `codex/coordination-ledger` | 2026-09-13 07:08Z | Observation-only task wait ledger, staff-scoped recording/closure, timing and retry safety. Additive register-only adjacency to #805; no other claimed files touched. |
 
 
 ## Recently released
