@@ -30,7 +30,6 @@ export const workWaits = pgTable("work_waits", {
   uniqueIndex("work_waits_closing_event").on(table.applicationId, table.closingEventId),
   uniqueIndex("work_waits_active_task_counterparty").on(table.taskId, table.counterparty).where(sql`${table.closedAt} IS NULL`),
   index("work_waits_application_id").on(table.applicationId, table.id),
-  check("work_waits_promise_order", sql`${table.promisedAt} IS NULL OR ${table.promisedAt} >= ${table.startedAt}`),
   check("work_waits_start_order", sql`${table.startedAt} <= ${table.recordedAt}`),
   check("work_waits_closure_complete", sql`
     (${table.closedAt} IS NULL AND ${table.closingEventId} IS NULL AND ${table.outcome} IS NULL

@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS "work_waits" (
   "document_id" varchar REFERENCES "documents" ("id"),
   "closed_by" varchar REFERENCES "users" ("id"),
   "closure_recorded_at" timestamp(3) with time zone,
-  CONSTRAINT "work_waits_promise_order" CHECK ("promised_at" IS NULL OR "promised_at" >= "started_at"),
   CONSTRAINT "work_waits_start_order" CHECK ("started_at" <= "recorded_at"),
   CONSTRAINT "work_waits_closure_complete" CHECK (
     ("closed_at" IS NULL AND "closing_event_id" IS NULL AND "outcome" IS NULL

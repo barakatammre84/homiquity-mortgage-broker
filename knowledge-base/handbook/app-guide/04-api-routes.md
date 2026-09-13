@@ -124,7 +124,8 @@ entries commit in the same transaction.
 what is outstanding; its existing ownership remains authoritative. The counterparty names a
 category, not an individually identified vendor or person. Separate deliverables need separate
 tasks. An omitted promise stays unknown; it is never inferred from an SLA or legal clock.
-Start time cannot be in the future; a promise cannot precede it. Both the observation's effective
+Start time cannot be in the future. A promise may already be overdue when a wait starts;
+the ledger preserves it as observed. Both the observation's effective
 start and server recording time/actor are retained. Historical observations are allowed on
 existing tasks, including terminal tasks, without changing their status.
 

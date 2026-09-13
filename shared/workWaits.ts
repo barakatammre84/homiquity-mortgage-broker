@@ -13,9 +13,7 @@ export const recordWorkWaitSchema = z.object({
   startEventId: eventId,
   startedAt: instant,
   promisedAt: instant.nullable().default(null),
-}).strict().refine(value => !value.promisedAt || value.promisedAt >= value.startedAt, {
-  message: "The promise cannot precede the wait.", path: ["promisedAt"],
-});
+}).strict();
 
 export const closeWorkWaitSchema = z.object({
   closingEventId: eventId,

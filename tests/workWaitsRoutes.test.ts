@@ -79,7 +79,7 @@ describe.sequential("observation-only work waits over real HTTP and PostgreSQL",
   });
   it("validates references, chronology, pagination and rejects unrecognized writable fields", async () => {
     expect((await request("lo", endpoint, { ...observation, taskId: otherTaskId })).status).toBe(404);
-    for (const changes of [{ startedAt: "2099-01-01T00:00:00Z", promisedAt: null }, { promisedAt: "2025-01-01T00:00:00Z" }, { counterparty: "unknown" }, { recordedBy: "test-admin" }]) {
+    for (const changes of [{ startedAt: "2099-01-01T00:00:00Z", promisedAt: null }, { promisedAt: "not-a-date" }, { counterparty: "unknown" }, { recordedBy: "test-admin" }]) {
       expect((await request("lo", endpoint, { ...observation, ...changes })).status).toBe(400);
     }
     expect((await request("lo", `${endpoint}?limit=101`)).status).toBe(400);
@@ -157,6 +157,11 @@ describe.sequential("observation-only work waits over real HTTP and PostgreSQL",
     const otherWait = (await response.json()).wait;
     expect(otherWait.id).not.toBe(waitId);
     expect((await request("admin", `${otherEndpoint}/${otherWait.id}/close`, { ...closure, documentId: otherDocumentId })).status).toBe(200);
+  });
+  it("preserves an already-overdue promise when a later wait cycle starts", async () => {
+    const response = await request("lo", endpoint, { ...observation, startEventId: randomUUID(), startedAt: closedAt });
+    expect(response.status).toBe(201);
+    expect((await response.json()).wait).toMatchObject({ startedAt: closedAt, promisedAt });
   });
   it("allows only one competing opening and one competing closure to win", async () => {
     const openings = await Promise.all([0, 1].map(() => request("lo", endpoint, {

@@ -5,7 +5,8 @@ const start = { taskId: "task-1", counterparty: "borrower", startEventId: "f0c62
 describe("work wait observation contract", () => {
   it("preserves an unknown promise instead of inventing a deadline", () => {
     expect(recordWorkWaitSchema.parse(start).promisedAt).toBeNull();
-    expect(recordWorkWaitSchema.safeParse({ ...start, promisedAt: "2026-09-01T09:59:59Z" }).success).toBe(false);
+    // A late handoff can already be overdue when this counterparty's wait starts.
+    expect(recordWorkWaitSchema.parse({ ...start, promisedAt: "2026-09-01T09:59:59Z" }).promisedAt?.toISOString()).toBe("2026-09-01T09:59:59.000Z");
   });
   it("rejects ambiguous local timestamps, invented counterparties and client-supplied actors", () => {
     for (const fields of [{ startedAt: "2026-09-01T10:00:00" }, { counterparty: "none" }, { recordedBy: "admin" }, { startEventId: "event-1" }, { note: "borrower details" }]) {
