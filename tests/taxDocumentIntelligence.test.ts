@@ -98,6 +98,21 @@ describe("per-form field schemas", () => {
     expect(parsed.netProfitOrLoss?.value).toBe(-4200);
   });
 
+  it("captures reviewable 1040 signature evidence and signed Schedule D totals", () => {
+    const form1040 = buildFormFieldsSchema("tax_return_1040").parse({
+      signatureEvidencePresent: { value: true, confidence: 0.94, pageNumber: 2 },
+    }) as Record<string, { value: unknown; pageNumber: number }>;
+    const scheduleD = buildFormFieldsSchema("schedule_d").parse({
+      totalCapitalGainOrLoss: { value: "-12,500", confidence: 0.91, pageNumber: 4 },
+    }) as Record<string, { value: unknown; pageNumber: number }>;
+
+    expect(form1040.signatureEvidencePresent).toMatchObject({ value: true, pageNumber: 2 });
+    expect(scheduleD.totalCapitalGainOrLoss).toMatchObject({ value: -12_500, pageNumber: 4 });
+    expect(TAX_FORM_FIELD_CATALOG.tax_return_1040.signatureEvidencePresent.kind).toBe("boolean");
+    expect(TAX_FORM_FIELD_CATALOG.schedule_d.totalCapitalGainOrLoss.kind).toBe("signedCurrency");
+    expect(fieldValueColumn("boolean")).toBe("boolean");
+  });
+
   it("drops an out-of-range value as a whole field (absent, never defaulted)", () => {
     const schema = buildFormFieldsSchema("schedule_c");
     const parsed = schema.parse({

@@ -20,7 +20,7 @@
   "schema.urlaLoanDetailsSchema": {
     "undefined": "reject:",
     "null": "reject:",
-    "empty-object": "reject:amortizationType,preferredLoanType",
+    "empty-object": "reject:amortizationType,loanTermMonths,preferredLoanType",
     "empty-array": "reject:",
     "empty-string": "reject:",
     "zero": "reject:",
@@ -28,11 +28,12 @@
     "string": "reject:",
     "number": "reject:",
     "true": "reject:",
-    "all-keys-typed": "reject:amortizationType,preferredLoanType",
-    "missing-preferredLoanType": "reject:amortizationType,preferredLoanType",
-    "missing-amortizationType": "reject:amortizationType,preferredLoanType",
-    "wrongtype-preferredLoanType": "reject:amortizationType,preferredLoanType",
-    "all-keys-null": "reject:amortizationType,preferredLoanType"
+    "all-keys-typed": "reject:amortizationType,loanTermMonths,preferredLoanType",
+    "missing-preferredLoanType": "reject:amortizationType,loanTermMonths,preferredLoanType",
+    "missing-amortizationType": "reject:amortizationType,loanTermMonths,preferredLoanType",
+    "missing-loanTermMonths": "reject:amortizationType,loanTermMonths,preferredLoanType",
+    "wrongtype-preferredLoanType": "reject:amortizationType,loanTermMonths,preferredLoanType",
+    "all-keys-null": "reject:amortizationType,loanTermMonths,preferredLoanType"
   },
   "schema.insertLoanApplicationSchema": {
     "undefined": "reject:",
@@ -53,7 +54,7 @@
     "missing-financialDataVerifiedBy": "reject:aiAnalyzedAt,armInitialRate,assetsVerified,ausSubmittedAt,avoidsInterestFinancing,cdIssuedDate,closingDate,creditVerified,currentPropertyDisposition,d1cAssetsRelief,d1cEmploymentRelief,d1cIncomeRelief,departingResidence,financialDataVerifiedAt,hmdaDenialReasons,homeSquareFootage,householdFamilySize,incomeVerified,leIssuedDate,loCompensationBps,loCompensationModel,ownsOtherRealEstate,preApprovalAmount,propertyValue,tridTriggeredAt",
     "missing-incomeVerified": "reject:aiAnalyzedAt,armInitialRate,assetsVerified,ausSubmittedAt,avoidsInterestFinancing,cdIssuedDate,closingDate,creditVerified,currentPropertyDisposition,d1cAssetsRelief,d1cEmploymentRelief,d1cIncomeRelief,departingResidence,financialDataVerifiedAt,hmdaDenialReasons,homeSquareFootage,householdFamilySize,leIssuedDate,loCompensationBps,loCompensationModel,ownsOtherRealEstate,preApprovalAmount,propertyValue,tridTriggeredAt",
     "wrongtype-userId": "reject:aiAnalyzedAt,armInitialRate,assetsVerified,ausSubmittedAt,avoidsInterestFinancing,cdIssuedDate,closingDate,creditVerified,currentPropertyDisposition,d1cAssetsRelief,d1cEmploymentRelief,d1cIncomeRelief,departingResidence,financialDataVerifiedAt,hmdaDenialReasons,homeSquareFootage,householdFamilySize,incomeVerified,leIssuedDate,loCompensationBps,loCompensationModel,ownsOtherRealEstate,preApprovalAmount,propertyValue,tridTriggeredAt,userId",
-    "all-keys-null": "reject:assetsVerified,creditVerified,d1cAssetsRelief,d1cEmploymentRelief,d1cIncomeRelief,financialDataProvenance,incomeVerified,status,userId"
+    "all-keys-null": "reject:assetsVerified,creditVerified,d1cAssetsRelief,d1cEmploymentRelief,d1cIncomeRelief,financialDataProvenance,incomeVerified,loanTermMonths,status,userId"
   },
   "schema.insertDealTeamMemberSchema": {
     "undefined": "reject:",
@@ -213,14 +214,14 @@
     "string": "reject:",
     "number": "reject:",
     "true": "reject:",
-    "all-keys-typed": "reject:employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-applicationId": "reject:applicationId,employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-borrowerSequenceNumber": "reject:employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-employmentType": "reject:employerCountry,employmentType,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-employerName": "reject:employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-employerPhone": "reject:employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "missing-employerStreet": "reject:employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
-    "wrongtype-applicationId": "reject:applicationId,employerCountry,endDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "all-keys-typed": "reject:employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-applicationId": "reject:applicationId,employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-borrowerSequenceNumber": "reject:employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-employmentType": "reject:employerCountry,employmentType,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-employerName": "reject:employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-employerPhone": "reject:employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "missing-employerStreet": "reject:employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
+    "wrongtype-applicationId": "reject:applicationId,employerCountry,endDate,futureIncomeEffectiveDate,ownershipShare25OrMore,ownershipShareLessThan25,paidInVirtualCurrency,startDate",
     "all-keys-null": "reject:applicationId,employmentType"
   },
   "schema.insertOtherIncomeSourceSchema": {
@@ -234,14 +235,14 @@
     "string": "reject:",
     "number": "reject:",
     "true": "reject:",
-    "all-keys-typed": "reject:monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-applicationId": "reject:applicationId,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-borrowerSequenceNumber": "reject:monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-incomeSource": "reject:incomeSource,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-monthlyAmount": "reject:monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-taxTreatment": "reject:monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
-    "missing-nonTaxableMonthlyAmount": "reject:monthlyAmount,paidInVirtualCurrency",
-    "wrongtype-applicationId": "reject:applicationId,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "all-keys-typed": "reject:fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-applicationId": "reject:applicationId,fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-borrowerSequenceNumber": "reject:fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-incomeSource": "reject:fullDistributionPenaltyAmount,incomeSource,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-monthlyAmount": "reject:fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-taxTreatment": "reject:fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
+    "missing-nonTaxableMonthlyAmount": "reject:fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,paidInVirtualCurrency",
+    "wrongtype-applicationId": "reject:applicationId,fullDistributionPenaltyAmount,linkedAssetAccountLast4,monthlyAmount,nonTaxableMonthlyAmount,paidInVirtualCurrency",
     "all-keys-null": "reject:applicationId,borrowerSequenceNumber,incomeSource,monthlyAmount"
   },
   "schema.insertUrlaAssetSchema": {

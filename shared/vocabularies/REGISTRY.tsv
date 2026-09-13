@@ -56,7 +56,7 @@ DOCUMENT_PACKAGE_TYPES	shared/schema/documents.ts	array	5	91571264c095	DocumentP
 DOCUMENT_REVIEW_ROLES	shared/documentStatus.ts	array	5	8401e578170a		5	internal	
 DOCUMENT_STATUSES	shared/documentStatus.ts	array	4	e24710fd8d36	DocumentStatus	3	internal	
 DOCUMENT_SUBJECT_TYPES	shared/documentLineage.ts	array	4	7fb7640d846a	DocumentSubjectType	2	internal	
-DOCUMENT_TYPE_TAXONOMY	shared/schema/documents.ts	array	46	926146f14c60	DocumentTypeTaxonomy	6	internal	
+DOCUMENT_TYPE_TAXONOMY	shared/schema/documents.ts	array	50	9fb1ecaa3cde	DocumentTypeTaxonomy	6	internal	
 EditSeverity	shared/fannieMae/loanDeliveryEdits.ts	union	2	aaecbabcc789		0	internal	
 EditSource	shared/fannieMae/loanDeliveryEdits.ts	union	4	22a54bcd93dc		0	internal	
 ENTITY_BEARING_FORM_TYPES	shared/taxFormExtraction.ts	array	5	08087b74fd82		2	internal	
@@ -73,7 +73,7 @@ FURNISHING_STATE	shared/schema/rent.ts	array	6	f288323799cf	FurnishingState	3	in
 GATED_SITEMAP_PATHS	shared/seo/routeMeta.ts	array	6	08397f1a3d99		1	internal	
 HomebuyerPlanningStage	shared/homebuyerJourney.ts	union	3	a221f95e0340		2	internal	
 HOUSING_STATUS_TYPES	shared/schema/intelligence.ts	array	4	93ca79ca9101		0	internal	
-INCOME_PATH_IDS	shared/incomePaths.ts	array	5	2cf686b1fc72	IncomePathId	4	internal	
+INCOME_PATH_IDS	shared/incomePaths.ts	array	7	a89f932b2dc9	IncomePathId	4	internal	
 INCOME_TYPES	shared/schema/underwritingTasks.ts	array	13	2743ad5a0e91	IncomeType	4	internal	
 IncomePathKind	shared/incomePaths.ts	union	2	12b65f52d50d		0	internal	
 IncomePathRole	shared/incomePaths.ts	union	2	217d537e6161		0	internal	
@@ -116,7 +116,7 @@ MILITARY_STATUS_TYPES	shared/schema/intelligence.ts	array	6	ef723c5a7302		0	inte
 MortgageType	shared/mismo.ts	union	5	21acce0dc8ae		4	ULAD	MortgageType
 OCCUPANCY_TYPES	shared/occupancy.ts	array	3	69d7391fa2b2	OccupancyType	1	internal	
 OPEN_RATE_LOCK_STATUSES	shared/statusVocabularies.ts	array	2	530435164a7f		4	internal	
-OTHER_INCOME_TYPE_IDS	shared/incomeTypes.ts	array	20	8464cf565d0f	OtherIncomeTypeId	1	internal	
+OTHER_INCOME_TYPE_IDS	shared/incomeTypes.ts	array	21	2a182d35b9dc	OtherIncomeTypeId	1	internal	
 PaidByOtherPartyIneligibleReason	shared/liabilityExclusions.ts	union	4	1f975ddad262		0	internal	
 PARTNER_PERSONAS	shared/schema/partners.ts	array	2	befe9c8e41df	PartnerPersona	1	internal	
 PARTNER_PROFILE_SOURCES	shared/schema/partners.ts	array	2	346d274f1f09	PartnerProfileSource	0	internal	

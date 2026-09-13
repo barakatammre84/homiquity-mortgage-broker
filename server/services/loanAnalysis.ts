@@ -95,6 +95,8 @@ export interface ScenarioInputs {
   enginePmiMonthly: number | null;
   /** The exact program evaluated by the current decision. */
   selectedLoanProgram: InstantDecision["loanProgram"];
+  /** The borrower-selected amortization term used by the decision payment. */
+  loanTermMonths: 120 | 180 | 240 | 300 | 360;
 }
 
 // Escrow model matches generateLoanEstimate: tax 1.2%/yr, insurance
@@ -158,15 +160,17 @@ export function scenarioAPR(args: {
 function buildScenario(
   loanType: "conventional" | "fha" | "va",
   inputs: ScenarioInputs,
-  opts: { points?: number; isRecommended?: boolean; termYears?: 15 | 30 } = {},
+  opts: { points?: number; isRecommended?: boolean } = {},
 ): LoanScenario {
   const { purchasePrice, downPayment, loanAmount, creditScore } = inputs;
-  const termYears = opts.termYears ?? 30;
-  const termMonths = termYears * 12;
+  const termMonths = inputs.loanTermMonths;
+  const termYears = termMonths / 12;
   const points = opts.points ?? 0;
   // 1 discount point buys ~0.25% off the rate (standard rule of thumb; the
   // real buy-down comes from rate sheets once Contract 2 lands). 15-year
-  // terms carry the customary ~0.50% discount to the 30-year base rate.
+  // This is still a preliminary, deterministic rate model. Preserve the
+  // established 15-year adjustment, but never generate a different term than
+  // the one whose payment and income were actually evaluated.
   const rate = baseRateFor(loanType, creditScore) - points * 0.25 - (termYears === 15 ? 0.5 : 0);
   const { tax, insurance } = escrowFor(purchasePrice);
   const ltv = (loanAmount / purchasePrice) * 100;
@@ -227,9 +231,6 @@ export function buildScenarios(inputs: ScenarioInputs): LoanScenario[] {
     return [
       buildScenario("conventional", inputs, { isRecommended: true }),
       buildScenario("conventional", inputs, { points: 1 }),
-      // 15-year fixed: same deterministic model, shorter amortization — shows
-      // the equity-velocity trade-off (higher payment, far less total interest).
-      buildScenario("conventional", inputs, { termYears: 15 }),
     ];
   }
   if (inputs.selectedLoanProgram === "FHA") {
@@ -261,12 +262,13 @@ function maxQualifyingPurchase(
   monthlyDebts: number,
   downPayment: number,
   creditScore: number,
+  termMonths: number,
 ): number {
   const budget = (dtiCapPct / 100) * monthlyIncome - monthlyDebts;
   if (budget <= 0) return 0;
 
   const rate = baseRateFor("conventional", creditScore);
-  const n = 360;
+  const n = termMonths;
   const k = paymentFactor(rate, n);
   const t = 0.012; // annual property-tax model (matches loanEstimate)
   const ins = 150; // flat monthly insurance floor ($1,800/yr conservative)
@@ -333,6 +335,7 @@ export async function analyzeIntake(
           isFirstTimeBuyer: app.isFirstTimeBuyer ?? false,
           enginePmiMonthly: decision?.metrics ? decision.metrics.pmiMonthly : null,
           selectedLoanProgram: decision?.loanProgram ?? null,
+          loanTermMonths: app.loanTermMonths as ScenarioInputs["loanTermMonths"],
         })
       : [];
 
@@ -419,7 +422,14 @@ export async function analyzeIntake(
           `CRITICAL COMPLIANCE ERROR: CONVENTIONAL_DTI_CAP is outside the permitted 30%-60% range (${dtiCapPct})`,
         );
       }
-      const maxPrice = maxQualifyingPurchase(dtiCapPct, monthlyIncome, monthlyDebts, downPayment, creditScore);
+      const maxPrice = maxQualifyingPurchase(
+        dtiCapPct,
+        monthlyIncome,
+        monthlyDebts,
+        downPayment,
+        creditScore,
+        app.loanTermMonths,
+      );
       // Never issue less than the price the engine just approved.
       preApprovalAmount = String(Math.max(maxPrice, purchasePrice));
     } else {

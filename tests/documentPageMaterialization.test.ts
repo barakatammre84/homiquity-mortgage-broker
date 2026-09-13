@@ -24,6 +24,9 @@ describe("normalized document page rendering", () => {
     expect(packetSegmentExtractorType("paystub")).toBe("pay_stub");
     expect(packetSegmentExtractorType("w2")).toBe("w2");
     expect(packetSegmentExtractorType("business_bank_statement")).toBe("bank_statement");
+    expect(packetSegmentExtractorType("brokerage_statement")).toBe("bank_statement");
+    expect(packetSegmentExtractorType("retirement_statement_401k")).toBe("bank_statement");
+    expect(packetSegmentExtractorType("retirement_statement_ira")).toBe("bank_statement");
     expect(packetSegmentExtractorType("lease_agreement")).toBe("lease_agreement");
     expect(packetSegmentExtractorType("profit_loss_statement")).toBe("profit_loss");
     expect(packetSegmentExtractorType("drivers_license")).toBeNull();

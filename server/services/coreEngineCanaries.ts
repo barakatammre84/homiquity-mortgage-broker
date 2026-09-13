@@ -31,6 +31,7 @@ function syntheticEmployment(
     otherIncome: null,
     totalMonthlyIncome: null,
     paidInVirtualCurrency: false,
+    hasKnownFutureIncomeReduction: false,
     selfEmploymentIncome: null,
     ...overrides,
   } as EmploymentHistory;
@@ -70,7 +71,15 @@ function syntheticScheduleCWorksheet(): SelfEmploymentWorksheet {
 function syntheticFinancialAnalysisInput(): IncomePathsCoreInput {
   return {
     employment: [
-      syntheticEmployment({ baseIncome: "6000", bonusIncome: "500" }, "synthetic-w2"),
+      syntheticEmployment({
+        employerName: "Synthetic Employer",
+        baseIncome: "6000",
+        bonusIncome: "500",
+        hasKnownFutureIncomeReduction: true,
+        futureMonthlyIncome: "6000",
+        futureIncomeEffectiveDate: "2026-12-01",
+        futureIncomeReason: "Moving to a lower pay structure",
+      }, "synthetic-w2"),
       syntheticEmployment({
         employerName: "Synthetic Side Business",
         employmentType: "self_employed",
@@ -90,6 +99,45 @@ function syntheticFinancialAnalysisInput(): IncomePathsCoreInput {
       hasDefinedExpiration: false,
       expirationDate: null,
       paidInVirtualCurrency: false,
+      linkedAssetAccountLast4: null,
+      assetOwnershipType: null,
+      hasUnrestrictedAccess: null,
+      fullDistributionPenaltyAmount: null,
+      fundsUsedForTransaction: null,
+    }, {
+      id: "synthetic-capital-gains",
+      applicationId: "synthetic-core-canary",
+      borrowerSequenceNumber: 1,
+      createdAt: null,
+      incomeSource: "Capital Gains",
+      monthlyAmount: "0",
+      taxTreatment: "taxable",
+      nonTaxableMonthlyAmount: null,
+      hasDefinedExpiration: false,
+      expirationDate: null,
+      paidInVirtualCurrency: false,
+      linkedAssetAccountLast4: null,
+      assetOwnershipType: null,
+      hasUnrestrictedAccess: null,
+      fullDistributionPenaltyAmount: null,
+      fundsUsedForTransaction: null,
+    }, {
+      id: "synthetic-employment-assets",
+      applicationId: "synthetic-core-canary",
+      borrowerSequenceNumber: 1,
+      createdAt: null,
+      incomeSource: "Employment-Related Assets as Income",
+      monthlyAmount: "0",
+      taxTreatment: "taxable",
+      nonTaxableMonthlyAmount: null,
+      hasDefinedExpiration: false,
+      expirationDate: null,
+      paidInVirtualCurrency: false,
+      linkedAssetAccountLast4: "5678",
+      assetOwnershipType: "individual",
+      hasUnrestrictedAccess: true,
+      fullDistributionPenaltyAmount: "12000",
+      fundsUsedForTransaction: "18000",
     }],
     rentalProperties: [
       {
@@ -104,6 +152,57 @@ function syntheticFinancialAnalysisInput(): IncomePathsCoreInput {
       },
     ],
     applyRentalToDti: true,
+    capitalGainsAnalysis: {
+      borrowerSequenceNumber: 1,
+      expectedTaxYears: [2025, 2024],
+      years: [
+        {
+          taxYear: 2025,
+          annualCapitalGainOrLoss: 120_000,
+          form1040DocumentId: "synthetic-1040-2025",
+          scheduleDDocumentId: "synthetic-schedule-d-2025",
+          verifiedFactId: "synthetic-capital-fact-2025",
+          signatureVerifiedFactId: "synthetic-signature-fact-2025",
+        },
+        {
+          taxYear: 2024,
+          annualCapitalGainOrLoss: 96_000,
+          form1040DocumentId: "synthetic-1040-2024",
+          scheduleDDocumentId: "synthetic-schedule-d-2024",
+          verifiedFactId: "synthetic-capital-fact-2024",
+          signatureVerifiedFactId: "synthetic-signature-fact-2024",
+        },
+      ],
+      portfolio: {
+        documentId: "synthetic-brokerage-statement",
+        assetId: "synthetic-brokerage-asset",
+        statementEndDate: "2026-08-31",
+        currentMarketValue: 250_000,
+        verifiedFactIds: ["synthetic-balance", "synthetic-date", "synthetic-last4"],
+      },
+      missingItems: [],
+    },
+    employmentRelatedAssetsAnalysis: {
+      amortizationTermMonths: 360,
+      loanPurpose: "purchase",
+      occupancyType: "primary_residence",
+      ltvPercent: 80,
+      cltvPercent: 80,
+      hcltvPercent: 80,
+      maximumLienRatioPercent: 80,
+      assets: [{
+        assetId: "synthetic-retirement-asset",
+        documentId: "synthetic-retirement-statement",
+        borrowerSequenceNumber: 1,
+        statementEndDate: "2026-08-31",
+        documentedBalance: 120_000,
+        fullDistributionPenaltyAmount: 12_000,
+        fundsUsedForTransaction: 18_000,
+        netDocumentedAssets: 90_000,
+        verifiedFactIds: ["synthetic-retirement-balance", "synthetic-retirement-date", "synthetic-retirement-last4"],
+      }],
+      missingItems: [],
+    },
   };
 }
 
@@ -123,6 +222,8 @@ export function financialAnalysisCanaryPasses(): boolean {
   const expectedPathIds = [
     "agency_wage",
     "self_employment",
+    "capital_gains",
+    "employment_related_assets",
     "rental",
     "bank_statement",
     "dscr",
@@ -133,14 +234,18 @@ export function financialAnalysisCanaryPasses(): boolean {
     /^[0-9a-f]{64}$/.test(inputFingerprint) &&
     first.incomeBasis === "urla_line_items" &&
     first.primaryBreakdown.agencyBase === 6_000 &&
-    first.primaryBreakdown.agencyVariable === 900 &&
+    first.primaryBreakdown.agencyVariable === 400 &&
     first.primaryBreakdown.selfEmployment > 0 &&
+    first.primaryBreakdown.capitalGains === 9_000 &&
+    first.primaryBreakdown.employmentRelatedAssets === 250 &&
     first.primaryBreakdown.rentalIncomeApplied === 350 &&
     first.primaryBreakdown.rentalLiabilityApplied === 450 &&
     first.primaryMonthlyQualifyingIncome ===
       first.primaryBreakdown.agencyBase +
       first.primaryBreakdown.agencyVariable +
       first.primaryBreakdown.selfEmployment +
+      (first.primaryBreakdown.capitalGains ?? 0) +
+      (first.primaryBreakdown.employmentRelatedAssets ?? 0) +
       first.primaryBreakdown.rentalIncomeApplied &&
     expectedPathIds.every((pathId) => paths.has(pathId));
 }

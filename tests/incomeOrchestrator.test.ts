@@ -27,6 +27,7 @@ function emp(over: Partial<EmploymentHistory>): EmploymentHistory {
     id: "e", applicationId: "a", borrowerSequenceNumber: 1, employerName: null,
     employmentType: "salaried", isSelfEmployed: false, startDate: null, endDate: null,
     paidInVirtualCurrency: false,
+    hasKnownFutureIncomeReduction: false,
     baseIncome: null, overtimeIncome: null, bonusIncome: null, commissionIncome: null,
     otherIncome: null, totalMonthlyIncome: null, selfEmploymentIncome: null,
     ...over,
@@ -67,6 +68,71 @@ describe("agency wage path", () => {
     expect(r.variableMonthlyIncome).toBe(800);
     expect(r.path.monthlyQualifyingIncome).toBe(5800);
     expect(r.path.status).toBe("applicable");
+  });
+
+  it("includes captured military entitlements in the employment total", () => {
+    const r = computeAgencyWageIncome({
+      employment: [emp({ baseIncome: 5000, militaryEntitlements: 750 })],
+      otherIncome: [],
+    });
+    expect(r.baseMonthlyIncome).toBe(5000);
+    expect(r.variableMonthlyIncome).toBe(750);
+    expect(r.path.monthlyQualifyingIncome).toBe(5750);
+  });
+
+  it("uses a known lower future pay amount instead of current income", () => {
+    const job = emp({
+      employerName: "Acme",
+      baseIncome: 6000,
+      bonusIncome: 500,
+      hasKnownFutureIncomeReduction: true,
+      futureMonthlyIncome: 4200,
+      futureIncomeEffectiveDate: "2026-12-01",
+      futureIncomeReason: "Moving to a four-day schedule",
+    });
+    const r = computeAgencyWageIncome({ employment: [job], otherIncome: [] });
+    expect(r.path.monthlyQualifyingIncome).toBe(4200);
+    expect(r.variableMonthlyIncome).toBe(0);
+    expect(r.path.notes.join(" ")).toMatch(/lower future gross monthly income/i);
+    expect(r.path.requiresManualReview).toBe(false);
+  });
+
+  it("does not qualify current pay when a known lower amount is missing", () => {
+    const r = computeAgencyWageIncome({
+      employment: [emp({
+        employerName: "Acme",
+        baseIncome: 6000,
+        hasKnownFutureIncomeReduction: true,
+        futureIncomeEffectiveDate: "2026-12-01",
+        futureIncomeReason: "Retiring",
+      })],
+      otherIncome: [],
+    });
+    expect(r.path.monthlyQualifyingIncome).toBe(0);
+    expect(r.path.requiresManualReview).toBe(true);
+    expect(r.path.notes.join(" ")).toMatch(/excluded/i);
+  });
+
+  it("fingerprints military and future-income inputs that change qualification", () => {
+    const base: IncomePathsCoreInput = {
+      employment: [emp({ baseIncome: 5000 })],
+      otherIncome: [],
+      rentalProperties: [],
+    };
+    expect(incomeInputsFingerprint(base)).not.toBe(incomeInputsFingerprint({
+      ...base,
+      employment: [emp({ baseIncome: 5000, militaryEntitlements: 500 })],
+    }));
+    expect(incomeInputsFingerprint(base)).not.toBe(incomeInputsFingerprint({
+      ...base,
+      employment: [emp({
+        baseIncome: 5000,
+        hasKnownFutureIncomeReduction: true,
+        futureMonthlyIncome: 3000,
+        futureIncomeEffectiveDate: "2027-01-01",
+        futureIncomeReason: "Retiring",
+      })],
+    }));
   });
 
   it("falls back to rolled-up total when no itemized field is present", () => {

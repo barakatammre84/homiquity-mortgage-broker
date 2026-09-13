@@ -71,19 +71,28 @@ describe("financial evidence reconciliation", () => {
       ["pay", [field("pay-amount", "pay", "monthly_income_ytd_avg", 6000), field("pay-employer", "pay", "employer_name", "Fictional Hospital")]],
       ["w2", [field("w2-amount", "w2", "w2_box_1_wages", 72000), field("w2-employer", "w2", "employer_name", "Fictional Hospital"), field("w2-year", "w2", "tax_year", "2025")]],
       ["bank", [field("bank-amount", "bank", "closing_balance", 90000), field("bank-account", "bank", "account_number_last4", "1234")]],
+      ["brokerage", [field("brokerage-amount", "brokerage", "closing_balance", 250000), field("brokerage-account", "brokerage", "account_number_last4", "5678")]],
       ["lease", [field("lease-amount", "lease", "monthly_rent", 3000), field("lease-address", "lease", "property_address", "10 Rental Way")]],
     ]);
     const result = reconcileFinancialEvidence({
-      documents: [document("pay", "paystub"), document("w2", "w2"), document("bank", "bank_statement_checking"), document("lease", "lease_agreement")],
+      documents: [document("pay", "paystub"), document("w2", "w2"), document("bank", "bank_statement_checking"), document("brokerage", "brokerage_statement"), document("lease", "lease_agreement")],
       factsByDocument,
       employment: [{ employerName: "Fictional Hospital", isSelfEmployed: false, baseIncome: "6000" } as EmploymentHistory],
-      assets: [{ accountNumberLast4: "1234", cashOrMarketValue: "90000" } as UrlaAsset],
+      assets: [
+        { accountNumberLast4: "1234", cashOrMarketValue: "90000" } as UrlaAsset,
+        { accountNumberLast4: "5678", cashOrMarketValue: "250000" } as UrlaAsset,
+      ],
       rentalProperties: [{ address: "10 Rental Way", monthlyRentalIncome: "3000" } as RentalPropertyEntry],
     });
 
-    expect(result).toHaveLength(4);
+    expect(result).toHaveLength(5);
     expect(result.every(item => item.status === "match")).toBe(true);
-    expect(result.map(item => item.kind)).toEqual(["asset", "income", "income", "rental"]);
+    expect(result.map(item => item.kind)).toEqual(["asset", "asset", "income", "income", "rental"]);
+    expect(result.find(item => item.label.includes("Brokerage"))).toMatchObject({
+      status: "match",
+      evidenceValue: 250000,
+      calculationValue: 250000,
+    });
     expect(result.find(item => item.label.includes("W-2"))).toMatchObject({
       evidenceValue: 72000,
       calculationValue: 72000,

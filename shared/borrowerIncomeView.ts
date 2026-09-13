@@ -45,6 +45,8 @@ export const INCOME_ANALYSIS_EDUCATION =
 export const INCOME_SOURCE_LABELS: Record<IncomePathId, string> = {
   agency_wage: "Employment income",
   self_employment: "Business & self-employment income",
+  capital_gains: "Capital gains income",
+  employment_related_assets: "Employment-related asset income",
   rental: "Rental income",
   dscr: "Investment-property cash flow",
   bank_statement: "Bank-statement income",

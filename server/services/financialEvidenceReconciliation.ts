@@ -228,7 +228,13 @@ export function reconcileFinancialEvidence(input: ReconciliationInput): Financia
       }
     }
 
-    if (type === "bank_statement") {
+    if ([
+      "bank_statement",
+      "brokerage_statement",
+      "retirement_statement",
+      "retirement_statement_401k",
+      "retirement_statement_ira",
+    ].includes(type)) {
       const amountFact = fact(rows, "closing_balance");
       const evidenceValue = effectiveNumber(amountFact);
       if (amountFact && evidenceValue !== null) {
@@ -244,7 +250,11 @@ export function reconcileFinancialEvidence(input: ReconciliationInput): Financia
           kind: "asset",
           documentId: document.id,
           facts: [amountFact, ...(accountFact ? [accountFact] : [])],
-          label: "Bank statement closing balance",
+          label: type === "brokerage_statement"
+            ? "Brokerage statement closing balance"
+            : type.startsWith("retirement_statement")
+              ? "Retirement statement closing balance"
+              : "Bank statement closing balance",
           evidenceValue,
           calculationValue,
           tolerance: 1,

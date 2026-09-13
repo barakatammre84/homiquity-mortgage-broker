@@ -236,7 +236,10 @@ function simulatedW2Extraction(filePath: string | Buffer): ExtractedW2Data {
   };
 }
 
-function simulatedBankStatementExtraction(filePath: string | Buffer): ExtractedBankStatementData {
+function simulatedBankStatementExtraction(
+  filePath: string | Buffer,
+  classifiedDocumentType: DocumentTypeTaxonomy = "bank_statement_checking",
+): ExtractedBankStatementData {
   const frac = simulationFraction("bank", filePath);
   const openingBalance = Math.round(12_000 + frac * 18_000);
   const totalDeposits = Math.round(7_000 + frac * 5_000);
@@ -247,7 +250,13 @@ function simulatedBankStatementExtraction(filePath: string | Buffer): ExtractedB
     "openingBalance", "closingBalance", "totalDeposits", "totalWithdrawals", "averageDailyBalance",
   ];
   return {
-    accountType: "checking",
+    accountType: classifiedDocumentType === "brokerage_statement"
+      ? "brokerage"
+      : classifiedDocumentType === "retirement_statement" || classifiedDocumentType === "retirement_statement_401k"
+        ? "401k"
+        : classifiedDocumentType === "retirement_statement_ira"
+          ? "ira"
+          : "checking",
     accountNumber: "4321",
     statementPeriod: { start: "2026-06-01", end: "2026-06-30" },
     openingBalance,
@@ -264,7 +273,7 @@ function simulatedBankStatementExtraction(filePath: string | Buffer): ExtractedB
       boundingBox: { x: index % 2 ? 0.55 : 0.08, y: 0.14 + (index % 4) * 0.16, width: 0.35, height: 0.05 },
     }])),
     pageCount: 2,
-    documentClassification: simulatedClassification("bank_statement_checking", 2),
+    documentClassification: simulatedClassification(classifiedDocumentType, 2),
     ...lineageFor(SIMULATED_MODEL_ID),
   };
 }
@@ -604,9 +613,17 @@ ${CLASSIFICATION_INSTRUCTIONS}`;
 export async function extractBankStatementData(
   filePath: string | Buffer,
   storedMimeType?: string,
+  declaredDocumentType?: string,
 ): Promise<ExtractedBankStatementData> {
   const model = EXTRACTION_MODEL_SINGLE_DOC;
-  if (extractionSimulationEnabled()) return simulatedBankStatementExtraction(filePath);
+  const classifiedDocumentType = DOCUMENT_TYPE_TAXONOMY.includes(
+    declaredDocumentType as DocumentTypeTaxonomy,
+  )
+    ? declaredDocumentType as DocumentTypeTaxonomy
+    : "bank_statement_checking";
+  if (extractionSimulationEnabled()) {
+    return simulatedBankStatementExtraction(filePath, classifiedDocumentType);
+  }
   if (!anthropic) {
     return {
       confidence: "low",
@@ -619,11 +636,11 @@ export async function extractBankStatementData(
     const base64 = await fileToBase64(filePath);
     const mimeType = getMimeType(filePath, storedMimeType);
 
-    const prompt = `You are a banking document analysis specialist. Extract financial data from this bank statement.
+    const prompt = `You are a financial-account document analysis specialist. Extract financial data from this bank, brokerage, investment, or retirement account statement.
 
 Return ONLY valid JSON with this structure:
 {
-  "accountType": "checking or savings or money_market",
+  "accountType": "checking, savings, money_market, brokerage, investment, 401k, or ira",
   "accountNumber": "last 4 digits or null",
   "statementPeriod": {
     "start": "2024-01-01 or null",
@@ -645,11 +662,12 @@ Return ONLY valid JSON with this structure:
     "closingBalance": {"pageNumber": 3, "confidence": 0.97, "boundingBox": {"x": 0.1, "y": 0.8, "width": 0.3, "height": 0.04}}
   },
   "pageCount": 3
-  ,${classificationJsonExample("bank_statement_checking", 3)}
+  ,${classificationJsonExample(classifiedDocumentType, 3)}
 }
 
+For brokerage, investment, and retirement statements, use the ending market value as closingBalance. Transactions and deposit totals may be omitted when the statement does not report them in a comparable form.
 Only include fields that are clearly visible. Return null for any unclear values.
-Limit transactions array to first 10 most significant transactions.
+Limit transactions array to first 10 most significant transactions when present.
 For every included value, add fieldEvidence with its 1-indexed source page,
 field-specific confidence from 0 to 1, and normalized boundingBox when visible.
 ${CLASSIFICATION_INSTRUCTIONS}`;

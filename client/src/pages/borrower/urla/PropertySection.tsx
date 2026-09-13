@@ -13,7 +13,7 @@ import type {
   UrlaPropertyInfo,
 } from "@shared/schema";
 import { MoneyInput } from "./MoneyInput";
-import { AMORTIZATION_TYPE_OPTIONS, LOAN_TYPE_OPTIONS } from "./types";
+import { AMORTIZATION_TYPE_OPTIONS, LOAN_TERM_OPTIONS, LOAN_TYPE_OPTIONS } from "./types";
 
 interface PropertySectionProps {
   propertyInfo: Partial<UrlaPropertyInfo>;
@@ -274,6 +274,31 @@ export function PropertySection({
                     key={option.value}
                     value={option.value}
                     data-testid={`option-amortization-type-${option.value}`}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loan-term">Loan Term</Label>
+            <Select
+              value={String(loanDetails.loanTermMonths)}
+              onValueChange={(value) => onLoanDetailsChange({
+                ...loanDetails,
+                loanTermMonths: Number(value) as UrlaLoanDetails["loanTermMonths"],
+              })}
+            >
+              <SelectTrigger id="loan-term" data-testid="select-loan-term">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOAN_TERM_OPTIONS.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={String(option.value)}
+                    data-testid={`option-loan-term-${option.value}`}
                   >
                     {option.label}
                   </SelectItem>

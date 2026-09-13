@@ -120,6 +120,9 @@ export const TAX_FORM_FIELD_CATALOG: Record<TaxFormType, Record<string, TaxField
   tax_return_1040: {
     taxpayerName: text("Primary taxpayer name as printed at the top of the return"),
     spouseName: text("Spouse name if filing jointly"),
+    signatureEvidencePresent: bool(
+      "True only when the return includes visible taxpayer signature or electronic-signature evidence; otherwise false",
+    ),
     filingStatus: text("Filing status checkbox: single, married_filing_jointly, married_filing_separately, head_of_household, qualifying_surviving_spouse"),
     wagesSalariesTips: currency("Total wages, salaries, tips (the W-2 wage entry on page 1)"),
     taxableInterest: currency("Taxable interest income"),

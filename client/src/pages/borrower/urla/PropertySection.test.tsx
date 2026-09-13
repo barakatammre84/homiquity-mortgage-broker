@@ -36,6 +36,7 @@ const app = {
 const loanDetails: UrlaLoanDetails = {
   preferredLoanType: "conventional",
   amortizationType: "fixed",
+  loanTermMonths: 360,
 };
 
 function renderSection(onLoanDetailsChange = vi.fn(), onChange = vi.fn(), propertyInfo: Record<string, unknown> = {}) {
@@ -57,11 +58,14 @@ describe("PropertySection — section 4a loan details", () => {
 
     const loanType = screen.getByTestId("select-loan-type") as HTMLButtonElement;
     const amortization = screen.getByTestId("select-amortization-type") as HTMLButtonElement;
+    const term = screen.getByTestId("select-loan-term") as HTMLButtonElement;
 
     expect(loanType.disabled).toBe(false);
     expect(amortization.disabled).toBe(false);
+    expect(term.disabled).toBe(false);
     expect(loanType.textContent).toContain("Conventional");
     expect(amortization.textContent).toContain("Fixed Rate");
+    expect(term.textContent).toContain("30 years");
 
     // The disabled-era caption is gone from the two stated controls — only the
     // loan-purpose control (still read-only by design) keeps one.
@@ -78,6 +82,7 @@ describe("PropertySection — section 4a loan details", () => {
     expect(onLoanDetailsChange).toHaveBeenCalledWith({
       preferredLoanType: "fha",
       amortizationType: "fixed",
+      loanTermMonths: 360,
     });
   });
 
@@ -91,6 +96,21 @@ describe("PropertySection — section 4a loan details", () => {
     expect(onLoanDetailsChange).toHaveBeenCalledWith({
       preferredLoanType: "conventional",
       amortizationType: "adjustable",
+      loanTermMonths: 360,
+    });
+  });
+
+  it("submits the selected loan term through the section callback", async () => {
+    const user = userEvent.setup();
+    const onLoanDetailsChange = renderSection();
+
+    await user.click(screen.getByTestId("select-loan-term"));
+    await user.click(await screen.findByTestId("option-loan-term-180"));
+
+    expect(onLoanDetailsChange).toHaveBeenCalledWith({
+      preferredLoanType: "conventional",
+      amortizationType: "fixed",
+      loanTermMonths: 180,
     });
   });
 

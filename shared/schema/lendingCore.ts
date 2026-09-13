@@ -85,6 +85,9 @@ export const loanApplications = pgTable("loan_applications", {
   // Loan Preferences
   loanPurpose: varchar("loan_purpose", { length: 50 }),
   preferredLoanType: varchar("preferred_loan_type", { length: 50 }),
+  // Borrower-selected amortization term in months. Required by Fannie Mae
+  // B3-3.4-06 when employment-related assets are converted to monthly income.
+  loanTermMonths: integer("loan_term_months").default(360).notNull(),
   isVeteran: boolean("is_veteran").default(false),
   isFirstTimeBuyer: boolean("is_first_time_buyer").default(false),
   // UAL P7: borrower-declared answer to "Do you require financing that avoids
@@ -208,6 +211,9 @@ import { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES } from "../statusVocabularies"
 export { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES };
 export type { AmortizationType, PreferredLoanType } from "../statusVocabularies";
 
+export { LOAN_TERM_MONTHS } from "../statusVocabularies";
+export type { LoanTermMonths } from "../statusVocabularies";
+
 /**
  * URLA Section 4a save body (WF2-F4). Both fields are required together: no
  * HTTP surface wrote either loan_applications column, so section-4 gating
@@ -219,6 +225,13 @@ export type { AmortizationType, PreferredLoanType } from "../statusVocabularies"
 export const urlaLoanDetailsSchema = z.object({
   preferredLoanType: z.enum(PREFERRED_LOAN_TYPES),
   amortizationType: z.enum(AMORTIZATION_TYPES),
+  loanTermMonths: z.union([
+    z.literal(120),
+    z.literal(180),
+    z.literal(240),
+    z.literal(300),
+    z.literal(360),
+  ]),
 });
 export type UrlaLoanDetails = z.infer<typeof urlaLoanDetailsSchema>;
 

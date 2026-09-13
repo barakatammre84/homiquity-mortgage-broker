@@ -290,6 +290,13 @@ export const employmentHistory = pgTable("employment_history", {
   // B3-3.1-01: income paid to or earned in virtual currency is ineligible.
   // Null is unanswered; false is an affirmative borrower/LO answer.
   paidInVirtualCurrency: boolean("paid_in_virtual_currency"),
+  // B3-3.1-01: when the borrower or employer reports an upcoming move to a
+  // lower pay structure, qualification must use the lower stable amount.
+  // Null means the question has not been answered.
+  hasKnownFutureIncomeReduction: boolean("has_known_future_income_reduction"),
+  futureMonthlyIncome: decimal("future_monthly_income", { precision: 12, scale: 2 }),
+  futureIncomeEffectiveDate: varchar("future_income_effective_date", { length: 10 }),
+  futureIncomeReason: text("future_income_reason"),
   ownershipShareLessThan25: boolean("ownership_share_less_than_25"),
   ownershipShare25OrMore: boolean("ownership_share_25_or_more"),
   isEmployedByFamilyMember: boolean("is_employed_by_family_member").default(false),
@@ -347,6 +354,16 @@ export const otherIncomeSources = pgTable("other_income_sources", {
   hasDefinedExpiration: boolean("has_defined_expiration"),
   expirationDate: date("expiration_date"),
   paidInVirtualCurrency: boolean("paid_in_virtual_currency"),
+
+  // B3-3.4-06 employment-related assets as qualifying income. These fields
+  // describe the borrower's intended use of one retirement asset; the income
+  // workpaper still requires a current reviewed statement before any amount
+  // can qualify. Account last-four is the PII-minimized link to urla_assets.
+  linkedAssetAccountLast4: varchar("linked_asset_account_last4", { length: 4 }),
+  assetOwnershipType: varchar("asset_ownership_type", { length: 40 }),
+  hasUnrestrictedAccess: boolean("has_unrestricted_access"),
+  fullDistributionPenaltyAmount: decimal("full_distribution_penalty_amount", { precision: 12, scale: 2 }),
+  fundsUsedForTransaction: decimal("funds_used_for_transaction", { precision: 12, scale: 2 }),
   
   createdAt: timestamp("created_at").defaultNow(),
 });

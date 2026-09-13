@@ -15,6 +15,7 @@ const BASE: ScenarioInputs = {
   isFirstTimeBuyer: false,
   enginePmiMonthly: null,
   selectedLoanProgram: "CONVENTIONAL",
+  loanTermMonths: 360,
 };
 
 const num = (v: string) => parseFloat(v);
@@ -25,32 +26,30 @@ function standardPI(principal: number, annualRatePct: number, n: number): number
 }
 
 describe("buildScenarios — comparison matrix contract", () => {
-  it("includes a 15-year conventional scenario alongside the 30-year options", () => {
+  it("keeps every quoted option on the exact term evaluated for the application", () => {
     const scenarios = buildScenarios(BASE);
     const terms = scenarios.filter((s) => s.loanType === "conventional").map((s) => s.loanTerm);
-    expect(terms).toContain(30);
-    expect(terms).toContain(15);
+    expect(terms).toEqual([30, 30]);
   });
 
-  it("prices the 15-year term 0.50% below the 30-year base rate", () => {
-    const scenarios = buildScenarios(BASE);
-    const thirty = scenarios.find((s) => s.loanTerm === 30 && s.points === "0")!;
-    const fifteen = scenarios.find((s) => s.loanTerm === 15)!;
+  it("prices the selected 15-year term 0.50% below the selected 30-year term", () => {
+    const thirty = buildScenarios(BASE).find((s) => s.points === "0")!;
+    const fifteen = buildScenarios({ ...BASE, loanTermMonths: 180 }).find((s) => s.points === "0")!;
     expect(num(thirty.interestRate) - num(fifteen.interestRate)).toBeCloseTo(0.5, 6);
   });
 
   it("computes P&I with the standard amortization formula for both terms", () => {
-    const scenarios = buildScenarios(BASE);
-    for (const s of scenarios.filter((x) => x.loanType === "conventional")) {
-      const expected = standardPI(num(s.loanAmount), num(s.interestRate), s.loanTerm * 12);
-      expect(num(s.principalAndInterest)).toBeCloseTo(expected, 1);
+    for (const loanTermMonths of [180, 360] as const) {
+      for (const s of buildScenarios({ ...BASE, loanTermMonths })) {
+        const expected = standardPI(num(s.loanAmount), num(s.interestRate), s.loanTerm * 12);
+        expect(num(s.principalAndInterest)).toBeCloseTo(expected, 1);
+      }
     }
   });
 
   it("shows the 15-year trade-off: higher payment, less lifetime interest", () => {
-    const scenarios = buildScenarios(BASE);
-    const thirty = scenarios.find((s) => s.loanTerm === 30 && s.points === "0")!;
-    const fifteen = scenarios.find((s) => s.loanTerm === 15)!;
+    const thirty = buildScenarios(BASE).find((s) => s.points === "0")!;
+    const fifteen = buildScenarios({ ...BASE, loanTermMonths: 180 }).find((s) => s.points === "0")!;
     expect(num(fifteen.principalAndInterest)).toBeGreaterThan(num(thirty.principalAndInterest));
     expect(num(fifteen.totalInterestPaid)).toBeLessThan(num(thirty.totalInterestPaid));
   });
@@ -142,7 +141,7 @@ describe("buildScenarios — comparison matrix contract", () => {
 
   it("keeps option cards inside the selected product family", () => {
     expect(buildScenarios({ ...BASE, isVeteran: true }).map((s) => s.loanType))
-      .toEqual(["conventional", "conventional", "conventional"]);
+      .toEqual(["conventional", "conventional"]);
     expect(buildScenarios({ ...BASE, selectedLoanProgram: "FHA" }).map((s) => s.loanType))
       .toEqual(["fha"]);
     expect(buildScenarios({ ...BASE, isVeteran: true, selectedLoanProgram: "VA" }).map((s) => s.loanType))

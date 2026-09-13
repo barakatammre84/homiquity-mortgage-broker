@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { determineDocumentRequirements, getBorrowerProfileFromApplication } from "../server/pipelineEngine";
-import type { LoanApplication } from "../shared/schema";
+import type { EmploymentHistory, LoanApplication } from "../shared/schema";
 
 const baseProfile = {
   employmentYears: 3,
@@ -14,6 +14,10 @@ const baseProfile = {
   isFirstTimeBuyer: false,
   isSelfEmployed: false,
   hasRentalIncome: false,
+  hasCapitalGains: false,
+  capitalGainsTaxYears: null,
+  hasEmploymentRelatedAssets: false,
+  hasKnownFutureIncomeReduction: false,
   businessNames: [],
 };
 
@@ -115,7 +119,7 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
       hasRentalIncome: true,
     });
 
-    const taxReturn = requirements.find((requirement) => requirement.documentType === "tax_return");
+    const taxReturn = requirements.find((requirement) => requirement.documentType === "rental_tax_package");
     expect(taxReturn?.conditionTitle).toContain("Schedule E");
     expect(taxReturn?.description).toContain("Schedule E");
     expect(taxReturn?.priority).toBe("prior_to_approval");
@@ -161,5 +165,93 @@ describe("determineDocumentRequirements - employmentType 'other'", () => {
     expect(types).toContain("bank_statement_business");
     expect(taxReturn?.yearsRequired).toHaveLength(2);
     expect(taxReturn?.description).toContain("Harbor Studio LLC");
+  });
+
+  it("asks for two signed returns with Schedule D and a current brokerage statement for capital gains", () => {
+    const requirements = determineDocumentRequirements({
+      ...baseProfile,
+      employmentType: "employed",
+      hasCapitalGains: true,
+    });
+
+    const taxReturn = requirements.find((requirement) => requirement.documentType === "capital_gains_tax_package");
+    const brokerage = requirements.find((requirement) => requirement.documentType === "brokerage_statement");
+    expect(taxReturn).toMatchObject({
+      priority: "prior_to_approval",
+      yearsRequired: [new Date().getFullYear() - 1, new Date().getFullYear() - 2],
+    });
+    expect(taxReturn?.description).toMatch(/signed personal federal tax returns/i);
+    expect(taxReturn?.description).toContain("Form 1040 and Schedule D for each year");
+    expect(brokerage?.description).toMatch(/portfolio of assets available for sale/i);
+  });
+
+  it("uses the expected note date to request the exact capital-gains tax years", () => {
+    const profile = getBorrowerProfileFromApplication(
+      {
+        employmentType: "employed",
+        closingDate: "2026-02-28",
+      } as unknown as LoanApplication,
+      [{ incomeSource: "Capital Gains" } as any],
+    );
+    const taxReturn = determineDocumentRequirements(profile).find(
+      requirement => requirement.documentType === "capital_gains_tax_package",
+    );
+    expect(profile.capitalGainsTaxYears).toEqual([2024, 2023]);
+    expect(taxReturn?.yearsRequired).toEqual([2024, 2023]);
+  });
+
+  it("combines capital-gains, rental, and business return needs into one precise tax request", () => {
+    const requirements = determineDocumentRequirements({
+      ...baseProfile,
+      employmentType: "self_employed",
+      isSelfEmployed: true,
+      hasRentalIncome: true,
+      hasCapitalGains: true,
+      businessNames: ["Harbor Studio LLC"],
+    });
+
+    const taxReturns = requirements.filter((requirement) =>
+      ["tax_return", "rental_tax_package", "capital_gains_tax_package"].includes(requirement.documentType),
+    );
+    expect(taxReturns).toHaveLength(1);
+    expect(taxReturns[0].documentType).toBe("capital_gains_tax_package");
+    expect(taxReturns[0].description).toContain("Schedule D");
+    expect(taxReturns[0].description).toContain("Schedule E");
+    expect(taxReturns[0].description).toContain("business returns and K-1s");
+    expect(taxReturns[0].description).toContain("Harbor Studio LLC");
+  });
+
+  it("detects capital gains from the saved URLA other-income row", () => {
+    const profile = getBorrowerProfileFromApplication(
+      { employmentType: "employed" } as unknown as LoanApplication,
+      [{ incomeSource: "Capital Gains" } as any],
+    );
+    expect(profile.hasCapitalGains).toBe(true);
+  });
+
+  it("requests one current retirement statement when employment-related asset income is selected", () => {
+    const profile = getBorrowerProfileFromApplication(
+      { employmentType: "employed" } as unknown as LoanApplication,
+      [{ incomeSource: "Employment-Related Assets as Income" } as any],
+    );
+    const requirements = determineDocumentRequirements(profile);
+    expect(profile.hasEmploymentRelatedAssets).toBe(true);
+    expect(requirements).toContainEqual(expect.objectContaining({
+      documentType: "retirement_statement",
+      priority: "prior_to_approval",
+    }));
+  });
+
+  it("requests written employer verification for a known future income reduction", () => {
+    const profile = getBorrowerProfileFromApplication(
+      { employmentType: "employed" } as unknown as LoanApplication,
+      [],
+      [{ isSelfEmployed: false, hasKnownFutureIncomeReduction: true } as EmploymentHistory],
+    );
+    expect(profile.hasKnownFutureIncomeReduction).toBe(true);
+    expect(determineDocumentRequirements(profile)).toContainEqual(expect.objectContaining({
+      documentType: "employment_verification",
+      priority: "prior_to_approval",
+    }));
   });
 });

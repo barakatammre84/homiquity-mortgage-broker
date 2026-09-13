@@ -18,6 +18,14 @@ import { calculateSubjectPropertyQualifyingRent } from "../underwritingNuance";
 import { estimateMonthlyPITI } from "../preUnderwriting";
 import { computeAgencyWageIncome } from "./paths/agencyWage";
 import { computeSelfEmploymentPath } from "./paths/selfEmployment";
+import {
+  computeCapitalGainsPath,
+  type CapitalGainsAnalysisInput,
+} from "./paths/capitalGains";
+import {
+  computeEmploymentRelatedAssetsPath,
+  type EmploymentRelatedAssetsAnalysisInput,
+} from "./paths/employmentRelatedAssets";
 import { computeRentalPath, splitRentalOffsets, withSubjectPropertyRent } from "./paths/rental";
 import { computeDscrPath } from "./paths/dscr";
 import {
@@ -59,6 +67,10 @@ export interface IncomePathsCoreInput {
    * review but never increases the tax-return qualifying figure. */
   profitLossActivity?: CurrentProfitLossSignal[];
   profitLossActivityIssues?: ProfitLossActivityIssue[];
+  /** Current, human-reviewed Schedule D and portfolio evidence. */
+  capitalGainsAnalysis?: CapitalGainsAnalysisInput;
+  /** Current, human-reviewed employment-related retirement asset evidence. */
+  employmentRelatedAssetsAnalysis?: EmploymentRelatedAssetsAnalysisInput;
   /**
    * Decision-grade provenance gate (shared/dataProvenance isDecisionGrade):
    * POSITIVE rental offsets and subject-property rent apply to qualifying
@@ -100,6 +112,11 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
     input.profitLossActivity,
     input.profitLossActivityIssues,
   );
+  const capitalGains = computeCapitalGainsPath(input.otherIncome, input.capitalGainsAnalysis);
+  const employmentRelatedAssets = computeEmploymentRelatedAssetsPath(
+    input.otherIncome,
+    input.employmentRelatedAssetsAnalysis,
+  );
 
   // S-07: the departing residence enters the per-property offset set as one
   // more rental (projected rent − retained PITIA), never the DSCR portfolio.
@@ -131,6 +148,8 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
   // netted across properties (the split is strictly conservative).
   const agencyApplied = agency.path.monthlyQualifyingIncome;
   const seApplied = selfEmployment.path.monthlyQualifyingIncome;
+  const capitalGainsApplied = capitalGains.path.monthlyQualifyingIncome;
+  const employmentRelatedAssetsApplied = employmentRelatedAssets.monthlyQualifyingIncome;
   const rentalSplit = splitRentalOffsets(rentalEntries);
   const rentalNet = rentalSplit.count > 0 ? rentalSplit.net : 0;
   const rentalIncomeApplied =
@@ -152,7 +171,12 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
       : 0;
 
   const primary = roundCents(
-    agencyApplied + seApplied + rentalIncomeApplied + subjectRentalIncomeApplied,
+    agencyApplied
+      + seApplied
+      + capitalGainsApplied
+      + employmentRelatedAssetsApplied
+      + rentalIncomeApplied
+      + subjectRentalIncomeApplied,
   );
 
   // Every path states what it CONTRIBUTED to `primary`, not merely what it is
@@ -165,6 +189,8 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
   const paths: IncomePathResult[] = [
     { ...agency.path, appliedMonthlyIncome: agencyApplied, appliedMonthlyObligation: 0 },
     { ...selfEmployment.path, appliedMonthlyIncome: seApplied, appliedMonthlyObligation: 0 },
+    { ...capitalGains.path, appliedMonthlyIncome: capitalGainsApplied, appliedMonthlyObligation: 0 },
+    { ...employmentRelatedAssets, appliedMonthlyIncome: employmentRelatedAssetsApplied, appliedMonthlyObligation: 0 },
     withSubjectPropertyRent(rentalPath, subjectRentalIncomeApplied),
     // Alternatives are a competing METHOD, never summed into the full-doc
     // total: their contribution is zero by construction.
@@ -191,7 +217,11 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
   }
 
   const requiresManualReview =
-    agency.path.requiresManualReview || selfEmployment.path.requiresManualReview || rentalPath.requiresManualReview;
+    agency.path.requiresManualReview
+    || selfEmployment.path.requiresManualReview
+    || capitalGains.path.requiresManualReview
+    || employmentRelatedAssets.requiresManualReview
+    || rentalPath.requiresManualReview;
 
   return {
     paths,
@@ -200,6 +230,8 @@ export function computeIncomePaths(input: IncomePathsCoreInput): IncomeOrchestra
       agencyBase: agency.baseMonthlyIncome,
       agencyVariable: agency.variableMonthlyIncome,
       selfEmployment: seApplied,
+      capitalGains: capitalGainsApplied,
+      employmentRelatedAssets: employmentRelatedAssetsApplied,
       rental: roundCents(rentalNet),
       rentalIncomeApplied,
       rentalLiabilityApplied,
@@ -225,9 +257,14 @@ export function incomeInputsFingerprint(input: IncomePathsCoreInput): string {
         ot: numOrNull(e.overtimeIncome),
         bo: numOrNull(e.bonusIncome),
         c: numOrNull(e.commissionIncome),
+        m: numOrNull(e.militaryEntitlements),
         o: numOrNull(e.otherIncome),
         t: numOrNull(e.totalMonthlyIncome),
         crypto: e.paidInVirtualCurrency,
+        futureReduction: e.hasKnownFutureIncomeReduction,
+        futureMonthly: numOrNull(e.futureMonthlyIncome),
+        futureDate: e.futureIncomeEffectiveDate,
+        futureReason: e.futureIncomeReason,
         // Self-employment worksheet drives the 1084 figure — hash its content.
         w: e.selfEmploymentIncome ?? null,
       }))
@@ -242,6 +279,11 @@ export function incomeInputsFingerprint(input: IncomePathsCoreInput): string {
         hasDefinedExpiration: o.hasDefinedExpiration,
         expirationDate: o.expirationDate,
         crypto: o.paidInVirtualCurrency,
+        linkedAssetAccountLast4: o.linkedAssetAccountLast4,
+        assetOwnershipType: o.assetOwnershipType,
+        hasUnrestrictedAccess: o.hasUnrestrictedAccess,
+        fullDistributionPenaltyAmount: numOrNull(o.fullDistributionPenaltyAmount),
+        fundsUsedForTransaction: numOrNull(o.fundsUsedForTransaction),
       }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
     expectedNoteDate: input.expectedNoteDate instanceof Date
@@ -277,6 +319,45 @@ export function incomeInputsFingerprint(input: IncomePathsCoreInput): string {
     profitLossActivityIssues: (input.profitLossActivityIssues ?? [])
       .map(issue => ({ employmentId: issue.employmentId, documentId: issue.documentId, message: issue.message }))
       .sort((a, b) => a.employmentId.localeCompare(b.employmentId) || a.documentId.localeCompare(b.documentId)),
+    capitalGains: input.capitalGainsAnalysis
+      ? {
+          borrowerSequenceNumber: input.capitalGainsAnalysis.borrowerSequenceNumber,
+          expectedTaxYears: input.capitalGainsAnalysis.expectedTaxYears,
+          years: input.capitalGainsAnalysis.years
+            .map(year => ({
+              taxYear: year.taxYear,
+              annualCapitalGainOrLoss: roundCents(year.annualCapitalGainOrLoss),
+              form1040DocumentId: year.form1040DocumentId,
+              scheduleDDocumentId: year.scheduleDDocumentId,
+              verifiedFactId: year.verifiedFactId,
+              signatureVerifiedFactId: year.signatureVerifiedFactId,
+            }))
+            .sort((a, b) => b.taxYear - a.taxYear),
+          portfolio: {
+            ...input.capitalGainsAnalysis.portfolio,
+            currentMarketValue: roundCents(input.capitalGainsAnalysis.portfolio.currentMarketValue),
+            verifiedFactIds: [...input.capitalGainsAnalysis.portfolio.verifiedFactIds].sort(),
+          },
+          missingItems: [...input.capitalGainsAnalysis.missingItems].sort(),
+        }
+      : null,
+    employmentRelatedAssets: input.employmentRelatedAssetsAnalysis
+      ? {
+          ...input.employmentRelatedAssetsAnalysis,
+          ltvPercent: roundCents(input.employmentRelatedAssetsAnalysis.ltvPercent),
+          assets: input.employmentRelatedAssetsAnalysis.assets
+            .map(asset => ({
+              ...asset,
+              documentedBalance: roundCents(asset.documentedBalance),
+              fullDistributionPenaltyAmount: roundCents(asset.fullDistributionPenaltyAmount),
+              fundsUsedForTransaction: roundCents(asset.fundsUsedForTransaction),
+              netDocumentedAssets: roundCents(asset.netDocumentedAssets),
+              verifiedFactIds: [...asset.verifiedFactIds].sort(),
+            }))
+            .sort((a, b) => a.assetId.localeCompare(b.assetId)),
+          missingItems: [...input.employmentRelatedAssetsAnalysis.missingItems].sort(),
+        }
+      : null,
     // Rental DTI application context (B3-3.8-01 wiring): the provenance gate,
     // the mortgage-liability coexistence guard, and the subject-property facts
     // all change the applied result, so they are part of the inputs identity.

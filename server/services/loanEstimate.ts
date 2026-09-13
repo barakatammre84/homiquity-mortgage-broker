@@ -7,7 +7,7 @@ import { offerMonthlyMI, offerUpfrontMI } from "./mortgageInsurance";
 import { resolveFeeScheduleForApplication } from "./platformFeeSchedule";
 import { resolveCompensation } from "@shared/compliance/loCompensation";
 import { toActualFeeMap, type ActualFeeMap } from "@shared/compliance/feeProvenance";
-import type { LoanApplication } from "@shared/schema";
+import { LOAN_TERM_MONTHS, type LoanApplication } from "@shared/schema";
 import { monthlyPrincipalAndInterest } from "@shared/lib/amortization";
 import { assessSubjectPropertyFinancing } from "@shared/subjectPropertyFinancing";
 
@@ -21,6 +21,7 @@ export interface LoanEstimateData {
   loanTerms: {
     loanAmount: number;
     interestRate: number;
+    termMonths: number;
     monthlyPrincipalAndInterest: number;
     prepaymentPenalty: boolean;
     balloonPayment: boolean;
@@ -387,7 +388,13 @@ async function derivePricing(
   baseRate += llpaResult.totalLLPA * 0.125;
   const interestRate = Math.round(baseRate * 1000) / 1000;
 
-  const termMonths = 360;
+  // The migration backfills historic applications to the prior 30-year model.
+  // The fallback keeps a rolling deploy safe while that migration and the new
+  // application column become visible to all processes.
+  const termMonths = application.loanTermMonths ?? 360;
+  if (!LOAN_TERM_MONTHS.includes(termMonths as typeof LOAN_TERM_MONTHS[number])) {
+    throw new Error("Select a supported loan term before pricing the mortgage");
+  }
   const monthlyPandI = calculateMonthlyPayment(loanAmount, interestRate, termMonths);
   // Product-aware MI through the one product-aware module (services/
   // mortgageInsurance.ts, F-087): conventional keeps the CONVENTIONAL_PMI
@@ -452,6 +459,8 @@ async function derivePricing(
  */
 export interface PaymentProjection {
   loanAmount: number;
+  /** Selected amortization term used for this exact payment projection. */
+  termMonths: number;
   /** Note rate, % — the same derivation the Loan Estimate prices. */
   interestRate: number;
   monthlyPrincipalAndInterest: number;
@@ -564,7 +573,7 @@ async function computePaymentProjectionInternal(
   overrides?: PricingOverrides,
   decisionLoanProgram?: "conventional" | "fha" | "va" | "usda",
 ): Promise<PaymentProjection> {
-  const { application, purchasePrice, loanAmount, interestRate, monthlyPandI, monthlyPMI } =
+  const { application, purchasePrice, loanAmount, interestRate, termMonths, monthlyPandI, monthlyPMI } =
     await derivePricing(applicationId, overrides, decisionLoanProgram);
   const { monthlyEscrow } = estimateMonthlyEscrow({ purchasePrice });
 
@@ -593,6 +602,7 @@ async function computePaymentProjectionInternal(
 
   return {
     loanAmount,
+    termMonths,
     interestRate,
     monthlyPrincipalAndInterest: Math.round(monthlyPandI * 100) / 100,
     monthlyMortgageInsurance: Math.round(monthlyPMI * 100) / 100,
@@ -763,6 +773,7 @@ export async function generateLoanEstimate(applicationId: string): Promise<LoanE
     loanTerms: {
       loanAmount,
       interestRate,
+      termMonths,
       monthlyPrincipalAndInterest: Math.round(monthlyPandI * 100) / 100,
       prepaymentPenalty: false,
       balloonPayment: false,

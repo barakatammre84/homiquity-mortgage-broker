@@ -79,6 +79,7 @@ function application(overrides: Record<string, unknown> = {}) {
     propertyState: "IL",
     propertyType: "single_family",
     preferredLoanType: "conventional",
+    loanTermMonths: 360,
     isVeteran: false,
     isFirstTimeBuyer: false,
     // Deliberately NO loCompensationModel / loCompensationBps: this is the
@@ -122,6 +123,22 @@ describe("computePaymentProjection — compensation independence (WF1-002)", () 
     const first = await computePaymentProjection("app-1");
     const second = await computePaymentProjection("app-1");
     expect(second).toEqual(first);
+  });
+
+  it("uses the selected loan term in both the decision projection and Loan Estimate", async () => {
+    h.application = application({
+      loanTermMonths: 180,
+      loCompensationModel: "lender_paid",
+      loCompensationBps: 125,
+    });
+    const projection = await computePaymentProjection("app-1");
+    const estimate = await generateLoanEstimate("app-1");
+
+    expect(projection.termMonths).toBe(180);
+    expect(estimate.loanTerms.termMonths).toBe(180);
+    expect(projection.monthlyPrincipalAndInterest)
+      .toBe(estimate.loanTerms.monthlyPrincipalAndInterest);
+    expect(projection.monthlyPrincipalAndInterest).toBeGreaterThan(3000);
   });
 
   it("still gaps honestly on a genuinely missing pricing input", async () => {

@@ -25,6 +25,8 @@ interface SituationResponse {
 const PATH_LABELS: Record<IncomePathSignal["pathId"], string> = {
   agency_wage: "Agency W-2 wage",
   self_employment: "Self-employment (Fannie 1084)",
+  capital_gains: "Capital gains (Schedule D)",
+  employment_related_assets: "Employment-related assets",
   rental: "Rental offsets (B3-3.8-01)",
   dscr: "DSCR (non-QM)",
   bank_statement: "Bank statement (non-QM)",

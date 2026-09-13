@@ -38,7 +38,12 @@ describe("document type vocabulary bridge", () => {
     expect(extractionDocumentType("bank_statement_checking")).toBe("bank_statement");
     expect(extractionDocumentType("bank_statement_business")).toBe("bank_statement");
     expect(extractionDocumentType("business_bank_statement")).toBe("bank_statement");
+    expect(extractionDocumentType("brokerage_statement")).toBe("bank_statement");
+    expect(extractionDocumentType("retirement_statement_401k")).toBe("bank_statement");
+    expect(extractionDocumentType("retirement_statement_ira")).toBe("bank_statement");
     expect(extractionDocumentType("tax_return_1040")).toBe("tax_return");
+    expect(extractionDocumentType("rental_tax_package")).toBe("tax_return");
+    expect(extractionDocumentType("capital_gains_tax_package")).toBe("tax_return");
     expect(extractionDocumentType("1099_misc")).toBe("tax_return");
     expect(extractionDocumentType("1099_nec")).toBe("tax_return");
     expect(extractionDocumentType("business_tax_return_1120s")).toBe("tax_return");
@@ -47,6 +52,8 @@ describe("document type vocabulary bridge", () => {
     expect(isTaxReturnDocumentType("tax_return_1040")).toBe(true);
     expect(isTaxReturnDocumentType("1099_misc")).toBe(true);
     expect(documentTypesMatch("tax_return", "1099_misc")).toBe(false);
+    expect(documentTypesMatch("rental_tax_package", "tax_return_1040")).toBe(false);
+    expect(documentTypesMatch("capital_gains_tax_package", "rental_tax_package")).toBe(false);
     expect(isBusinessBankStatementDocumentType("bank_statement_business")).toBe(true);
     expect(extractionDocumentType("government_id")).toBeNull();
   });

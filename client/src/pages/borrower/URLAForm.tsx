@@ -135,7 +135,15 @@ export function isEmploymentSectionComplete(records: Partial<EmploymentHistory>[
   if (started.length === 0) return false;
   return started.every((record) => {
     if (!record.employerName) return false;
-    if (!record.isSelfEmployed) return true;
+    if (!record.isSelfEmployed) {
+      if (record.hasKnownFutureIncomeReduction === false) return true;
+      return record.hasKnownFutureIncomeReduction === true
+        && record.futureMonthlyIncome !== null
+        && record.futureMonthlyIncome !== undefined
+        && String(record.futureMonthlyIncome).trim() !== ""
+        && !!record.futureIncomeEffectiveDate
+        && !!record.futureIncomeReason?.trim();
+    }
     return isSelfEmploymentWorksheetComplete(record.selfEmploymentIncome);
   });
 }
@@ -298,6 +306,7 @@ export default function URLAForm() {
   const [loanDetails, setLoanDetails] = useState<UrlaLoanDetails>({
     preferredLoanType: "conventional",
     amortizationType: "fixed",
+    loanTermMonths: 360,
   });
 
   const [activeStep, setActiveStep] = useState<string>(STEPS[0].id);
@@ -888,6 +897,7 @@ export default function URLAForm() {
                   onChange={setEmploymentRecords}
                   otherIncomes={slice.otherIncomeSources}
                   onOtherIncomesChange={setOtherIncomes}
+                  assets={slice.assets}
                 />
               </TabsContent>
 

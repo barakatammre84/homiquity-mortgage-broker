@@ -567,7 +567,11 @@ async function extractStandard(document: Document): Promise<ExtractedDocumentDat
     case "w2":
       return extractW2Data(document.storagePath, document.mimeType ?? undefined);
     case "bank_statement":
-      return extractBankStatementData(document.storagePath, document.mimeType ?? undefined);
+      return extractBankStatementData(
+        document.storagePath,
+        document.mimeType ?? undefined,
+        document.documentType,
+      );
     case "lease_agreement":
       return extractLeaseData(document.storagePath, document.mimeType ?? undefined);
     case "profit_loss":

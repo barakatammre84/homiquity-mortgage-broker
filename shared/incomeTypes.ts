@@ -35,6 +35,7 @@ export const OTHER_INCOME_TYPE_IDS = [
   "trust",
   "va_compensation",
   "capital_gains",
+  "employment_related_assets",
   "other",
 ] as const;
 
@@ -85,7 +86,22 @@ export const OTHER_INCOME_TYPES: readonly OtherIncomeTypeDefinition[] = [
   { id: "separate_maintenance", label: "Separate Maintenance", qualifyingAuthority: null },
   { id: "trust", label: "Trust", qualifyingAuthority: null },
   { id: "va_compensation", label: "VA Compensation", qualifyingAuthority: null },
-  { id: "capital_gains", label: "Capital Gains", qualifyingAuthority: null },
+  {
+    id: "capital_gains",
+    label: "Capital Gains",
+    qualifyingAuthority: {
+      doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+      section: "B3-3.4-05, Capital Gains Income",
+    },
+  },
+  {
+    id: "employment_related_assets",
+    label: "Employment-Related Assets as Income",
+    qualifyingAuthority: {
+      doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+      section: "B3-3.4-06, Employment Related Assets as Qualifying Income",
+    },
+  },
   { id: "other", label: "Other", qualifyingAuthority: null },
 ];
 
@@ -140,8 +156,8 @@ export function otherIncomeTypeLabel(id: OtherIncomeTypeId): string {
 /**
  * True when this type's qualifying treatment has no in-repo authority — i.e. the
  * amount is being used exactly as declared because no cited rule says otherwise.
- * Today that is every type; see the module docstring for why that is the honest
- * state and what changes it.
+ * Capital gains is the first cited type-specific implementation; every other
+ * null entry remains deliberately uncited and unadjusted.
  */
 export function hasUncitedQualifyingTreatment(id: OtherIncomeTypeId): boolean {
   return otherIncomeTypeDefinition(id).qualifyingAuthority === null;

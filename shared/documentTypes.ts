@@ -25,6 +25,8 @@ const DOCUMENT_TYPE_CANONICAL: Record<string, string> = {
   bank_statement_savings: "bank_statement",
   bank_statement_business: "business_bank_statement",
   homeowners_insurance_binder: "homeowners_insurance",
+  retirement_statement_401k: "retirement_statement",
+  retirement_statement_ira: "retirement_statement",
 };
 
 type ExtractionDocumentType =
@@ -38,6 +40,8 @@ type ExtractionDocumentType =
 const TAX_PACKAGE_UPLOAD_TYPES = new Set([
   "tax_return",
   "tax_return_1040",
+  "rental_tax_package",
+  "capital_gains_tax_package",
   "tax_return_1065",
   "tax_return_1120",
   "tax_return_1120s",
@@ -68,6 +72,7 @@ export function extractionDocumentType(
   if (normalized === "bank_statement" || normalized === "business_bank_statement") {
     return "bank_statement";
   }
+  if (["brokerage_statement", "retirement_statement"].includes(normalized)) return "bank_statement";
   if (normalized === "lease_agreement") return "lease_agreement";
   if (normalized === "profit_loss") return "profit_loss";
   return null;

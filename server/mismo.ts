@@ -1000,7 +1000,10 @@ function buildLoanNode(dto: MISMOLoanDTO, mersMin?: string, loanState?: LoanStat
         tag: "AMORTIZATION_RULE",
         // XSD AMORTIZATION_RULE sequence: PeriodCount, PeriodType, LoanAmortizationType.
         children: [
-          { tag: "LoanAmortizationPeriodCount", text: String(selectedOption?.loanTerm || 30) },
+          {
+            tag: "LoanAmortizationPeriodCount",
+            text: String(selectedOption?.loanTerm ?? (application.loanTermMonths ?? 360) / 12),
+          },
           { tag: "LoanAmortizationPeriodType", text: "Year" },
           { tag: "LoanAmortizationType", text: mapAmortizationType(application.amortizationType) },
         ],
