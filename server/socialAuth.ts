@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { isAdmin } from "@shared/roles";
+import { getRoleHomeRoute } from "@shared/roleHomeRoute";
 import { authStorage } from "./integrations/auth/storage";
 import { randomBytes, createSign } from "crypto";
 
@@ -126,6 +126,10 @@ function isProviderConfigured(provider: OAuthProviderConfig): boolean {
 export interface ProvidersResponse {
   providers: Record<string, boolean>;
   missing?: Record<string, string[]>;
+}
+
+export function getSocialAuthSuccessRoute(role: string): string {
+  return getRoleHomeRoute(role);
 }
 
 /**
@@ -348,11 +352,7 @@ export function setupSocialAuth(app: Express) {
               console.error(`[${providerName}] Session login failed:`, err);
               return res.redirect("/login?error=auth_failed");
             }
-            const roleRoute =
-              isAdmin(user) ? "/admin" :
-              ["lo", "loa", "processor", "underwriter", "closer", "broker", "lender"].includes(user.role) ? "/staff-dashboard" :
-              "/dashboard";
-            res.redirect(roleRoute);
+            res.redirect(getSocialAuthSuccessRoute(user.role));
           }
         );
       } catch (error) {
