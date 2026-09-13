@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
 import { db } from "../db";
 import { auditLogs, dealTeamMembers, documents, loanApplications, tasks, workWaits, type WorkWait } from "@shared/schema";
-import { isInternalStaffRole } from "@shared/roles";
+import { isAdmin, isInternalStaffRole } from "@shared/roles";
 import { elapsedWaitMs, type CloseWorkWait, type ListWorkWaits, type RecordWorkWait } from "@shared/workWaits";
 import { withPostgresTransactionRetry } from "./transactionRetry";
 
@@ -17,7 +17,7 @@ async function authorize(tx: Transaction, applicationId: string, actor: Actor, w
   const [application] = await tx.select({ id: loanApplications.id, loanOfficerId: loanApplications.loanOfficerId })
     .from(loanApplications).where(eq(loanApplications.id, applicationId)).for(write ? "update" : "share");
   if (!application) throw new WorkWaitError("Application not found", 404);
-  if (actor.role === "admin" || application.loanOfficerId === actor.id) return;
+  if (isAdmin(actor) || application.loanOfficerId === actor.id) return;
   const members = await tx.select({ id: dealTeamMembers.id }).from(dealTeamMembers).where(and(
     eq(dealTeamMembers.applicationId, applicationId), eq(dealTeamMembers.userId, actor.id), eq(dealTeamMembers.isActive, true),
   )).for("share");
