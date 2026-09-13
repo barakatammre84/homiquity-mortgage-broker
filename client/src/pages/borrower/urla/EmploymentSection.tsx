@@ -9,13 +9,14 @@ import { Plus, Trash2 } from "lucide-react";
 import type { EmploymentHistory, OtherIncomeSource } from "@shared/schema";
 import { MoneyInput } from "./MoneyInput";
 import { SelfEmploymentIncomeWorksheet } from "./SelfEmploymentIncomeWorksheet";
-import { INCOME_SOURCES } from "./types";
+import { INCOME_SOURCES, type AssetForm } from "./types";
 
 interface EmploymentSectionProps {
   employmentRecords: Partial<EmploymentHistory>[];
   onChange: (value: Partial<EmploymentHistory>[]) => void;
   otherIncomes: Partial<OtherIncomeSource>[];
   onOtherIncomesChange: (value: Partial<OtherIncomeSource>[]) => void;
+  assets: AssetForm[];
 }
 
 export function EmploymentSection({
@@ -23,7 +24,19 @@ export function EmploymentSection({
   onChange,
   otherIncomes,
   onOtherIncomesChange,
+  assets,
 }: EmploymentSectionProps) {
+  const retirementAssets = assets.flatMap((asset, index) => {
+    if (!/retirement|401\s*\(?k\)?|\bira\b|\bsep\b|keogh/i.test(asset.accountType ?? "")) return [];
+    const last4 = asset.accountNumberLast4
+      ?? asset.accountNumber?.replace(/\D/g, "").slice(-4)
+      ?? "";
+    if (last4.length !== 4) return [];
+    return [{
+      value: last4,
+      label: `${asset.financialInstitution || asset.accountType || `Retirement account ${index + 1}`} ·••••${last4}`,
+    }];
+  });
   return (
     <>
       <Card>
@@ -302,6 +315,87 @@ export function EmploymentSection({
                 </div>
               </div>
 
+              {!emp.isSelfEmployed && (
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-4 space-y-4">
+                  <div className="space-y-1">
+                    <Label>Do you know if this income will decrease?</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Tell us about a planned retirement, reduced hours, job change, or other confirmed pay change so your estimate stays accurate.
+                    </p>
+                  </div>
+                  <Select
+                    value={emp.hasKnownFutureIncomeReduction === true
+                      ? "yes"
+                      : emp.hasKnownFutureIncomeReduction === false ? "no" : "unknown"}
+                    onValueChange={(value) => {
+                      const updated = [...employmentRecords];
+                      updated[index] = {
+                        ...updated[index],
+                        hasKnownFutureIncomeReduction: value === "unknown" ? null : value === "yes",
+                        ...(value === "yes" ? {} : {
+                          futureMonthlyIncome: null,
+                          futureIncomeEffectiveDate: null,
+                          futureIncomeReason: null,
+                        }),
+                      };
+                      onChange(updated);
+                    }}
+                  >
+                    <SelectTrigger data-testid={`select-future-income-reduction-${index}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unknown">Choose an answer</SelectItem>
+                      <SelectItem value="no">No known decrease</SelectItem>
+                      <SelectItem value="yes">Yes, it will decrease</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {emp.hasKnownFutureIncomeReduction === true && (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>Future gross monthly income</Label>
+                        <MoneyInput
+                          value={emp.futureMonthlyIncome ?? ""}
+                          onChange={(e) => {
+                            const updated = [...employmentRecords];
+                            updated[index] = { ...updated[index], futureMonthlyIncome: e.target.value };
+                            onChange(updated);
+                          }}
+                          data-testid={`input-future-monthly-income-${index}`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Effective date</Label>
+                        <Input
+                          type="date"
+                          value={emp.futureIncomeEffectiveDate ?? ""}
+                          onChange={(e) => {
+                            const updated = [...employmentRecords];
+                            updated[index] = { ...updated[index], futureIncomeEffectiveDate: e.target.value };
+                            onChange(updated);
+                          }}
+                          data-testid={`input-future-income-date-${index}`}
+                        />
+                      </div>
+                      <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+                        <Label>What is changing?</Label>
+                        <Input
+                          placeholder="For example, retiring or moving to reduced hours"
+                          value={emp.futureIncomeReason ?? ""}
+                          onChange={(e) => {
+                            const updated = [...employmentRecords];
+                            updated[index] = { ...updated[index], futureIncomeReason: e.target.value };
+                            onChange(updated);
+                          }}
+                          data-testid={`input-future-income-reason-${index}`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {emp.isSelfEmployed && (
                 <>
                   <hr />
@@ -327,8 +421,8 @@ export function EmploymentSection({
             <div className="space-y-1.5">
               <CardTitle>Section 1e: Income from Other Sources</CardTitle>
               <CardDescription>
-                Retirement, Social Security, disability, and similar income all count toward
-                qualifying — include anything you'd like considered.
+                Include retirement, Social Security, disability, capital gains, or anything else
+                you'd like us to review for qualification.
               </CardDescription>
             </div>
             <Button
@@ -360,7 +454,25 @@ export function EmploymentSection({
                         value={income.incomeSource || ""}
                         onValueChange={(value) => {
                           const updated = [...otherIncomes];
-                          updated[index] = { ...updated[index], incomeSource: value };
+                          updated[index] = value === "Capital Gains" || value === "Employment-Related Assets as Income"
+                            ? {
+                                ...updated[index],
+                                incomeSource: value,
+                                monthlyAmount: "0",
+                                taxTreatment: "taxable",
+                                nonTaxableMonthlyAmount: null,
+                                hasDefinedExpiration: false,
+                                expirationDate: null,
+                                paidInVirtualCurrency: false,
+                                ...(value === "Employment-Related Assets as Income" ? {
+                                  linkedAssetAccountLast4: null,
+                                  assetOwnershipType: null,
+                                  hasUnrestrictedAccess: null,
+                                  fullDistributionPenaltyAmount: null,
+                                  fundsUsedForTransaction: null,
+                                } : {}),
+                              }
+                            : { ...updated[index], incomeSource: value };
                           onOtherIncomesChange(updated);
                         }}
                       >
@@ -374,18 +486,52 @@ export function EmploymentSection({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Monthly Amount</Label>
-                      <MoneyInput
-                        value={income.monthlyAmount || ""}
-                        onChange={(e) => {
-                          const updated = [...otherIncomes];
-                          updated[index] = { ...updated[index], monthlyAmount: e.target.value };
-                          onOtherIncomesChange(updated);
-                        }}
-                        data-testid={`input-income-amount-${index}`}
-                      />
-                    </div>
+                    {income.incomeSource === "Capital Gains" ? (
+                      <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                        No estimate needed. We calculate this from your two most recent Schedule D
+                        forms and a current brokerage statement.
+                      </div>
+                    ) : income.incomeSource === "Employment-Related Assets as Income" ? (
+                      <div className="space-y-2">
+                        <Label>Retirement account</Label>
+                        {retirementAssets.length > 0 ? (
+                          <Select
+                            value={income.linkedAssetAccountLast4 || ""}
+                            onValueChange={(value) => {
+                              const updated = [...otherIncomes];
+                              updated[index] = { ...updated[index], linkedAssetAccountLast4: value };
+                              onOtherIncomesChange(updated);
+                            }}
+                          >
+                            <SelectTrigger data-testid={`select-employment-asset-${index}`}>
+                              <SelectValue placeholder="Select account..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {retirementAssets.map((asset) => (
+                                <SelectItem key={asset.value} value={asset.value}>{asset.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                            Add your retirement account in the Assets step, including the account number, then return here to select it.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Label>Monthly Amount</Label>
+                        <MoneyInput
+                          value={income.monthlyAmount || ""}
+                          onChange={(e) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], monthlyAmount: e.target.value };
+                            onOtherIncomesChange(updated);
+                          }}
+                          data-testid={`input-income-amount-${index}`}
+                        />
+                      </div>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon" aria-label="Delete"
@@ -395,7 +541,72 @@ export function EmploymentSection({
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  {income.incomeSource === "Employment-Related Assets as Income" && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>How is this account owned?</Label>
+                        <Select
+                          value={income.assetOwnershipType || ""}
+                          onValueChange={(value) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], assetOwnershipType: value };
+                            onOtherIncomesChange(updated);
+                          }}
+                        >
+                          <SelectTrigger data-testid={`select-employment-asset-ownership-${index}`}><SelectValue placeholder="Select ownership..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="individual">I own it individually</SelectItem>
+                            <SelectItem value="joint_with_coborrower">Jointly with a co-borrower on this loan</SelectItem>
+                            <SelectItem value="joint_other">Jointly with someone who is not on this loan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Can you request the full balance now, without employer or plan approval?</Label>
+                        <Select
+                          value={income.hasUnrestrictedAccess === true ? "yes" : income.hasUnrestrictedAccess === false ? "no" : ""}
+                          onValueChange={(value) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], hasUnrestrictedAccess: value === "yes" };
+                            onOtherIncomesChange(updated);
+                          }}
+                        >
+                          <SelectTrigger data-testid={`select-employment-asset-access-${index}`}><SelectValue placeholder="Select..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="yes">Yes, I can request all funds</SelectItem>
+                            <SelectItem value="no">No or I’m not sure</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Penalty if the full account were distributed</Label>
+                        <MoneyInput
+                          value={income.fullDistributionPenaltyAmount || ""}
+                          onChange={(event) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], fullDistributionPenaltyAmount: event.target.value };
+                            onOtherIncomesChange(updated);
+                          }}
+                          placeholder="Enter 0 if none"
+                          data-testid={`input-employment-asset-penalty-${index}`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Amount from this account used for down payment, closing costs, and reserves</Label>
+                        <MoneyInput
+                          value={income.fundsUsedForTransaction || ""}
+                          onChange={(event) => {
+                            const updated = [...otherIncomes];
+                            updated[index] = { ...updated[index], fundsUsedForTransaction: event.target.value };
+                            onOtherIncomesChange(updated);
+                          }}
+                          placeholder="Enter 0 if none"
+                          data-testid={`input-employment-asset-transaction-use-${index}`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {income.incomeSource !== "Capital Gains" && income.incomeSource !== "Employment-Related Assets as Income" && <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Is any of this income exempt from federal income tax?</Label>
                       <Select
@@ -495,9 +706,13 @@ export function EmploymentSection({
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
+                  </div>}
                   <p className="text-xs text-muted-foreground">
-                    These details help us calculate eligible income correctly and avoid asking for the same information later.
+                    {income.incomeSource === "Capital Gains"
+                      ? "Your loan officer will review the return history, confirm the signed returns, and connect the current investment portfolio before any amount is counted."
+                      : income.incomeSource === "Employment-Related Assets as Income"
+                        ? "We subtract any full-distribution penalty and every dollar assigned to this transaction, then divide the remaining reviewed balance over the loan term you select."
+                      : "These details help us calculate eligible income correctly and avoid asking for the same information later."}
                   </p>
                 </div>
               ))}

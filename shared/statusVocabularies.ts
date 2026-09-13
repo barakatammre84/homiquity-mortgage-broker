@@ -100,6 +100,13 @@ export const PREFERRED_LOAN_TYPES = ["conventional", "fha", "va", "usda"] as con
 export type PreferredLoanType = (typeof PREFERRED_LOAN_TYPES)[number];
 
 export const AMORTIZATION_TYPES = ["fixed", "adjustable"] as const;
+
+/** Supported fixed-rate amortization terms carried end-to-end by URLA,
+ * payment projection, option generation, evidence workpapers, and MISMO.
+ * Lives here, not in the Drizzle schema, so the client can value-import it
+ * without pulling the table definitions into the public bundle (#482). */
+export const LOAN_TERM_MONTHS = [120, 180, 240, 300, 360] as const;
+export type LoanTermMonths = typeof LOAN_TERM_MONTHS[number];
 export type AmortizationType = (typeof AMORTIZATION_TYPES)[number];
 
 /** Cost categories on the immutable per-file cost ledger. */

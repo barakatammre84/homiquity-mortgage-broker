@@ -39,7 +39,10 @@ export const DOCUMENT_CATEGORIES = [
     documents: [
       { type: "paystub", name: "Recent Pay Stubs", required: true, description: "Last 30 days of pay stubs" },
       { type: "w2", name: "W-2 Forms", required: true, description: "W-2s from the last 2 years" },
+      { type: "employment_verification", name: "Employment Verification", required: false, description: "Employer letter or verification showing a known change in pay" },
       { type: "tax_return_1040", name: "Tax Returns (1040)", required: true, description: "Personal tax returns from last 2 years" },
+      { type: "rental_tax_package", name: "Rental Income Tax Package", required: false, description: "Signed tax return with Schedule 1 and Schedule E" },
+      { type: "capital_gains_tax_package", name: "Capital Gains Tax Package", required: false, description: "Two signed tax returns with Schedule D for each year" },
       { type: "1099_misc", name: "1099 Forms", required: false, description: "1099 forms if you have additional income" },
       { type: "1099_nec", name: "1099-NEC Forms", required: false, description: "Nonemployee compensation forms for contract work" },
       { type: "profit_loss", name: "Profit & Loss Statement", required: false, description: "For self-employed borrowers" },

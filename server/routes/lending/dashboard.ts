@@ -290,19 +290,25 @@ export function registerDashboardRoutes(
       // Only borrower-owned tasks are actions for the borrower. Staff review
       // tasks may be visible as progress elsewhere, but they must never turn
       // into a second "Upload" button in this action list.
-      let [allTasks, conditions, existingConsents, activeConsentTemplates] = await Promise.all([
+      let [allTasks, conditions, existingConsents, activeConsentTemplates, otherIncome, employment] = await Promise.all([
         storage.getTasksByApplication(applicationId),
         storage.getLoanConditionsByApplication(applicationId),
         storage.getBorrowerConsentsByApplication(applicationId),
         storage.getActiveConsentTemplates(),
+        storage.getOtherIncomeSources(applicationId),
+        storage.getEmploymentHistory(applicationId),
       ]);
 
-      // Repair an existing rental file once when its open checklist still
-      // predates the Schedule E rule. New submissions are already initialized
-      // during intake; avoiding an unconditional re-drive here keeps this
-      // frequently-polled endpoint read-only after the one compatibility pass.
+      // Repair an existing complex-income file once when its open checklist
+      // predates the current Schedule E or capital-gains evidence rules. New
+      // submissions are initialized during intake; avoiding an unconditional
+      // re-drive keeps this frequently-polled endpoint read-only afterward.
       const borrowerOwnsApplication = application.userId === user.id;
-      const hasRentalIncome = getBorrowerProfileFromApplication(application).hasRentalIncome;
+      const profile = getBorrowerProfileFromApplication(application, otherIncome, employment);
+      const hasRentalIncome = profile.hasRentalIncome;
+      const hasCapitalGains = profile.hasCapitalGains;
+      const hasEmploymentRelatedAssets = profile.hasEmploymentRelatedAssets;
+      const hasKnownFutureIncomeReduction = profile.hasKnownFutureIncomeReduction;
       // Fresh intake deliberately remains in `analyzing` until its conditions
       // and tasks exist. Never start the compatibility repair while that owner
       // is still working: the generators are idempotent across completed runs,
@@ -318,29 +324,54 @@ export function registerDashboardRoutes(
       const missingRentalTask = !allTasks.some(
         (task) => task.taskType === "document_request" && task.documentCategory === "lease_agreement",
       );
-      const staleOpenTaxTask = allTasks.some(
-        (task) =>
-          task.taskType === "document_request" &&
-          task.documentCategory === "tax_return" &&
-          task.status === "OPEN" &&
-          !/schedule e/i.test(`${task.title} ${task.description ?? ""}`),
+      const missingRentalTaxTask = !allTasks.some(
+        task => task.taskType === "document_request" && task.documentCategory === "rental_tax_package",
       );
       const missingRentalCondition = !conditions.some(
         (condition) => condition.sourceRule === "DOC_REQ_LEASE_AGREEMENT",
       );
-      const staleOpenTaxCondition = conditions.some(
-        (condition) =>
-          condition.sourceRule === "DOC_REQ_TAX_RETURN" &&
-          condition.status === "outstanding" &&
-          !/schedule e/i.test(`${condition.title} ${condition.description ?? ""}`),
+      const missingRentalTaxCondition = !conditions.some(
+        condition => condition.sourceRule === "DOC_REQ_RENTAL_TAX_PACKAGE",
+      );
+      const missingCapitalGainsTask = !allTasks.some(
+        (task) => task.taskType === "document_request" && task.documentCategory === "brokerage_statement",
+      );
+      const missingCapitalGainsTaxTask = !allTasks.some(
+        task => task.taskType === "document_request" && task.documentCategory === "capital_gains_tax_package",
+      );
+      const missingCapitalGainsCondition = !conditions.some(
+        (condition) => condition.sourceRule === "DOC_REQ_BROKERAGE_STATEMENT",
+      );
+      const missingCapitalGainsTaxCondition = !conditions.some(
+        condition => condition.sourceRule === "DOC_REQ_CAPITAL_GAINS_TAX_PACKAGE",
+      );
+      const rentalChecklistNeedsRepair = hasRentalIncome && (
+        missingRentalTask || missingRentalTaxTask || missingRentalCondition || missingRentalTaxCondition
+      );
+      const capitalGainsChecklistNeedsRepair = hasCapitalGains && (
+        missingCapitalGainsTask ||
+        missingCapitalGainsTaxTask ||
+        missingCapitalGainsCondition ||
+        missingCapitalGainsTaxCondition
+      );
+      const employmentAssetChecklistNeedsRepair = hasEmploymentRelatedAssets && (
+        !allTasks.some(
+          task => task.taskType === "document_request" && task.documentCategory === "retirement_statement",
+        )
+        || !conditions.some(condition => condition.sourceRule === "DOC_REQ_RETIREMENT_STATEMENT")
+      );
+      const futureIncomeChecklistNeedsRepair = hasKnownFutureIncomeReduction && (
+        !allTasks.some(
+          task => task.taskType === "document_request" && task.documentCategory === "employment_verification",
+        )
+        || !conditions.some(condition => condition.sourceRule === "DOC_REQ_EMPLOYMENT_VERIFICATION")
       );
       if (
         borrowerOwnsApplication &&
-        hasRentalIncome &&
         intakeIsSettled &&
         isPastIntakeInitializationWindow &&
         !isTerminalLoanAppStatus(application.status) &&
-        (missingRentalTask || staleOpenTaxTask || missingRentalCondition || staleOpenTaxCondition)
+        (rentalChecklistNeedsRepair || capitalGainsChecklistNeedsRepair || employmentAssetChecklistNeedsRepair || futureIncomeChecklistNeedsRepair)
       ) {
         await initializeLoanPipeline(application, user.id);
         [allTasks, conditions] = await Promise.all([

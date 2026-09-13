@@ -85,6 +85,8 @@ vi.mock("../server/storage", () => ({
     getPropertiesByUser: async () => [],
     getLoanMilestones: async () => null,
     createLoanMilestone: async () => ({}),
+    getOtherIncomeSources: async () => [],
+    getEmploymentHistory: async () => [],
     getLoanConditionsByApplication: async () => [],
     createLoanCondition: async (condition: Record<string, unknown>) => {
       lifecycleEvents.push(`condition:${String(condition.requiredDocumentTypes)}`);

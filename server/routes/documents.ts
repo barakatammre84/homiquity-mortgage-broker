@@ -563,7 +563,11 @@ export function registerDocumentRoutes(
           extractedData = await extractW2Data(document.storagePath, document.mimeType ?? undefined);
           break;
         case "bank_statement":
-          extractedData = await extractBankStatementData(document.storagePath, document.mimeType ?? undefined);
+          extractedData = await extractBankStatementData(
+            document.storagePath,
+            document.mimeType ?? undefined,
+            document.documentType,
+          );
           break;
         case "lease_agreement":
           extractedData = await extractLeaseData(document.storagePath, document.mimeType ?? undefined);

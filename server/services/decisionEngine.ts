@@ -116,7 +116,7 @@ export interface InstantDecision {
   } | null;
 }
 
-const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v3";
+const DECISION_INPUT_FINGERPRINT_VERSION = "instant-decision-input-v4";
 
 /** Map the persisted URLA vocabulary to the engine's explicit program axis. */
 export function requestedUnderwritingProgram(
@@ -265,6 +265,19 @@ interface AggregatedFinancials {
 }
 
 /**
+ * Final decisions must consume the immutable, current workpaper result an
+ * officer approved. Preliminary decisions continue to use the live URLA
+ * calculation, which deliberately excludes evidence-only adjustments.
+ */
+export function selectIncomeForDecision(
+  computed: IncomeOrchestrationResult,
+  decisionGrade: boolean,
+  approvedIncome: { result: IncomeOrchestrationResult } | null,
+): IncomeOrchestrationResult {
+  return decisionGrade && approvedIncome ? approvedIncome.result : computed;
+}
+
+/**
  * Aggregate qualifying income and monthly debts across EVERY borrower on the
  * application, from URLA line items when present. This removes the human step of
  * hand-tallying co-borrower income and debts, and only counts liabilities that
@@ -310,6 +323,11 @@ async function aggregateBorrowerFinancials(
   app: LoanApplication,
   decisionGrade: boolean,
   decisionCredit: DecisionCreditPicture | null,
+  approvedIncome: {
+    result: IncomeOrchestrationResult;
+    inputsFingerprint: string;
+    evaluationFingerprint: string;
+  } | null,
 ): Promise<AggregatedFinancials> {
   const [employment, otherIncome, liabilities, urlaAssets, bankStatementAnalysis, propertyInfo, declarations, realEstateOwned] =
     await Promise.all([
@@ -381,7 +399,12 @@ async function aggregateBorrowerFinancials(
     // S-07: a converting departing residence joins the per-property offsets.
     departingResidence: app.ownsOtherRealEstate == null ? departingResidenceInput(app) : null,
   };
-  const income = computeIncomePaths(incomeInput);
+  const computedIncome = computeIncomePaths(incomeInput);
+  // A VERIFIED decision consumes the exact immutable income calculation the
+  // officer approved. assembleWorkspace already proved that workpaper current
+  // against every source fact and dependency; recomputing here from URLA rows
+  // discarded evidence-only income such as Schedule D capital gains.
+  const income = selectIncomeForDecision(computedIncome, decisionGrade, approvedIncome);
 
   // Debts: monthly payments not being paid off, summed across all borrowers,
   // plus an applied net rental LOSS — B3-3.8-01 puts it in monthly
@@ -439,7 +462,8 @@ async function aggregateBorrowerFinancials(
   const monthlyDebts = Math.max(disclosedMonthlyDebts, bureauMonthlyDebts ?? 0)
     + income.primaryBreakdown.rentalLiabilityApplied;
 
-  // Engine split (base+bonus, used only as a sum): agency variable is "bonus";
+  // Engine split (base+bonus, used only as a sum): agency variable, capital
+  // gains, and employment-related asset income are "bonus";
   // agency base + self-employment are "base"; applied rental income (non-
   // subject positive offsets + subject-property qualifying rent) rides in
   // "variable" so base + variable always equals the primary total. For a
@@ -448,6 +472,8 @@ async function aggregateBorrowerFinancials(
     baseMonthlyIncome: income.primaryBreakdown.agencyBase + income.primaryBreakdown.selfEmployment,
     variableMonthlyIncome:
       income.primaryBreakdown.agencyVariable +
+      (income.primaryBreakdown.capitalGains ?? 0) +
+      (income.primaryBreakdown.employmentRelatedAssets ?? 0) +
       income.primaryBreakdown.rentalIncomeApplied +
       income.primaryBreakdown.subjectRentalIncomeApplied,
     totalMonthlyIncome: income.primaryMonthlyQualifyingIncome,
@@ -465,8 +491,12 @@ async function aggregateBorrowerFinancials(
     incomeBasis: income.incomeBasis,
     assets,
     income,
-    incomeInputsFingerprint: incomeInputsFingerprint(incomeInput),
-    incomeEvaluationFingerprint: incomeEvaluationFingerprint(income),
+    incomeInputsFingerprint: decisionGrade && approvedIncome
+      ? approvedIncome.inputsFingerprint
+      : incomeInputsFingerprint(incomeInput),
+    incomeEvaluationFingerprint: decisionGrade && approvedIncome
+      ? approvedIncome.evaluationFingerprint
+      : incomeEvaluationFingerprint(income),
   };
 }
 
@@ -491,7 +521,12 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       ? "preliminary_conventional_candidate"
       : null;
 
-  const fin = await aggregateBorrowerFinancials(app, isVerified, decisionCredit);
+  const fin = await aggregateBorrowerFinancials(
+    app,
+    isVerified,
+    decisionCredit,
+    currentGrade.approvedIncome,
+  );
   const effectiveCreditScore = decisionCredit?.representativeScore ?? app.creditScore;
 
   // A policy fingerprint proves which rules were used; this separate digest
@@ -512,6 +547,7 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
       loanPurpose: app.loanPurpose,
       preferredLoanType: app.preferredLoanType,
       amortizationType: app.amortizationType,
+      loanTermMonths: app.loanTermMonths,
       isVeteran: app.isVeteran,
       householdFamilySize: app.householdFamilySize,
       homeSquareFootage: app.homeSquareFootage,
@@ -640,7 +676,8 @@ export async function runInstantDecision(applicationId: string): Promise<Instant
     };
   }
 
-  // The internal payment model below is a 30-year fixed purchase projection.
+  // The internal payment model below is a fixed-rate purchase projection using
+  // the amortization term explicitly stored on the application.
   // Do not calculate a plausible-looking payment and only then discover that
   // the selected transaction needs different program rules. Preserve the exact
   // product in the snapshot and route it to review before pricing.

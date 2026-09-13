@@ -95,16 +95,70 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
       otherIncomeRequiresReview = true;
       treatmentGaps.add(`${jobLabel}: confirm whether any income is paid in virtual currency`);
     }
-    const itemized = [e.baseIncome, e.overtimeIncome, e.bonusIncome, e.commissionIncome, e.otherIncome];
+    let jobBase = 0;
+    let jobVariable = 0;
+    let hasJobLineItem = false;
+    const itemized = [
+      e.baseIncome,
+      e.overtimeIncome,
+      e.bonusIncome,
+      e.commissionIncome,
+      e.militaryEntitlements,
+      e.otherIncome,
+    ];
     if (itemized.some(isPresentNumber)) {
-      base += toNum(e.baseIncome);
-      variable +=
-        toNum(e.overtimeIncome) + toNum(e.bonusIncome) + toNum(e.commissionIncome) + toNum(e.otherIncome);
+      jobBase = toNum(e.baseIncome);
+      jobVariable =
+        toNum(e.overtimeIncome)
+        + toNum(e.bonusIncome)
+        + toNum(e.commissionIncome)
+        + toNum(e.militaryEntitlements)
+        + toNum(e.otherIncome);
       sawLineItem = true;
+      hasJobLineItem = true;
     } else if (isPresentNumber(e.totalMonthlyIncome)) {
-      base += toNum(e.totalMonthlyIncome);
+      jobBase = toNum(e.totalMonthlyIncome);
       sawLineItem = true;
+      hasJobLineItem = true;
     }
+
+    if (e.hasKnownFutureIncomeReduction === true) {
+      const currentMonthly = jobBase + jobVariable;
+      if (!isPresentNumber(e.futureMonthlyIncome) || toNum(e.futureMonthlyIncome) < 0) {
+        jobBase = 0;
+        jobVariable = 0;
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${jobLabel}: add the lower future gross monthly income`);
+        notes.push(`${jobLabel} excluded until the known lower future income is entered.`);
+      } else {
+        const futureMonthly = toNum(e.futureMonthlyIncome);
+        if (hasJobLineItem && futureMonthly >= currentMonthly) {
+          jobBase = 0;
+          jobVariable = 0;
+          otherIncomeRequiresReview = true;
+          treatmentGaps.add(`${jobLabel}: the future amount must be lower than the current monthly income`);
+          notes.push(`${jobLabel} excluded because the reported future amount does not describe a reduction.`);
+        } else {
+          jobBase = futureMonthly;
+          jobVariable = 0;
+          notes.push(`${jobLabel} uses the reported lower future gross monthly income under Selling Guide B3-3.1-01.`);
+        }
+      }
+      if (!parseDate(e.futureIncomeEffectiveDate)) {
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${jobLabel}: add the effective date of the lower income`);
+      }
+      if (!e.futureIncomeReason?.trim()) {
+        otherIncomeRequiresReview = true;
+        treatmentGaps.add(`${jobLabel}: explain the known income change`);
+      }
+    } else if (e.hasKnownFutureIncomeReduction !== false) {
+      otherIncomeRequiresReview = true;
+      treatmentGaps.add(`${jobLabel}: confirm whether the income is expected to decrease`);
+    }
+
+    base += jobBase;
+    variable += jobVariable;
   }
 
   // Section 1e other income: B3-3.1-01 continuance and nontaxable treatment.
@@ -118,6 +172,17 @@ export function computeAgencyWageIncome(input: AgencyWageInput): AgencyWageCompu
       const label = typeId === null
         ? ((o.incomeSource ?? "").trim() || "Other income")
         : otherIncomeTypeLabel(typeId);
+      // B3-3.4-05 never permits the borrower's typed monthly capital-gains
+      // amount to qualify at face value. Its dedicated path uses reviewed
+      // Schedule D history plus current portfolio evidence. Mark the detailed
+      // row as seen so the application-summary fallback cannot reintroduce the
+      // same unsupported amount through the household annual total.
+      if (typeId === "capital_gains" || typeId === "employment_related_assets") {
+        notes.push(typeId === "capital_gains"
+          ? `${label} is calculated separately from reviewed tax returns and portfolio evidence.`
+          : `${label} is calculated separately from reviewed retirement-account evidence.`);
+        continue;
+      }
       if (o.paidInVirtualCurrency === true) {
         notes.push(`${label} excluded because the income is paid in virtual currency.`);
         continue;

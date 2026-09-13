@@ -67,6 +67,24 @@ describe("LoanPurposeType — valid ULDD enum (F-019)", () => {
   });
 });
 
+describe("LoanAmortizationPeriodCount", () => {
+  it("uses the application term when no option has been generated", () => {
+    const xml = generateMISMO34XML(baseDto({
+      application: { loanTermMonths: 180 } as any,
+      loanOptions: [],
+    }));
+    expect(xml).toContain("<LoanAmortizationPeriodCount>15</LoanAmortizationPeriodCount>");
+  });
+
+  it("uses the locked option term as the final delivery term", () => {
+    const xml = generateMISMO34XML(baseDto({
+      application: { loanTermMonths: 360 } as any,
+      loanOptions: [{ loanTerm: 15, isLocked: true, loanAmount: "400000" } as any],
+    }));
+    expect(xml).toContain("<LoanAmortizationPeriodCount>15</LoanAmortizationPeriodCount>");
+  });
+});
+
 describe("ConstructionMethodType (Fix 5)", () => {
   it("emits SiteBuilt for a standard property, never the raw propertyType", () => {
     const xml = generateMISMO34XML(baseDto());

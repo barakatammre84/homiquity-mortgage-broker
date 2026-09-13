@@ -6,11 +6,28 @@ import { BASE_URL } from "./setup";
 const applicationId = randomUUID();
 const outsideApplicationId = randomUUID();
 let borrowerId = randomUUID();
-const documentTypes = ["pay_stub", "schedule_k1", "business_tax_return_1120s", "lease_agreement", "bank_statement_checking", "credit_report", "business_bank_statement"];
+const documentTypes = [
+  "pay_stub",
+  "schedule_k1",
+  "business_tax_return_1120s",
+  "lease_agreement",
+  "bank_statement_checking",
+  "credit_report",
+  "business_bank_statement",
+  "tax_return_1040",
+  "tax_return_1040",
+  "brokerage_statement",
+  "retirement_statement",
+  "employment_verification",
+];
 const documentIds = documentTypes.map(() => randomUUID());
 const liquidityFormId = randomUUID();
 const currentK1FormId = randomUUID();
 const priorK1FormId = randomUUID();
+const capital1040CurrentFormId = randomUUID();
+const capitalScheduleDCurrentFormId = randomUUID();
+const capital1040PriorFormId = randomUUID();
+const capitalScheduleDPriorFormId = randomUUID();
 const businessEntityId = randomUUID();
 const otherBusinessEntityId = randomUUID();
 const workpaperIds: string[] = [];
@@ -54,7 +71,7 @@ beforeAll(async () => {
 
   const rental = [{ type: "rental", annualAmount: "0", rentalProperties: [{ address: "10 Rental Way", monthlyRentalIncome: "3000", monthlyDebtPayment: "1800" }] }];
   await pool.query(
-    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources,owns_other_real_estate) VALUES ($1,$3,'processing','purchase','conventional','650000','130000','160000','self_reported',$4::jsonb,true),($2,$3,'draft','purchase','conventional','400000','80000','90000','self_reported','[]'::jsonb,false)",
+    "INSERT INTO loan_applications (id,user_id,status,loan_purpose,preferred_loan_type,loan_term_months,purchase_price,down_payment,annual_income,financial_data_provenance,income_sources,owns_other_real_estate,closing_date,occupancy_type) VALUES ($1,$3,'processing','purchase','conventional',360,'650000','130000','160000','self_reported',$4::jsonb,true,'2026-10-15','primary_residence'),($2,$3,'draft','purchase','conventional',360,'400000','80000','90000','self_reported','[]'::jsonb,false,'2026-10-15','primary_residence')",
     [applicationId, outsideApplicationId, borrowerId, JSON.stringify(rental)],
   );
   await pool.query(
@@ -77,7 +94,7 @@ beforeAll(async () => {
     },
   };
   await pool.query(
-    "INSERT INTO employment_history (id,application_id,borrower_sequence_number,employment_type,employer_name,is_self_employed,self_employment_income,paid_in_virtual_currency) VALUES ($1,$3,1,'self_employed','Fictional S Corp',true,$4::jsonb,false),($2,$3,2,'full_time','Fictional Hospital',false,NULL,false)",
+    "INSERT INTO employment_history (id,application_id,borrower_sequence_number,employment_type,employer_name,is_self_employed,self_employment_income,paid_in_virtual_currency,has_known_future_income_reduction) VALUES ($1,$3,1,'self_employed','Fictional S Corp',true,$4::jsonb,false,false),($2,$3,2,'full_time','Fictional Hospital',false,NULL,false,false)",
     [randomUUID(), randomUUID(), applicationId, JSON.stringify(worksheet)],
   );
   await pool.query(
@@ -86,10 +103,15 @@ beforeAll(async () => {
   );
   await pool.query("UPDATE employment_history SET base_income='6000',total_monthly_income='6000' WHERE application_id=$1 AND borrower_sequence_number=2", [applicationId]);
   await pool.query(
-    "INSERT INTO other_income_sources (application_id,borrower_sequence_number,income_source,monthly_amount,tax_treatment,has_defined_expiration,paid_in_virtual_currency) VALUES ($1,2,'Retirement (e.g., Pension, IRA)','1000','taxable',false,false)",
+    "INSERT INTO other_income_sources (application_id,borrower_sequence_number,income_source,monthly_amount,tax_treatment,has_defined_expiration,paid_in_virtual_currency,linked_asset_account_last4,asset_ownership_type,has_unrestricted_access,full_distribution_penalty_amount,funds_used_for_transaction) VALUES ($1,2,'Retirement (e.g., Pension, IRA)','1000','taxable',false,false,NULL,NULL,NULL,NULL,NULL),($1,1,'Capital Gains','0','taxable',false,false,NULL,NULL,NULL,NULL,NULL),($1,2,'Employment-Related Assets as Income','0','taxable',false,false,'5678','individual',true,'12000','18000')",
     [applicationId],
   );
-  await pool.query("INSERT INTO urla_assets (application_id,borrower_sequence_number,account_type,financial_institution,account_number_last4,cash_or_market_value) VALUES ($1,1,'checking','Fictional Bank','1234','90000'),($1,2,'401k','Fictional Retirement','5678','120000')", [applicationId]);
+  await pool.query("INSERT INTO urla_personal_info (application_id,borrower_sequence_number,is_primary_borrower,date_of_birth) VALUES ($1,1,true,'1970-01-01'),($1,2,false,'1960-01-01')", [applicationId]);
+  await pool.query(
+    "INSERT INTO urla_property_info (application_id,monthly_flood_insurance,monthly_ground_rent,monthly_special_assessments,subordinate_financing_exists,closed_end_subordinate_balance,heloc_drawn_balance,heloc_credit_limit,monthly_subordinate_financing_payment) VALUES ($1,'0','0','0',false,'0','0','0','0')",
+    [applicationId],
+  );
+  await pool.query("INSERT INTO urla_assets (application_id,borrower_sequence_number,account_type,financial_institution,account_number_last4,cash_or_market_value) VALUES ($1,1,'checking','Fictional Bank','1234','90000'),($1,2,'401k','Fictional Retirement','5678','120000'),($1,1,'Brokerage account','Fictional Brokerage','4321','250000')", [applicationId]);
   await pool.query("INSERT INTO urla_liabilities (application_id,borrower_sequence_number,liability_type,creditor_name,account_number_last4,unpaid_balance,monthly_payment) VALUES ($1,1,'credit_card','Fictional Card','9999','5000','250'),($1,2,'student_loan','Fictional Servicer','8888','20000','0')", [applicationId]);
 
   for (let index = 0; index < documentIds.length; index += 1) {
@@ -131,12 +153,33 @@ beforeAll(async () => {
       [documentIds[1], formId, String(ordinaryIncome)],
     );
   }
+  for (const [form1040Id, scheduleDId, taxYear, sourceDocumentId, capitalGain] of [
+    [capital1040CurrentFormId, capitalScheduleDCurrentFormId, 2025, documentIds[7], 120000],
+    [capital1040PriorFormId, capitalScheduleDPriorFormId, 2024, documentIds[8], 96000],
+  ] as const) {
+    await pool.query(
+      "INSERT INTO logical_documents (id,loan_id,borrower_id,document_type,aggregated_confidence,status,tax_year,source_document_id,page_start,page_end,is_complete,verified_by_user_id,verified_at) VALUES ($1,$3,$4,'tax_return_1040','0.99','accepted',$5,$6,1,2,true,'test-lo',now()),($2,$3,$4,'schedule_d','0.99','accepted',$5,$6,3,4,true,'test-lo',now())",
+      [form1040Id, scheduleDId, applicationId, borrowerId, taxYear, sourceDocumentId],
+    );
+    await pool.query(
+      "INSERT INTO extracted_fields (document_id,logical_document_id,page_number,field_name,value_boolean,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,$2,2,'signatureEvidencePresent',true,'boolean','0.99','fixture',true,'test-lo',now())",
+      [sourceDocumentId, form1040Id],
+    );
+    await pool.query(
+      "INSERT INTO extracted_fields (document_id,logical_document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,$2,4,'totalCapitalGainOrLoss',$3,'currency','0.99','fixture',true,'test-lo',now())",
+      [sourceDocumentId, scheduleDId, String(capitalGain)],
+    );
+  }
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'monthly_income_ytd_avg','6000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'employer_name','Fictional Hospital','string','0.99','fixture',true,'test-lo',now())", [documentIds[0]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'closing_balance','90000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[4]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'account_number_last4','1234','string','0.99','fixture',true,'test-lo',now())", [documentIds[4]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'monthly_rent','3000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[3]]);
   await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'property_address','10 Rental Way','string','0.99','fixture',true,'test-lo',now())", [documentIds[3]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'closing_balance','250000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[9]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'statement_period_end','2026-08-31','string','0.99','fixture',true,'test-lo',now()),($1,1,'account_number_last4','4321','string','0.99','fixture',true,'test-lo',now())", [documentIds[9]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_numeric,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'closing_balance','120000','currency','0.99','fixture',true,'test-lo',now())", [documentIds[10]]);
+  await pool.query("INSERT INTO extracted_fields (document_id,page_number,field_name,value_string,value_type,confidence,extraction_method,human_verified,verified_by_user_id,verified_at) VALUES ($1,1,'statement_period_end','2026-08-31','string','0.99','fixture',true,'test-lo',now()),($1,1,'account_number_last4','5678','string','0.99','fixture',true,'test-lo',now())", [documentIds[10]]);
 });
 
 afterAll(async () => {
@@ -172,7 +215,22 @@ describe.sequential("financial workpapers and cited memo", () => {
     const assetPaper = current.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation");
     const liabilities = current.workpapers.find((row: { kind: string }) => row.kind === "liability_reconciliation");
     expect(income.output.borrowerBreakdown.map((row: { borrowerSequenceNumber: number }) => row.borrowerSequenceNumber)).toEqual([1, 2]);
-    expect(income.output.borrowerBreakdown).toContainEqual({ borrowerSequenceNumber: 2, monthlyIncome: 7000 });
+    expect(income.output.borrowerBreakdown).toContainEqual({ borrowerSequenceNumber: 2, monthlyIncome: 7250 });
+    expect(income.output.evaluation.paths).toContainEqual(expect.objectContaining({
+      pathId: "capital_gains",
+      status: "applicable",
+      monthlyQualifyingIncome: 9000,
+      appliedToDti: true,
+    }));
+    expect(income.input.evidenceComparisons.filter((row: { label: string }) => row.label.includes("Schedule D capital gain or loss"))).toHaveLength(2);
+    expect(income.sources.some((source: { documentId: string }) => source.documentId === documentIds[9])).toBe(true);
+    expect(income.output.evaluation.paths).toContainEqual(expect.objectContaining({
+      pathId: "employment_related_assets",
+      status: "applicable",
+      monthlyQualifyingIncome: 250,
+      appliedToDti: true,
+    }));
+    expect(income.sources.some((source: { documentId: string }) => source.documentId === documentIds[10])).toBe(true);
     expect(selfEmployed.output.result.monthlyQualifyingIncome).toBeCloseTo(11083.33, 2);
     expect(selfEmployed.input.evidenceComparisons.filter((row: { label: string }) => row.label.endsWith("Ordinary business income or loss"))).toHaveLength(2);
     expect(liquidity.output).toMatchObject({ method: "quick_ratio", quickRatio: 2.2, supportsOrdinaryIncome: true });
@@ -251,7 +309,9 @@ describe.sequential("financial workpapers and cited memo", () => {
     expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
     const refreshed = await workspace();
     const refreshedIncome = refreshed.workpapers.find((row: { kind: string }) => row.kind === "income_summary");
-    const comparison = refreshedIncome.input.evidenceComparisons.find((row: { kind: string }) => row.kind === "income");
+    const comparison = refreshedIncome.input.evidenceComparisons.find(
+      (row: { kind: string; evidenceValue: number }) => row.kind === "income" && row.evidenceValue === 6500,
+    );
     expect(comparison).toMatchObject({ status: "variance", evidenceValue: 6500, calculationValue: 6000, variance: 500 });
     expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/workpapers/${refreshedIncome.id}/review`, {
       action: "approve",
@@ -457,5 +517,25 @@ describe.sequential("financial workpapers and cited memo", () => {
     const refreshed = await workspace();
     expect(refreshed.workpapers.find((row: { kind: string }) => row.kind === "rental_cash_flow").output.result.appliedMonthlyIncome).toBe(350);
     expect(refreshed.workpapers.find((row: { kind: string }) => row.kind === "asset_reconciliation").input.subject.realEstateOwned[0].helocBalance).toBe("10000.00");
+  });
+
+  it("rebuilds household income with a verified known future pay reduction", async () => {
+    await pool.query(
+      "UPDATE employment_history SET has_known_future_income_reduction=true,future_monthly_income='4000',future_income_effective_date='2026-12-01',future_income_reason='Moving to reduced hours',updated_at=now() WHERE application_id=$1 AND borrower_sequence_number=2",
+      [applicationId],
+    );
+    const changed = await workspace();
+    expect(changed.workpapers.find((row: { kind: string }) => row.kind === "income_summary").isCurrent).toBe(false);
+
+    expect((await call("lo", `/api/loan-applications/${applicationId}/financial-review/prepare`, {})).status).toBe(201);
+    const refreshed = await workspace();
+    const income = refreshed.workpapers.find((row: { kind: string }) => row.kind === "income_summary");
+    expect(income.blockers.map((blocker: { message: string }) => blocker.message).join(" ")).not.toMatch(/future income|employer verification/i);
+    expect(income.output.borrowerBreakdown).toContainEqual({
+      borrowerSequenceNumber: 2,
+      monthlyIncome: 5250,
+    });
+    expect(income.output.evaluation.paths.find((path: { pathId: string }) => path.pathId === "agency_wage").notes.join(" ")).toMatch(/lower future gross monthly income/i);
+    expect(income.sources.some((source: { documentId: string }) => source.documentId === documentIds[11])).toBe(true);
   });
 });

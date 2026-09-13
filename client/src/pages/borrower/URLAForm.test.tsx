@@ -513,7 +513,11 @@ describe("URLAForm — the progress bar counts the application, not the open tab
         ssnLast4: "1234",
       },
     ],
-    employmentHistory: [{ borrowerSequenceNumber: 1, employerName: "Acme" }],
+    employmentHistory: [{
+      borrowerSequenceNumber: 1,
+      employerName: "Acme",
+      hasKnownFutureIncomeReduction: false,
+    }],
     assets: [{ borrowerSequenceNumber: 1, accountType: "checking" }],
     liabilities: [{ borrowerSequenceNumber: 1, liabilityType: "auto_loan" }],
     allDeclarations: [],

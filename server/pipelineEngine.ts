@@ -8,6 +8,8 @@ import type {
   InsertLoanMilestone,
   Task,
   InsertTask,
+  OtherIncomeSource,
+  EmploymentHistory,
 } from "@shared/schema";
 import { loanConditions, loanMilestones, users, dealActivities } from "@shared/schema";
 import { db } from "./db";
@@ -26,6 +28,8 @@ import {
   assessLiabilities,
   calculateDTI,
 } from "./underwriting";
+import { classifyOtherIncomeSource } from "@shared/incomeTypes";
+import { expectedCapitalGainsTaxYears } from "./services/income/capitalGainsEvidence";
 
 interface DocumentRequirement {
   documentType: string;
@@ -49,6 +53,10 @@ interface BorrowerProfile {
   isFirstTimeBuyer: boolean;
   isSelfEmployed: boolean;
   hasRentalIncome: boolean;
+  hasCapitalGains: boolean;
+  capitalGainsTaxYears: [number, number] | null;
+  hasEmploymentRelatedAssets: boolean;
+  hasKnownFutureIncomeReduction: boolean;
   businessNames: string[];
 }
 
@@ -276,7 +284,9 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
       (requirement) => requirement.documentType === "tax_return",
     );
     const rentalTaxReturn: DocumentRequirement = {
-      documentType: "tax_return",
+      // A scoped type prevents a previously completed generic tax task from
+      // hiding a new Schedule E need when rental income is added later.
+      documentType: "rental_tax_package",
       yearsRequired: profile.isSelfEmployed ? [currentYear - 1, currentYear - 2] : [currentYear - 1],
       description: profile.isSelfEmployed
         ? `Signed personal federal tax returns with all schedules including Schedule E, plus applicable business returns and K-1s${businessList ? ` for ${businessList}` : ""}`
@@ -287,8 +297,8 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
         ? "Personal, Business & Rental Tax Returns Required"
         : "Rental Property Tax Return & Schedule E Required",
     };
-    if (genericTaxReturnIndex >= 0) requirements[genericTaxReturnIndex] = rentalTaxReturn;
-    else requirements.push(rentalTaxReturn);
+    if (genericTaxReturnIndex >= 0) requirements.splice(genericTaxReturnIndex, 1);
+    requirements.push(rentalTaxReturn);
 
     requirements.push({
       documentType: "lease_agreement",
@@ -296,6 +306,66 @@ export function determineDocumentRequirements(profile: BorrowerProfile): Documen
       priority: "prior_to_approval",
       conditionCategory: "income",
       conditionTitle: "Rental Property Lease Agreements Required",
+    });
+  }
+
+  if (profile.hasCapitalGains) {
+    // Fannie Mae Selling Guide B3-3.4-05: capital gains are not accepted from
+    // the borrower's estimate. The file needs two years of signed personal
+    // returns with Schedule D plus a current portfolio that can be sold. Keep
+    // one consolidated tax-return request when rental or business income also
+    // applies, so a complex borrower sees one precise ask instead of several
+    // overlapping tax tasks.
+    const taxReturnIndex = requirements.findIndex(
+      (requirement) => requirement.documentType === "tax_return"
+        || requirement.documentType === "rental_tax_package",
+    );
+    const includedSchedules = [
+      "Form 1040 and Schedule D for each year",
+      ...(profile.hasRentalIncome ? ["Schedule E"] : []),
+      ...(profile.isSelfEmployed ? ["all applicable business returns and K-1s"] : []),
+    ];
+    const capitalGainsTaxReturn: DocumentRequirement = {
+      // A distinct evidence request is essential when capital gains are added
+      // after an older generic/rental tax task was already completed.
+      documentType: "capital_gains_tax_package",
+      yearsRequired: profile.capitalGainsTaxYears ?? [currentYear - 1, currentYear - 2],
+      description: `Most recent two signed personal federal tax returns, including ${includedSchedules.join(", ")}${businessList ? ` for ${businessList}` : ""}`,
+      priority: "prior_to_approval",
+      conditionCategory: "income",
+      conditionTitle: profile.hasRentalIncome
+        ? "Capital Gains & Rental Tax Returns Required"
+        : "Capital Gains Tax Returns & Schedule D Required",
+    };
+    if (taxReturnIndex >= 0) requirements.splice(taxReturnIndex, 1);
+    requirements.push(capitalGainsTaxReturn);
+
+    requirements.push({
+      documentType: "brokerage_statement",
+      description: "Current brokerage or investment statement showing a portfolio of assets available for sale, account last four, statement date, and market value",
+      priority: "prior_to_approval",
+      conditionCategory: "assets",
+      conditionTitle: "Current Brokerage Statement Required for Capital Gains",
+    });
+  }
+
+  if (profile.hasEmploymentRelatedAssets) {
+    requirements.push({
+      documentType: "retirement_statement",
+      description: "Most recent monthly, quarterly, or annual retirement-account statement showing the account last four, asset composition, and ending market value",
+      priority: "prior_to_approval",
+      conditionCategory: "income",
+      conditionTitle: "Current Retirement Statement Required for Asset Income",
+    });
+  }
+
+  if (profile.hasKnownFutureIncomeReduction) {
+    requirements.push({
+      documentType: "employment_verification",
+      description: "Employer letter or written verification confirming the future gross monthly income, effective date, and whether the lower income is expected to continue",
+      priority: "prior_to_approval",
+      conditionCategory: "income",
+      conditionTitle: "Future Income Change Verification Required",
     });
   }
 
@@ -551,7 +621,11 @@ export async function generateDocumentTasks(
   return tasks;
 }
 
-export function getBorrowerProfileFromApplication(app: LoanApplication): BorrowerProfile {
+export function getBorrowerProfileFromApplication(
+  app: LoanApplication,
+  otherIncome: OtherIncomeSource[] = [],
+  employment: EmploymentHistory[] = [],
+): BorrowerProfile {
   const purchasePrice = app.purchasePrice ? parseFloat(app.purchasePrice.toString()) : 0;
   const downPayment = app.downPayment ? parseFloat(app.downPayment.toString()) : 0;
   const loanAmount = purchasePrice - downPayment;
@@ -583,6 +657,19 @@ export function getBorrowerProfileFromApplication(app: LoanApplication): Borrowe
     ) return [];
     return [source.employerName.trim()];
   })));
+  const hasCapitalGains = otherIncome.some(
+    source => classifyOtherIncomeSource(source.incomeSource) === "capital_gains",
+  );
+  const hasEmploymentRelatedAssets = otherIncome.some(
+    source => classifyOtherIncomeSource(source.incomeSource) === "employment_related_assets",
+  );
+  const closingDate = app.closingDate ? new Date(`${app.closingDate}T00:00:00Z`) : null;
+  const capitalGainsTaxYears = hasCapitalGains && closingDate && Number.isFinite(closingDate.getTime())
+    ? expectedCapitalGainsTaxYears(closingDate)
+    : null;
+  const hasKnownFutureIncomeReduction = employment.some(
+    job => !job.isSelfEmployed && job.hasKnownFutureIncomeReduction === true,
+  );
 
   return {
     employmentType: app.employmentType,
@@ -597,6 +684,10 @@ export function getBorrowerProfileFromApplication(app: LoanApplication): Borrowe
     isFirstTimeBuyer: app.isFirstTimeBuyer || false,
     isSelfEmployed: app.employmentType === "self_employed" || selfEmployedSources.length > 0,
     hasRentalIncome,
+    hasCapitalGains,
+    capitalGainsTaxYears,
+    hasEmploymentRelatedAssets,
+    hasKnownFutureIncomeReduction,
     businessNames,
   };
 }
@@ -617,7 +708,11 @@ export async function initializeLoanPipeline(
       submittedAt: new Date(),
     }));
 
-  const profile = getBorrowerProfileFromApplication(application);
+  const [otherIncome, employment] = await Promise.all([
+    storage.getOtherIncomeSources(application.id),
+    storage.getEmploymentHistory(application.id),
+  ]);
+  const profile = getBorrowerProfileFromApplication(application, otherIncome, employment);
   const requirements = determineDocumentRequirements(profile);
 
   const conditions = await generateConditionsFromRequirements(application.id, requirements);

@@ -1,4 +1,5 @@
 import type { CreditPull, LoanApplication } from "@shared/schema";
+import type { IncomeOrchestrationResult } from "@shared/incomePaths";
 import { isDecisionGrade, type DataProvenance } from "@shared/dataProvenance";
 import { assessCreditPullDecisionData, type DecisionCreditPicture } from "./decisionCredit";
 import { loadExpectedBorrowerSequences } from "./borrowerSequences";
@@ -6,6 +7,7 @@ import { loadExpectedBorrowerSequences } from "./borrowerSequences";
 export type CurrentDecisionEvidence = {
   financialMemoId: string | null;
   incomeWorkpaperId: string | null;
+  incomeWorkpaperHasEvaluation: boolean;
   assetWorkpaperId: string | null;
   liabilityWorkpaperId: string | null;
   creditPullId: string | null;
@@ -28,6 +30,11 @@ export type CurrentDecisionGrade = {
   };
   /** Server-side facts consumed by the decision engine; routes expose only the verification booleans above. */
   decisionCredit: DecisionCreditPicture | null;
+  approvedIncome: {
+    result: IncomeOrchestrationResult;
+    inputsFingerprint: string;
+    evaluationFingerprint: string;
+  } | null;
 };
 
 export function assessCurrentDecisionGrade(
@@ -41,6 +48,9 @@ export function assessCurrentDecisionGrade(
   if (!application.creditVerified) reasons.push("Credit verification has not been recorded.");
   if (!evidence.financialMemoId) reasons.push("The approved financial memo is missing or stale.");
   if (!evidence.incomeWorkpaperId) reasons.push("The approved income workpaper is missing or stale.");
+  if (evidence.incomeWorkpaperId && !evidence.incomeWorkpaperHasEvaluation) {
+    reasons.push("The approved income workpaper does not contain a usable reviewed calculation.");
+  }
   if (!evidence.assetWorkpaperId) reasons.push("The approved asset workpaper is missing or stale.");
   if (!evidence.creditPullId || evidence.creditPullIsSimulated || !evidence.creditPullIsCurrent) reasons.push("A current real bureau credit report is required.");
   if (evidence.creditPullId && !evidence.creditPullHasProviderReference) reasons.push("The bureau report is missing its provider reference.");
@@ -52,7 +62,10 @@ export function assessCurrentDecisionGrade(
     reasons,
     evidence,
     verification: {
-      income: application.incomeVerified === true && !!evidence.financialMemoId && !!evidence.incomeWorkpaperId,
+      income: application.incomeVerified === true
+        && !!evidence.financialMemoId
+        && !!evidence.incomeWorkpaperId
+        && evidence.incomeWorkpaperHasEvaluation,
       assets: application.assetsVerified === true && !!evidence.financialMemoId && !!evidence.assetWorkpaperId,
       credit: application.creditVerified === true
         && !!evidence.creditPullId
@@ -64,6 +77,7 @@ export function assessCurrentDecisionGrade(
         && (!evidence.creditPullHasOpenLiabilities || !!evidence.liabilityWorkpaperId),
     },
     decisionCredit: null,
+    approvedIncome: null,
   };
 }
 
@@ -82,6 +96,7 @@ export async function getCurrentDecisionGrade(application: LoanApplication): Pro
   const emptyEvidence: CurrentDecisionEvidence = {
     financialMemoId: null,
     incomeWorkpaperId: null,
+    incomeWorkpaperHasEvaluation: false,
     assetWorkpaperId: null,
     liabilityWorkpaperId: null,
     creditPullId: null,
@@ -104,7 +119,7 @@ export async function getCurrentDecisionGrade(application: LoanApplication): Pro
   const [financial, creditPull, expectedBorrowerSequenceNumbers] = await Promise.all([
     needsFinancialEvidence
       ? import("./financialReview").then(module => module.getCurrentApprovedFinancialVerificationEvidence(application.id))
-      : Promise.resolve({ memo: null, incomeWorkpaperId: null, assetWorkpaperId: null, liabilityWorkpaperId: null }),
+      : Promise.resolve({ memo: null, incomeWorkpaperId: null, assetWorkpaperId: null, liabilityWorkpaperId: null, approvedIncome: null }),
     needsCreditEvidence
       ? import("./creditService").then(module => module.getLatestCreditPull(application.id))
       : Promise.resolve(null),
@@ -114,6 +129,7 @@ export async function getCurrentDecisionGrade(application: LoanApplication): Pro
   const result = assessCurrentDecisionGrade(application, {
     financialMemoId: financial.memo?.id ?? null,
     incomeWorkpaperId: financial.incomeWorkpaperId,
+    incomeWorkpaperHasEvaluation: financial.approvedIncome !== null,
     assetWorkpaperId: financial.assetWorkpaperId,
     liabilityWorkpaperId: financial.liabilityWorkpaperId,
     creditPullId: creditPull?.id ?? null,
@@ -129,5 +145,6 @@ export async function getCurrentDecisionGrade(application: LoanApplication): Pro
     ...result,
     reasons: [...new Set([...result.reasons, ...scoreCoverageReasons])],
     decisionCredit: creditAssessment.picture,
+    approvedIncome: result.isDecisionGrade ? financial.approvedIncome : null,
   };
 }

@@ -770,17 +770,23 @@ export function registerUrlaRoutes(
         }
         const loanDetailsChanged =
           parsedLoanDetails.data.preferredLoanType !== application.preferredLoanType ||
-          parsedLoanDetails.data.amortizationType !== application.amortizationType;
+          parsedLoanDetails.data.amortizationType !== application.amortizationType ||
+          parsedLoanDetails.data.loanTermMonths !== application.loanTermMonths;
         if (loanDetailsChanged) {
           const updated = await storage.updateLoanApplication(applicationId, parsedLoanDetails.data);
           results.loanDetails = updated
-            ? { preferredLoanType: updated.preferredLoanType, amortizationType: updated.amortizationType }
+            ? {
+                preferredLoanType: updated.preferredLoanType,
+                amortizationType: updated.amortizationType,
+                loanTermMonths: updated.loanTermMonths,
+              }
             : parsedLoanDetails.data;
           decisionInputsChanged = true;
         } else {
           results.loanDetails = {
             preferredLoanType: application.preferredLoanType,
             amortizationType: application.amortizationType,
+            loanTermMonths: application.loanTermMonths,
           };
         }
       }

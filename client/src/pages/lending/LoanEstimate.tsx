@@ -35,6 +35,7 @@ interface LoanEstimateData {
     loanAmountFormatted: string;
     interestRate: number;
     interestRateFormatted: string;
+    termMonths: number;
     monthlyPrincipalAndInterest: number;
     monthlyPIFormatted: string;
     prepaymentPenalty: boolean;
@@ -280,7 +281,7 @@ export default function LoanEstimate() {
                   </CardContent>
                 </Card>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground">Loan Amount</CardTitle>
@@ -288,6 +289,17 @@ export default function LoanEstimate() {
                     <CardContent>
                       <p className="text-2xl font-bold" data-testid="text-loan-amount">
                         {le.loanTerms.loanAmountFormatted}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Loan Term</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold" data-testid="text-loan-term">
+                        {le.loanTerms.termMonths / 12} years
                       </p>
                     </CardContent>
                   </Card>
@@ -338,7 +350,7 @@ export default function LoanEstimate() {
                       
                       {le.projectedPayments.years6Through30 && (
                         <div className="rounded-lg border p-4">
-                          <h4 className="font-semibold mb-3">Years 6-30</h4>
+                          <h4 className="font-semibold mb-3">Years 6-{le.loanTerms.termMonths / 12}</h4>
                           <CostLineItem label="Principal & Interest" amount={le.projectedPayments.years6Through30.principalAndInterest} />
                           <CostLineItem label="Mortgage Insurance" amount={le.projectedPayments.years6Through30.mortgageInsurance} />
                           <CostLineItem label="Estimated Escrow" amount={le.projectedPayments.years6Through30.estimatedEscrow} />

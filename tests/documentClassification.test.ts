@@ -70,6 +70,17 @@ describe("simple document page classification", () => {
       pageCount: 1,
       pages: [{ pageNumber: 1, documentType: "bank_statement_checking", confidence: 0.96 }],
     })).toMatchObject({ compatible: false, mixedPacket: false });
+    expect(assessDocumentClassification("brokerage_statement", {
+      pageCount: 2,
+      pages: [
+        { pageNumber: 1, documentType: "brokerage_statement", confidence: 0.98 },
+        { pageNumber: 2, documentType: "brokerage_statement", confidence: 0.96 },
+      ],
+    })).toMatchObject({ compatible: true, mixedPacket: false });
+    expect(assessDocumentClassification("retirement_statement_401k", {
+      pageCount: 1,
+      pages: [{ pageNumber: 1, documentType: "retirement_statement_401k", confidence: 0.96 }],
+    })).toMatchObject({ compatible: true, mixedPacket: false });
     expect(assessDocumentClassification("profit_loss", {
       pageCount: 1,
       pages: [{ pageNumber: 1, documentType: "profit_loss_statement", confidence: 0.98 }],

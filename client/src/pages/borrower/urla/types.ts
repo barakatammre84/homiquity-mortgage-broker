@@ -1,6 +1,6 @@
-import { AMORTIZATION_TYPES, PREFERRED_LOAN_TYPES } from "@shared/statusVocabularies";
+import { AMORTIZATION_TYPES, LOAN_TERM_MONTHS, PREFERRED_LOAN_TYPES } from "@shared/statusVocabularies";
 import { URLA_LIABILITY_TYPES } from "@shared/liabilityTypes";
-import type { AmortizationType, BorrowerDeclarations, EmploymentHistory, HmdaDemographics, IncomeSourceEntry, LoanApplication, OtherIncomeSource, PreferredLoanType, RealEstateOwned, SelfEmploymentWorksheet, UrlaAsset, UrlaLiability, UrlaLoanDetails, UrlaPersonalInfo, UrlaPropertyInfo, User } from "@shared/schema";
+import { type AmortizationType, type BorrowerDeclarations, type EmploymentHistory, type HmdaDemographics, type IncomeSourceEntry, type LoanApplication, type OtherIncomeSource, type PreferredLoanType, type RealEstateOwned, type SelfEmploymentWorksheet, type UrlaAsset, type UrlaLiability, type UrlaLoanDetails, type UrlaPersonalInfo, type UrlaPropertyInfo, type User } from "@shared/schema";
 import { OTHER_INCOME_LABELS, otherIncomeTypeLabel } from "@shared/incomeTypes";
 // SSN and account numbers are WRITE-ONLY virtual fields: the server encrypts
 // them at rest and never returns the value — responses carry only ssnLast4 /
@@ -73,6 +73,14 @@ export const AMORTIZATION_TYPE_OPTIONS: { value: AmortizationType; label: string
   { value: "adjustable", label: "Adjustable Rate (ARM)" },
 ];
 
+export const LOAN_TERM_OPTIONS: ReadonlyArray<{ value: UrlaLoanDetails["loanTermMonths"]; label: string }> = [
+  { value: 120, label: "10 years" },
+  { value: 180, label: "15 years" },
+  { value: 240, label: "20 years" },
+  { value: 300, label: "25 years" },
+  { value: 360, label: "30 years" },
+];
+
 /**
  * Section 4a state from the application row, narrowed to the shared
  * vocabulary. The columns are free varchars historically written only by the
@@ -81,7 +89,7 @@ export const AMORTIZATION_TYPE_OPTIONS: { value: AmortizationType; label: string
  * silently submitted by the server.
  */
 export const toLoanDetailsState = (
-  app: Pick<LoanApplication, "preferredLoanType" | "amortizationType">,
+  app: Pick<LoanApplication, "preferredLoanType" | "amortizationType" | "loanTermMonths">,
 ): UrlaLoanDetails => ({
   preferredLoanType: (PREFERRED_LOAN_TYPES as readonly string[]).includes(app.preferredLoanType ?? "")
     ? (app.preferredLoanType as PreferredLoanType)
@@ -89,6 +97,9 @@ export const toLoanDetailsState = (
   amortizationType: (AMORTIZATION_TYPES as readonly string[]).includes(app.amortizationType ?? "")
     ? (app.amortizationType as AmortizationType)
     : "fixed",
+  loanTermMonths: LOAN_TERM_MONTHS.includes(app.loanTermMonths as typeof LOAN_TERM_MONTHS[number])
+    ? app.loanTermMonths as UrlaLoanDetails["loanTermMonths"]
+    : 360,
 });
 
 export const emptyDemographics = (): DemographicsState => ({

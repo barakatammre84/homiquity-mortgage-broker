@@ -113,6 +113,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
       userId: "borrower-1",
       preferredLoanType: null,
       amortizationType: null,
+      loanTermMonths: null,
     });
   });
 
@@ -125,28 +126,30 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
 
   it("writes BOTH columns from a stated section 4 and echoes them back", async () => {
     const res = await save({
-      loanDetails: { preferredLoanType: "fha", amortizationType: "adjustable" },
+      loanDetails: { preferredLoanType: "fha", amortizationType: "adjustable", loanTermMonths: 360 },
     });
     expect(res.status).toBe(200);
 
     expect(h.updates).toHaveLength(1);
     expect(h.updates[0].id).toBe("app-1");
-    // Exactly the two validated columns — no mass assignment.
+    // Exactly the validated section fields — no mass assignment.
     expect(h.updates[0].data).toEqual({
       preferredLoanType: "fha",
       amortizationType: "adjustable",
+      loanTermMonths: 360,
     });
 
     const body = await res.json();
     expect(body.loanDetails).toEqual({
       preferredLoanType: "fha",
       amortizationType: "adjustable",
+      loanTermMonths: 360,
     });
   });
 
   it("refreshes the shared preliminary analysis when the values change", async () => {
     const res = await save({
-      loanDetails: { preferredLoanType: "va", amortizationType: "fixed" },
+      loanDetails: { preferredLoanType: "va", amortizationType: "fixed", loanTermMonths: 360 },
     });
     expect(res.status).toBe(200);
     expect(refreshAnalysisMock).toHaveBeenCalledWith("app-1", "urla_updated");
@@ -154,7 +157,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
 
   it("rejects an out-of-vocabulary loan type with a 400 and writes nothing", async () => {
     const res = await save({
-      loanDetails: { preferredLoanType: "jumbo", amortizationType: "fixed" },
+      loanDetails: { preferredLoanType: "jumbo", amortizationType: "fixed", loanTermMonths: 360 },
     });
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -172,9 +175,10 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
   it("does not rewrite or recalc when the stated values are unchanged", async () => {
     h.applications[0].preferredLoanType = "conventional";
     h.applications[0].amortizationType = "fixed";
+    h.applications[0].loanTermMonths = 360;
 
     const res = await save({
-      loanDetails: { preferredLoanType: "conventional", amortizationType: "fixed" },
+      loanDetails: { preferredLoanType: "conventional", amortizationType: "fixed", loanTermMonths: 360 },
     });
     expect(res.status).toBe(200);
     expect(h.updates).toHaveLength(0);
@@ -184,6 +188,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
     expect(body.loanDetails).toEqual({
       preferredLoanType: "conventional",
       amortizationType: "fixed",
+      loanTermMonths: 360,
     });
   });
 
@@ -198,7 +203,7 @@ describe("POST /api/urla/:applicationId/save — section 4a loanDetails", () => 
   it("refuses a non-owner before any write", async () => {
     currentUser = { id: "someone-else", role: "aspiring_owner" };
     const res = await save({
-      loanDetails: { preferredLoanType: "fha", amortizationType: "fixed" },
+      loanDetails: { preferredLoanType: "fha", amortizationType: "fixed", loanTermMonths: 360 },
     });
     expect(res.status).toBe(403);
     expect(h.updates).toHaveLength(0);

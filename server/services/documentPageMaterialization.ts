@@ -218,6 +218,10 @@ const SEGMENT_EXTRACTOR_TYPE: Partial<Record<DocumentTypeTaxonomy, string>> = {
   bank_statement_checking: "bank_statement",
   bank_statement_savings: "bank_statement",
   business_bank_statement: "bank_statement",
+  brokerage_statement: "bank_statement",
+  retirement_statement: "bank_statement",
+  retirement_statement_401k: "bank_statement",
+  retirement_statement_ira: "bank_statement",
   lease_agreement: "lease_agreement",
   profit_loss_statement: "profit_loss",
 };
@@ -248,16 +252,17 @@ async function pagesAsPdf(pages: MaterializedSegmentPage[]): Promise<Buffer> {
 }
 
 async function extractSegment(
-  documentType: string,
+  extractorType: string,
   source: Buffer,
+  detectedDocumentType: DocumentTypeTaxonomy,
 ): Promise<ExtractedDocumentData> {
-  switch (documentType) {
+  switch (extractorType) {
     case "pay_stub": return extractPayStubData(source, "application/pdf");
     case "w2": return extractW2Data(source, "application/pdf");
-    case "bank_statement": return extractBankStatementData(source, "application/pdf");
+    case "bank_statement": return extractBankStatementData(source, "application/pdf", detectedDocumentType);
     case "lease_agreement": return extractLeaseData(source, "application/pdf");
     case "profit_loss": return extractProfitLossData(source, "application/pdf");
-    default: throw new DocumentPageMaterializationError(`Unsupported logical document type: ${documentType}`);
+    default: throw new DocumentPageMaterializationError(`Unsupported logical document type: ${extractorType}`);
   }
 }
 
@@ -317,14 +322,15 @@ export async function extractMaterializedPacketSegments(input: {
   let attemptedSegments = 0;
 
   for (const pages of grouped.values()) {
-    const canonicalType = packetSegmentExtractorType(pages[0].documentType);
-    if (!canonicalType) {
+    const detectedType = pages[0].documentType;
+    const extractorType = packetSegmentExtractorType(detectedType);
+    if (!extractorType) {
       unsupportedTypes.add(pages[0].documentType);
       continue;
     }
     attemptedSegments += 1;
-    const extracted = await extractSegment(canonicalType, await pagesAsPdf(pages));
-    const assessment = assessDocumentClassification(canonicalType, extracted.documentClassification);
+    const extracted = await extractSegment(extractorType, await pagesAsPdf(pages), detectedType);
+    const assessment = assessDocumentClassification(detectedType, extracted.documentClassification);
     if (extracted.confidence === "low" || !assessment.compatible) continue;
 
     const relativeToSource = new Map(pages.map((page, index) => [index + 1, page]));
@@ -336,7 +342,7 @@ export async function extractMaterializedPacketSegments(input: {
       }
     }
     const remapped = { ...extracted, fieldEvidence: remappedEvidence } as ExtractedDocumentData;
-    const facts = buildDocumentFacts(canonicalType, remapped as unknown as Record<string, any>);
+    const facts = buildDocumentFacts(extractorType, remapped as unknown as Record<string, any>);
     const fieldConfidence = facts.length > 0
       ? facts.reduce((sum, fact) => sum + (fact.confidence ?? 0), 0) / facts.length
       : coarseConfidenceToNumeric(extracted.confidence);

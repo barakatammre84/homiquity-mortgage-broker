@@ -105,7 +105,7 @@ export async function extractAutopilotDocument(
       return { extracted: e, highlights };
     }
     case "bank_statement": {
-      const e = await extractBankStatementData(storagePath, mimeType ?? undefined);
+      const e = await extractBankStatementData(storagePath, mimeType ?? undefined, documentType);
       if (e.closingBalance != null) highlights.push(`Closing balance: ${usd(e.closingBalance)}`);
       if (e.totalDeposits != null) highlights.push(`Total deposits: ${usd(e.totalDeposits)}`);
       return { extracted: e, highlights };
@@ -177,7 +177,11 @@ export async function runAutopilotForSection(params: {
     if (!(await isAutopilotEnabled(application.loanOfficerId))) return;
     if (!(await canGenerateFollowUps())) return;
 
-    const profile = getBorrowerProfileFromApplication(application);
+    const [otherIncome, employment] = await Promise.all([
+      storage.getOtherIncomeSources(applicationId),
+      storage.getEmploymentHistory(applicationId),
+    ]);
+    const profile = getBorrowerProfileFromApplication(application, otherIncome, employment);
     const requirements = determineDocumentRequirements(profile);
     const created = await generateConditionsFromRequirements(applicationId, requirements);
 

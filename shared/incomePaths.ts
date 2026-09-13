@@ -30,6 +30,8 @@ import { z } from "zod";
 export const INCOME_PATH_IDS = [
   "agency_wage",
   "self_employment",
+  "capital_gains",
+  "employment_related_assets",
   "rental",
   "dscr",
   "bank_statement",
@@ -110,6 +112,10 @@ export interface IncomeOrchestrationResult {
     /** Agency variable income (overtime/bonus/commission/other + other-income sources). */
     agencyVariable: number;
     selfEmployment: number;
+    /** Reviewed Schedule D capital-gains income under B3-3.4-05. */
+    capitalGains?: number;
+    /** Reviewed employment-related asset income under B3-3.4-06. */
+    employmentRelatedAssets?: number;
     /** Net non-subject rental offset as computed (may be negative; informational). */
     rental: number;
     /** Positive net rental offset applied to qualifying income (B3-3.8-01; 0 unless applied). */

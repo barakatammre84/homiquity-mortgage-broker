@@ -114,10 +114,13 @@ export const DOCUMENT_TYPE_TAXONOMY = [
   // Income - W2/Employment
   "paystub",
   "w2",
+  "employment_verification",
   "1099_misc",
   "1099_nec",
   // Income - Tax Returns
   "tax_return_1040",
+  "rental_tax_package",
+  "capital_gains_tax_package",
   "schedule_1",
   "schedule_b",
   "schedule_c",
@@ -136,6 +139,7 @@ export const DOCUMENT_TYPE_TAXONOMY = [
   "bank_statement_checking",
   "bank_statement_savings",
   "business_bank_statement",
+  "retirement_statement",
   "retirement_statement_401k",
   "retirement_statement_ira",
   "brokerage_statement",

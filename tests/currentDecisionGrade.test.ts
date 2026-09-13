@@ -4,6 +4,7 @@ import { assessCurrentDecisionGrade, isCurrentRealCreditPull, type CurrentDecisi
 const complete: CurrentDecisionEvidence = {
   financialMemoId: "memo",
   incomeWorkpaperId: "income",
+  incomeWorkpaperHasEvaluation: true,
   assetWorkpaperId: "assets",
   liabilityWorkpaperId: "liabilities",
   creditPullId: "credit",
