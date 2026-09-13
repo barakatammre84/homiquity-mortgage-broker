@@ -53,8 +53,14 @@ describe("getRoleHomeRoute — post-login landing", () => {
     expect(getRoleHomeRoute("cpa")).toBe("/cpa-portal");
   });
 
-  it("routes internal staff to the operations dashboard", () => {
-    for (const role of INTERNAL_STAFF) {
+  it("routes the loan team to the deal desk", () => {
+    for (const role of ["lo", "loa"]) {
+      expect(getRoleHomeRoute(role)).toBe("/lo-command-center");
+    }
+  });
+
+  it("routes downstream operations staff to the operations dashboard", () => {
+    for (const role of ["processor", "underwriter", "closer"]) {
       expect(getRoleHomeRoute(role)).toBe("/staff-dashboard");
     }
   });

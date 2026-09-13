@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { buildProvidersResponse } from "../server/socialAuth";
+import { buildProvidersResponse, getSocialAuthSuccessRoute } from "../server/socialAuth";
 
 // buildProvidersResponse drives GET /api/auth/providers, which decides which
 // social buttons the login/signup pages render. It reports whether each
@@ -90,5 +90,19 @@ describe("buildProvidersResponse", () => {
 
     expect(res.providers.google).toBe(false);
     expect(res).not.toHaveProperty("missing");
+  });
+});
+
+describe("getSocialAuthSuccessRoute", () => {
+  it.each(["lo", "loa"])("lands %s in the streamlined deal desk", (role) => {
+    expect(getSocialAuthSuccessRoute(role)).toBe("/lo-command-center");
+  });
+
+  it("preserves the broker-specific dashboard", () => {
+    expect(getSocialAuthSuccessRoute("broker")).toBe("/broker-dashboard");
+  });
+
+  it("lands borrowers in their dashboard", () => {
+    expect(getSocialAuthSuccessRoute("active_buyer")).toBe("/dashboard");
   });
 });
