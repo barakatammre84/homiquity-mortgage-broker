@@ -11,7 +11,7 @@ the code lives.
 | **Anthropic (Claude Sonnet 5)** | AI Homebuyer Coach — streaming chat + tool-use intake capture | `ANTHROPIC_API_KEY` | `services/coachingClient.ts` (client) + the `coaching*.ts` family, `services/coachTools.ts`, `services/coachProfileSync.ts` | Coach runs in labeled offline-guidance mode (deterministic next-step answers; no writeback) |
 
 | **Google Cloud Storage** | Document/file storage via signed URLs | `GCS_SERVICE_ACCOUNT_KEY`, `PRIVATE_OBJECT_DIR`, `PUBLIC_OBJECT_SEARCH_PATHS` | `server/integrations/object_storage/` | Document upload/download broken |
-| **Google Maps Platform** | Address autocomplete, geocoding, address validation, maps, street view | `GOOGLE_MAPS_API_KEY` | `server/routes/geocode.ts`; client `AddressInput`, `PropertyMap`, `StreetView` | Manual address entry; no maps |
+| **Google Maps Platform** | Address autocomplete, geocoding, address validation, maps, street view | `GOOGLE_MAPS_SERVER_API_KEY`, `GOOGLE_MAPS_BROWSER_API_KEY` (`GOOGLE_MAPS_API_KEY` is local-only compatibility) | `server/routes/geocode.ts`; client `AddressInput`, `PropertyMap`, `StreetView` | Manual address entry; no maps |
 | **RapidAPI (Realty)** | Property listings search + live market rates | `RAPIDAPI_KEY` | `server/routes/listings.ts`, `services/rateService.ts` | Listings/live-rate features degrade (rates fall back to DB) |
 | **CFPB HMDA + Fannie Mae (public data)** | Competitor rate benchmarks + historical default/prepay rates | none (public APIs / bulk files) | `server/services/hmdaIngestService.ts`, `services/competitorRateService.ts`, `pnpm data:hmda` / `data:fannie` — see [specs/FREE_DATA_MOAT.md](../../specs/FREE_DATA_MOAT.md) | Market-data endpoints return 404 until ingested |
 | **Email (SMTP / SendGrid)** | Notifications, invites | `SMTP_*` or `SENDGRID_API_KEY`, `FROM_EMAIL`, `FROM_NAME` | `services/emailService.ts` | Emails print to server console (current state) |
@@ -62,9 +62,11 @@ can execute.
 
 ## Integration patterns to follow
 
-- **Server-side proxying for keys**: the client never holds API keys. E.g.
-  Maps calls go through `/api/geocode/*`; the browser gets a restricted maps
-  key via `/api/config/maps-key`.
+- **Server-side proxying for secret keys**: paid Places, Geocoding, and Address
+  Validation calls go through `/api/geocode/*` with the server-only
+  `GOOGLE_MAPS_SERVER_API_KEY`. Maps JavaScript and Street View receive the
+  separate, browser-safe `GOOGLE_MAPS_BROWSER_API_KEY` via
+  `/api/config/maps-key`; that key must be HTTP-referrer and API restricted.
 - **Graceful degradation**: services check for their env vars and log a
   warning instead of crashing (email is the model example). Follow this when
   adding integrations.
