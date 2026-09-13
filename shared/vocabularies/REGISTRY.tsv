@@ -79,7 +79,7 @@ IncomePathKind	shared/incomePaths.ts	union	2	12b65f52d50d		0	internal
 IncomePathRole	shared/incomePaths.ts	union	2	217d537e6161		0	internal	
 IncomePathStatus	shared/incomePaths.ts	union	3	8e3655838898		0	internal	
 INTENT_EVENT_TYPES	shared/schema/intelligence.ts	array	35	9501655d522e	IntentEventType	1	internal	
-INTERNAL_STAFF_ROLES	shared/roles.ts	array	6	0635acce74ba		9	internal	
+INTERNAL_STAFF_ROLES	shared/roles.ts	array	6	0635acce74ba		10	internal	
 JourneyStepId	shared/borrowerJourney.ts	union	7	608e57432bed		1	internal	
 K1_VARIANTS	shared/taxFormExtraction.ts	array	2	b978376fe176	K1Variant	1	internal	
 LEASE_STATUS	shared/schema/rent.ts	array	3	b317624de871	LeaseStatus	0	internal	
@@ -193,4 +193,6 @@ UNDERWRITING_ACTION_TYPES	shared/schema/underwritingFinancials.ts	array	7	68d978
 UNDERWRITING_TRIGGER_TYPES	shared/schema/underwritingFinancials.ts	array	8	23cda46d7ebc		1	internal	
 URLA_LIABILITY_TYPES	shared/liabilityTypes.ts	array	10	e8d5a2d3b8a5	UrlaLiabilityTypeLabel	3	internal	
 UrlaRowSection	shared/lib/urlaRowContent.ts	union	4	9300fecad005		1	internal	
+WAIT_COUNTERPARTIES	shared/workWaits.ts	array	5	6713791fad01		1	internal	
+WAIT_OUTCOMES	shared/workWaits.ts	array	3	e78d19ca91d7		1	internal	
 YesNoUnknownType	shared/mismo.ts	union	3	4d9e819e9547		0	uldd-spec	

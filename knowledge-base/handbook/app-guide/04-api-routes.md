@@ -97,3 +97,63 @@ never trust a client-supplied user id.
 - Response-body logging is **allow-list only**: only explicitly PII-free paths log their
   bodies, everything else logs status/duration only
   (`server/app.ts` → `RESPONSE_BODY_LOG_ALLOWLIST`; matches doc 06).
+
+## Work-wait observations (coordination Phase A)
+
+The task-linked wait ledger records explicitly observed waits. It is an internal API;
+there is no recording UI, automatic task backfill, or event/scheduler wiring in Phase A.
+An empty ledger means **no observations recorded**, not that the file has no outstanding work.
+`BLOCKED` is never interpreted as borrower responsibility.
+
+| Method | Endpoint | Result |
+|---|---|---|
+| GET | `/api/loan-applications/:id/work-waits` | `{ asOf, waits, nextCursor }`; each wait includes `elapsedMs` |
+| POST | `/api/loan-applications/:id/work-waits` | `{ replayed, wait }`; 201 on creation, 200 on an identical retry |
+| POST | `/api/loan-applications/:id/work-waits/:waitId/close` | `{ replayed, wait }`; 200 for closure or an identical retry |
+
+All three routes require an internal staff role and either the application's assigned
+loan-officer pointer or active deal-team membership; admin has explicit global access.
+Inactive/unrelated staff receive 404. Borrowers and external partners receive 403, even
+when on the deal team. Application access is checked on every read, write, and retry.
+All responses are private and non-cacheable. Reads are audited; writes and their audit
+entries commit in the same transaction.
+
+**Record a wait:** supply `taskId`, `counterparty` (`borrower|lender|vendor|title|internal`),
+`startEventId` (UUID), `startedAt` (ISO timestamp with timezone), and optional `promisedAt`
+(timestamp or null). The task must belong to the exact application. Its reference identifies
+what is outstanding; its existing ownership remains authoritative. The counterparty names a
+category, not an individually identified vendor or person. Separate deliverables need separate
+tasks. An omitted promise stays unknown; it is never inferred from an SLA or legal clock.
+Start time cannot be in the future. A promise may already be overdue when a wait starts;
+the ledger preserves it as observed. Both the observation's effective
+start and server recording time/actor are retained. Historical observations are allowed on
+existing tasks, including terminal tasks, without changing their status.
+
+**Close a wait:** supply `closingEventId` (UUID), `closedAt`, and `outcome`
+(`work_received|cancelled|superseded`). Optional `documentId` must belong to the same application.
+Closure cannot precede the start or exceed the recording time. The ledger retains effective
+closure time, server recording time, actor, outcome, and optional document reference. A closure
+is a staff observation; `work_received` does not mark evidence verified, resolve the task,
+approve a loan, or assert that a lender accepted it. Without a document reference, the
+structured staff observation is the only closing evidence recorded here.
+
+**Retries and history:** the caller generates one stable event UUID per recording/closing
+observation and reuses it with the same payload after a timeout. These are ledger observation
+identifiers, not foreign keys into `task_events`. Start-event and closing-event UUIDs have
+separate application-scoped namespaces. Reusing a key with different values returns 409.
+At most one wait can be open per task/counterparty. The next cycle needs a new start UUID and
+must start at or after the previous closure; overlapping cycles return 409. Different
+counterparties may wait concurrently. Closed observations cannot be edited or reopened; a new
+cycle preserves the prior history. There is no correction/deletion endpoint in this phase.
+
+**Time and reading:** `elapsedMs` is derived from start to closure, or to the GET response's
+single `asOf` instant while open. It is actual elapsed wall-clock time, not working hours,
+a legal deadline calculation, or proof of time spent actively working. Overlapping waits must
+not be summed as total loan duration. GET accepts `limit` (1–100, default 50) and `afterId`
+(the prior `nextCursor`); follow cursors until null. Pages sort by immutable row ID, not time.
+Pagination is not a cross-request snapshot: restart a scan to include concurrent inserts.
+
+Storage is additive `work_waits` (migration `migrations/0086_work_waits.sql`). Only references, structured
+categories, and timestamps are duplicated. The ledger neither sends messages nor changes loan,
+task, evidence, vendor-order, or decision state. Automated observation capture, chase behavior,
+`tasks.waitingOn`, and order tracking remain separate later phases.

@@ -20,6 +20,7 @@ export default defineConfig({
     testTimeout: 15000,
     hookTimeout: 30000,
     include: [
+      "tests/workWaitsRoutes.test.ts",
       "tests/fileReviewRoutes.test.ts",
       "tests/financialReviewRoutes.test.ts",
       "tests/api.test.ts",
