@@ -135,6 +135,17 @@ gate (see the roadmap ticket) instead of relying solely on the hand-built valida
   *(Present on disk since it was written; this inventory row was missing until 2026-08-06 — an
   uninventoried reference is one a future session will not know it can cite.)*
 
+### Capital gains and employment-related assets (Income Assessment, Chapter B3-3)
+- `capital-gains-income-reference.md` — verified capture (2026-09-12, edition 08-05-2026) of
+  **B3-3.4-05 Capital Gains Income**: two years of signed returns with Schedule D, portfolio
+  evidence, average-or-most-recent-year trend rule, losses disregarded. Grounds
+  `server/services/income/paths/capitalGains.ts` and `server/services/income/capitalGainsEvidence.ts`.
+- `employment-related-assets-income-reference.md` — verified capture (2026-09-12, edition
+  08-05-2026) of **B3-3.4-06 Employment Related Assets as Qualifying Income**: 70%/80% LTV limits,
+  purpose and occupancy limits, net-documented-assets formula. Grounds
+  `server/services/income/paths/employmentRelatedAssets.ts` and
+  `server/services/income/employmentRelatedAssetsEvidence.ts`.
+
 ### Other
 - `Wire Instruction Reference ID_final_05202025.pdf`
 

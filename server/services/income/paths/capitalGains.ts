@@ -39,11 +39,11 @@ export type CapitalGainsComputation = {
 
 const CITATIONS = [
   {
-    doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+    doc: "docs/fannie-mae/capital-gains-income-reference.md",
     section: "B3-3.4-05, Capital Gains Income",
   },
   {
-    doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+    doc: "docs/fannie-mae/capital-gains-income-reference.md",
     section: "B1-1-03, Allowable Age of Credit Documents and Federal Income Tax Returns",
   },
 ];

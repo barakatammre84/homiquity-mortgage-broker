@@ -90,7 +90,7 @@ export const OTHER_INCOME_TYPES: readonly OtherIncomeTypeDefinition[] = [
     id: "capital_gains",
     label: "Capital Gains",
     qualifyingAuthority: {
-      doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+      doc: "docs/fannie-mae/capital-gains-income-reference.md",
       section: "B3-3.4-05, Capital Gains Income",
     },
   },
@@ -98,7 +98,7 @@ export const OTHER_INCOME_TYPES: readonly OtherIncomeTypeDefinition[] = [
     id: "employment_related_assets",
     label: "Employment-Related Assets as Income",
     qualifyingAuthority: {
-      doc: "docs/fannie-mae/selling-guide/Selling-Guide_08-05-2026.pdf",
+      doc: "docs/fannie-mae/employment-related-assets-income-reference.md",
       section: "B3-3.4-06, Employment Related Assets as Qualifying Income",
     },
   },
