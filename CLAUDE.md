@@ -1,5 +1,8 @@
 # CLAUDE.md — Homiquity
 
+Starting a task? Read [AGENTS.md](AGENTS.md) first — it is the short entry point and routes
+you to the few documents your area needs. This file is the authority it routes into.
+
 Guidance for Claude Code when working in this repository. The deep engineering map is
 [DEVELOPER_PLAYBOOK.md](knowledge-base/handbook/DEVELOPER_PLAYBOOK.md); the per-subsystem handbook is [knowledge-base/handbook/app-guide/](knowledge-base/handbook/app-guide/);
 session working practices (doc rules, branch lifecycle, definition of done, push policy)

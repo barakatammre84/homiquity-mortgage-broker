@@ -1,5 +1,20 @@
 # Homiquity
 
+> **Repository identity — read this first if you are an agent or new here.**
+> This is `barakatammre84/homiquity-mortgage-broker`, and it is **the product**. It serves
+> <https://www.homiquity.com> and deploys from `main` on every merge.
+>
+> Two sibling repositories exist and are **not** this one:
+>
+> | Repository | What it is |
+> |---|---|
+> | `barakatammre84/Homiquity-Core` | A rebuild, **retired** by founder decision 2026-09-12. Do not build there. It cannot be deployed: it binds to loopback, has no hosting configuration, and destroys uploaded documents on restart ([log](knowledge-base/logs/2026-09-12-one-application.md)) |
+> | `barakatammre84/aquistionbyrealiquity` | A **separate business** in Python, becoming a Realiquity sub-product. Unrelated to the mortgage platform |
+>
+> Everything called "Homiquity" that is not this repository is one of those two. If a document,
+> a saved project or an agent points somewhere else, it is pointing at the wrong place.
+> Working here? Start at **[AGENTS.md](AGENTS.md)**.
+
 An AI-native mortgage **brokerage** platform: borrower intake (digital 1003), document
 collection, deterministic underwriting, MISMO 3.4 packaging, and delivery of complete
 loan files to wholesale lenders. Deployed at <https://www.homiquity.com> (Railway — one persistent
@@ -44,6 +59,10 @@ resolve — its content moved to [L1](knowledge-base/L1_VISION_AND_SCOPE.md); do
 Regulatory source binaries stay in **[`docs/`](docs/)**; app-data (not docs) in
 `data/regulatory/`.
 
+**Starting work?** Read [AGENTS.md](AGENTS.md), then
+[knowledge-base/ACTIVE_CONTEXT.md](knowledge-base/ACTIVE_CONTEXT.md) — the short entry point and
+the current state of the system. Everything below is what they route into.
+
 Two axes of authority:
 
 - **Precedence** (which doc wins on intent): **L1 → L2 → L3** —
@@ -62,7 +81,7 @@ Two axes of authority:
 | [handbook/app-guide/](knowledge-base/handbook/app-guide/) | The 12-chapter subsystem handbook. Start at [01-start-here](knowledge-base/handbook/app-guide/01-start-here.md). |
 | [governance/ASSUMPTIONS.md](knowledge-base/governance/ASSUMPTIONS.md) | The fact/assumption register: what is simulated, pending, or verified-when. |
 
-Core integration direction and acceptance gates: [Core capabilities inside Homiquity](knowledge-base/specs/CORE_INTEGRATION.md).
+Core integration direction and acceptance gates: [Core capabilities inside Homiquity](knowledge-base/specs/CORE_INTEGRATION.md). Confirmed 2026-09-12: this repository is the product; the Homiquity-Core repository is being archived and its remaining value merged here.
 
 ### Tier 2 — Doctrine (decisions; change deliberately, never casually)
 
