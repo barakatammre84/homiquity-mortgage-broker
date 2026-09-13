@@ -12,12 +12,25 @@ Each rule below names the failure it prevents.
 
 ## 1. No transient state in living docs
 
-Open-PR numbers, branch names, session names, and merge-queue status appear **only** in
-[CTO_ROADMAP.md](../../CTO_ROADMAP.md) §0–§3 (maintained nightly by Evening Triage, which holds
-exclusive §0–§3 authority — [routines/CHARTER.md](../routines/CHARTER.md) §4) and in dated snapshot reports. Living docs (README, ASSUMPTIONS,
-kb doctrine, app-guide) state durable facts and link to the roadmap for "what's in
-flight." *(Prevents: "Open PR #45 — verify on merge" surviving in a fact register hours
-after the PR merged.)*
+Open-PR numbers, branch names, session names and merge-queue status do not belong in living docs
+(README, ASSUMPTIONS, kb doctrine, app-guide). Those state durable facts. *(Prevents: "Open PR #45 —
+verify on merge" surviving in a fact register hours after the PR merged.)*
+
+**Corrected 2026-09-12.** This rule used to send transient state to `CTO_ROADMAP.md` §0–§3,
+"maintained nightly by Evening Triage". **Those sections no longer exist** — the roadmap was
+restructured into product phases, and Evening Triage is not running. The rule therefore pointed at
+nothing, which is worse than pointing nowhere: it read as though a home existed.
+
+The live answers to "what is in flight", strongest first:
+
+1. **`origin/main`** — what landed.
+2. **Open pull requests** — a file with an open PR against it is claimed by that PR.
+3. **[routines/REGISTER.md](../routines/REGISTER.md)** — the claim board, for intent that has not
+   landed yet. Claims expire at 24 h unless an open PR stands behind them.
+
+Do not hand-copy any of those into a document. A snapshot of open PRs is a claim about the past
+wearing the clothes of the present (REGISTER.md's own words, and the reason it has no in-flight
+table).
 
 ## 2. Dated reports are immutable snapshots
 
@@ -40,6 +53,11 @@ at `knowledge-base/archive/lo-audit/2026-07-04-pm.md`.)*
 
 - One session = one isolated worktree = one branch. Never work on a branch in the shared
   primary checkout.
+- **Name the branch for the agent that owns it**: `claude/<slice>` or `codex/<slice>`. Both
+  prefixes have been in live use for weeks (`codex/` authored PRs #796–#800) and neither was
+  written down until 2026-09-12, which left `git for-each-ref` unreadable as a record of who is
+  doing what. Bot branches keep their own prefixes; `archive/` is never deleted by
+  [`scripts/branch-cleanup.cjs`](../../scripts/branch-cleanup.cjs).
 - Claim before building: add your row to [routines/REGISTER.md](../routines/REGISTER.md) (the
   claim board); release the claim if you abandon. Stale claims (>24 h) are reclaimable.
 - Merged = deleted, same day — remote and local branch, worktree, and session archive.

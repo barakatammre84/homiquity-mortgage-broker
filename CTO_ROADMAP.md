@@ -2,7 +2,7 @@
 
 **Last evidence review:** 2026-09-11
 
-**Product direction:** one Homiquity application with Core capabilities inside it
+**Product direction:** one Homiquity application with Core capabilities inside it. Confirmed 2026-09-12: Homiquity-Core is being archived and its remaining value merged here; the 2026-09-11 decision that made Core the product was reversed the next day (knowledge-base/logs/2026-09-12-one-application.md).
 
 **Audited production baseline:** `50b496ddbc5c118bc260cbb93f26e51445f7b6a1` on 2026-09-11.
 Read the current build from `/api/health`; this baseline records the review, not a permanent
@@ -30,7 +30,7 @@ income and other complicated returns, combined with a choice of wholesale lender
 human service.
 
 Core remains part of Homiquity. A separate Core product would duplicate identity, applications and
-uploads while leaving the real lender, provider and operating gaps unresolved.
+uploads while leaving the real lender, provider and operating gaps unresolved — confirmed 2026-09-12.
 
 ## How status is reported
 
