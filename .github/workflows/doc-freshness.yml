@@ -19,4 +19,4 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prod=false
       - name: Source records and document dispositions
-        run: pnpm guard:docs
+        run: pnpm guard:sources

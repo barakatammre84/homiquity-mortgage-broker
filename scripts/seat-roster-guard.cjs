@@ -402,16 +402,25 @@ function writeTables(paths) {
   process.exit(0);
 }
 
+// THIS FILE IS NO LONGER A GUARD. It is a library of recovery helpers for historical
+// SEATS.tsv snapshots, kept because tests/seatRoster.test.ts proves they still parse and
+// render. Nothing in CI, checkup or preflight invokes it.
+//
+// Until 2026-09-15 `main()` delegated to source-instructions-guard.cjs and printed a seat
+// sentence over the top of it. Three npm aliases and seven call sites did the same thing, so
+// `pnpm checkup` reported the ONE guard as THREE passing checks under three names, and the
+// gate reported it as two. That is config-key-matches-nothing — the highest-scoring defect
+// class in this repo's own audit — which is why running this file now refuses loudly instead
+// of quietly succeeding. A no-op that exits 0 is the failure mode, not the fix.
 function main() {
-  if (process.argv.includes("--write-table")) {
-    console.error("The historical seat snapshot is retired; refusing to restore tables into retired charters.");
-    process.exitCode = 1;
-    return;
-  }
-  // Legacy parsing exports remain for recovery of historical SEATS.tsv snapshots.
-  // Local files never prove which tasks the application has actually scheduled.
-  require("./source-instructions-guard.cjs").main();
-  console.log("Task definitions checked through the document register. Scheduler registrations: unverified; inspect the application.");
+  console.error(
+    "seat-roster-guard is not a guard. Its checks were retired in #811 (CHARTER.md and TEAM.md\n" +
+    "no longer exist, so there is nothing to generate into). The document-register check that\n" +
+    "replaced it is:\n\n" +
+    "    pnpm guard:sources\n\n" +
+    "Scheduler registrations cannot be proved from disk; read them from the application.",
+  );
+  process.exitCode = 1;
 }
 
 module.exports = {

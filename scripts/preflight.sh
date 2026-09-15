@@ -78,9 +78,11 @@ step "migration ledger"               node scripts/migration-ledger-guard.cjs
 step "delivery-stack freeze"          node scripts/delivery-stack-freeze-guard.cjs
 step "design tokens"                  node scripts/design-token-guard.cjs
 step "UI standard ratchet"            node scripts/ui-standard-guard.cjs
-step "knowledge-base index"           node scripts/kb-index-guard.cjs
+# One step, not two: "knowledge-base index" and "routine seat roster" both ran this same
+# script after #811 replaced their guards with delegating shims, and `--no-freshness` was
+# inert because the shim never read argv.
+step "document register + sources"    node scripts/source-instructions-guard.cjs
 step "doc staleness ratchet"          node scripts/doc-staleness-guard.cjs
-step "routine seat roster"            node scripts/seat-roster-guard.cjs --no-freshness
 step "gating reality"                  pnpm guard:gating
 step "vocabulary registry"             pnpm guard:vocab
 # tsc covers the app; nothing covered scripts/*.cjs. #594 shipped a syntax error

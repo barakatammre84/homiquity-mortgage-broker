@@ -47,7 +47,7 @@ step "migration ledger"     node scripts/migration-ledger-guard.cjs
 step "delivery freeze"      node scripts/delivery-stack-freeze-guard.cjs
 step "design tokens"        node scripts/design-token-guard.cjs
 step "UI ratchet"           node scripts/ui-standard-guard.cjs
-step "kb index"             node scripts/kb-index-guard.cjs
+step "register + sources"   node scripts/source-instructions-guard.cjs
 step "doc staleness"        node scripts/doc-staleness-guard.cjs
 step "citations"            pnpm guard:citations
 step "query keys"           node scripts/query-key-guard.cjs

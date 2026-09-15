@@ -2,8 +2,10 @@
 
 > Tool documentation, not a living doc: it is verified against
 > `scripts/browser-probe.cjs`, so it goes stale when that script changes, not on a date. It
-> deliberately carries **no** `Freshness:` line — `doc-freshness-guard.cjs` reads a fixed list of
-> seven living docs, and a freshness line outside that list is a claim nothing checks.
+> deliberately carries **no** `Freshness:` line. That used to be because the doc-freshness guard
+> read a fixed list of seven living docs and a line outside it was a claim nothing checked; #811
+> retired that guard (its script is gone), so now **no** `Freshness:` line anywhere is checked. The
+> reasoning survives the guard: date a doc only where someone re-reads it on that cadence.
 
 `scripts/browser-probe.cjs` renders a page in Chromium and answers the questions a text scan
 cannot. **It adds no dependency** — Chromium is already on disk in any environment that has it

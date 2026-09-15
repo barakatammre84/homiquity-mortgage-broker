@@ -10,9 +10,11 @@
  * citing each other by pre-rename filenames, and a routine skill written that
  * same day citing a design doc archived four hours earlier.
  *
- * `kb-index-guard.cjs` already proves every KB doc is indexed and every INDEX
- * link resolves. It does not look inside a document. This one does: it counts
- * backticked repo-ish paths in living docs that resolve to nothing.
+ * This looks INSIDE a document: it counts backticked repo-ish paths in living docs
+ * that resolve to nothing. It was the inner half of a pair — `kb-index-guard.cjs`
+ * proved every KB doc was indexed and every INDEX link resolved — but that guard was
+ * retired in #811 and nothing replaced it, so the outer half is now unchecked: a KB
+ * doc missing from the index is invisible to CI.
  *
  *   node scripts/citation-guard.cjs          # ratchet check (CI / checkup)
  *   node scripts/citation-guard.cjs --list   # every unresolved reference, with line numbers

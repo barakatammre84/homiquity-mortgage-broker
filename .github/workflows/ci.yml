@@ -343,35 +343,30 @@ jobs:
         # contrast or rendering; green means "no new instances of seven specific mistakes".
         # (Job `name:` above deliberately unchanged — verbatim required-check string.)
         run: pnpm guard:ui
-      - name: Knowledge-base index guard
-        # "An unindexed doc is an unread doc" (TEAM_PRACTICES). Fails on a
-        # knowledge-base/*.md missing from the index, or an index link pointing at a
-        # path that does not exist. Deterministic — it reads only repo contents, which
-        # is why it belongs in the required gate while its sibling doc-freshness guard
-        # does NOT: that one goes overdue on a calendar date and would block every
-        # merge in the repo for a reason no PR caused. See doc-freshness.yml.
-        # (Job `name:` above deliberately unchanged — verbatim required-check string;
-        # see the rename warning.)
-        run: pnpm guard:kb
-      - name: Routine seat roster
-        # CHARTER.md §3/§3a and TEAM.md's seating chart are GENERATED from
-        # knowledge-base/routines/SEATS.tsv. This fails when they disagree with it, when an
-        # active seat's definition file is missing, when a living doc names a scheduled task
-        # the roster does not know, or when a paused/unregistered seat carries no reason and
-        # no reviewBy.
+      - name: Document register and source records
+        # scripts/source-instructions-guard.cjs. Fails when a Markdown file carries no
+        # disposition in knowledge-base/document-register.json, when a `deleted` document is
+        # restored, when a retired one is reintroduced or edited away from its recorded hash,
+        # when an active instruction links to a file that is not registered, or when a
+        # source reading in source-claims.json lacks an approved publisher, an effective
+        # version or a verification date. Deterministic — repo contents only.
         #
-        # WHY IT EXISTS. On 2026-08-24 §3 presented sixteen live seats; the scheduler held
-        # six. Ten definitions sat on disk unregistered — Evening Triage among them, the seat
-        # that reads every other seat's report — and TEAM.md marked three of the ten "yes,
-        # registered". §11 has always said a definition without a registration is a fossil;
-        # nothing enforced it, which is §0 recurring inside the file that records it.
+        # ONE GUARD, ONE STEP. Until 2026-09-15 this gate ran the SAME script twice, as
+        # "Knowledge-base index guard" (the guard:kb alias) and "Routine seat roster"
+        # (guard:seats --no-freshness). #811 replaced kb-index-guard.cjs,
+        # doc-freshness-guard.cjs and seat-roster-guard.cjs's main() with delegating shims
+        # and correctly renamed the weekly workflow — but not these two steps, so the gate
+        # went on advertising a knowledge-base index check and a seat-roster check that no
+        # longer existed. `--no-freshness` had also become inert: the shim never read argv.
         #
-        # --no-freshness: the roster also carries a `Registry read` date, because no CI job
-        # can read either scheduler and the roster is therefore a snapshot. That half is
-        # calendar-driven and stays OUT of the required check for the same reason the
-        # doc-freshness guard does (see doc-freshness.yml) — it would go red on a date, for a
-        # reason no PR caused. `pnpm checkup` and seat-roster.yml run the full check.
-        run: pnpm guard:seats --no-freshness
+        # WHAT IS NO LONGER CHECKED, stated so nobody rediscovers it as a surprise: KB index
+        # coverage and KB dead links, living-doc `Freshness:` stamps, and seat-roster
+        # consistency. Restoring any of them is a deliberate decision, not a regression to
+        # patch quietly.
+        #
+        # (Job `name:` above deliberately unchanged — verbatim required-check string; see
+        # the rename warning. STEP names are free to change; only the job name is matched.)
+        run: pnpm guard:sources
       - name: Gating reality (a required field nothing collects)
         if: steps.scope.outputs.code == 'true'
         # A completeness scorer marks a field `required`; nothing under client/src ever
@@ -425,9 +420,10 @@ jobs:
         run: pnpm guard:staleness
       - name: Citation ratchet
         # Backticked repo paths in living docs that resolve to nothing, vs
-        # scripts/citation-baseline.json (ratchet: may only go down). kb-index-guard
-        # proves every KB doc is indexed and every INDEX link resolves; it does not
-        # look INSIDE a document. This does. Added 2026-08-18 after a sweep found a
+        # scripts/citation-baseline.json (ratchet: may only go down). This looks INSIDE a
+        # document. (It used to be paired with kb-index-guard, which proved every KB doc was
+        # indexed and every INDEX link resolved — that guard was retired in #811 and nothing
+        # replaced that half, so an unindexed doc is now invisible.) Added 2026-08-18 after a sweep found a
         # security threat model listing `server/routes/borrower.ts` among its
         # highest-risk areas months after that file became a directory, and L1/L2
         # citing each other by pre-rename filenames. A ratchet rather than a hard zero

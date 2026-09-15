@@ -729,8 +729,8 @@ is unreviewable and will be rejected.
 |---|---|
 | `pnpm guard:tokens` — `scripts/design-token-guard.cjs` | raw palette classes stay at **0**; bare `white`/`black` literals ratchet down from 97. Required CI gate. |
 | `pnpm guard:ui` — `scripts/ui-standard-guard.cjs` | the seven §0 counts may only go down. Required CI gate. |
-| `pnpm guard:kb` | this doc is indexed. An unindexed doc is an unread doc. |
-| `pnpm guard:docs` | this doc has been re-read against the code within 30 days. |
+| ~~`pnpm guard:kb`~~ | **Retired #811.** Nothing now checks that this doc is indexed. |
+| ~~`pnpm guard:docs`~~ | **Retired #811.** Nothing now enforces the 30-day re-read below. |
 | `.claude/agents/ux-reviewer.md` + the `ui-components` skill | the human/agent review gate for every propagation batch. |
 
 **A green guard is not a clean bill of health.** Both guards are text scans. Neither sees
@@ -749,9 +749,11 @@ template literals or cva variants are invisible: **every count is a floor, not a
 - **Adding a new status colour?** Add a `<Badge>`/`<Alert>` variant plus `*-subtle` tokens
   (light and dark, AA-verified) — never a one-off palette class in a page.
 - **Adding a new primitive or token?** It needs review and a changelog entry.
-- **This doc is re-verified every 30 days** (`pnpm guard:docs`). Re-verification means re-reading
-  it against the code and re-running `pnpm guard:ui` for the §0 numbers — not bumping the date.
-  The predecessors went five weeks without that pass, and every number in them drifted.
+- **This doc is re-verified every 30 days.** Re-verification means re-reading it against the code
+  and re-running `pnpm guard:ui` for the §0 numbers — not bumping the date. The predecessors went
+  five weeks without that pass, and every number in them drifted. ⚠️ **This is now a convention,
+  not a check:** `guard:docs` enforced it until #811 retired the freshness guard, so nothing fails
+  when the date lapses. Treat the interval as a promise someone has to keep by hand.
 
 **Historical:** `knowledge-base/archive/ux-audit/` is a quarantined 2026-07 snapshot — do not act
 on it; its `design-tokens.json` describes the retired "Obsidian Indigo" palette. The findings

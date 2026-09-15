@@ -25,7 +25,7 @@ t0() {
   for f in scripts/*.cjs; do node --check "$f" || return 1; done
   step "T0 static — ratchets and structural guards"
   pnpm guard:schema && pnpm guard:migrations && pnpm guard:channel \
-    && pnpm guard:kb && pnpm guard:staleness && pnpm guard:citations \
+    && pnpm guard:sources && pnpm guard:staleness && pnpm guard:citations \
     && pnpm guard:querykeys && pnpm guard:tokens && pnpm guard:ui
 }
 

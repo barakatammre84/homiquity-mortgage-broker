@@ -1,20 +1,33 @@
-# Checks repository records only. Actual scheduler registration requires a live application read.
-name: Task instruction routing
-
+# ⛔ RETIRED 2026-09-15 — THIS WORKFLOW SHOULD BE DELETED. It is kept for one commit only
+# because deleting a workflow file is a decision for the repo owner, not an agent.
+#
+# WHY. It ran `node scripts/seat-roster-guard.cjs` on Mondays 09:00 UTC. #811 retired that
+# guard's checks (CHARTER.md and TEAM.md no longer exist, so there is nothing to generate
+# into) and left its main() delegating to source-instructions-guard.cjs — the SAME script
+# doc-freshness.yml already ran, in the SAME cron minute. Two scheduled workflows, two
+# names, one guard, run twice a week for one result.
+#
+# The schedule is removed rather than repointed, so this stops duplicating
+# source-records weekly. The remaining manual trigger runs the real guard under its real
+# name, so a dispatch proves something instead of exiting 1 on the retired shim.
+#
+# TO FINISH: `git rm .github/workflows/seat-roster.yml`.
+name: Task instruction routing (retired — pending deletion)
 
 on:
-  schedule:
-    - cron: "0 9 * * 1" # Mondays, 09:00 UTC — same slot as the doc-freshness sweep
   workflow_dispatch:
 
 jobs:
   roster:
-    name: task instruction routing
+    name: task instruction routing (retired)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Task definition routing (scheduler state is not inferred)
-        run: node scripts/seat-roster-guard.cjs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prod=false
+      - name: Document register and source records
+        run: pnpm guard:sources

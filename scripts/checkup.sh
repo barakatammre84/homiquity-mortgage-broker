@@ -61,7 +61,7 @@ check "schema ↔ migrations synced"    node scripts/schema-migration-guard.cjs
 check "migration ledger intact"       node scripts/migration-ledger-guard.cjs
 check "design tokens (no raw colors)" node scripts/design-token-guard.cjs
 check "UI standard ratchet"           node scripts/ui-standard-guard.cjs
-check "knowledge base indexed"        node scripts/kb-index-guard.cjs
+check "document register + sources"   node scripts/source-instructions-guard.cjs
 check "doc staleness ratchet"         node scripts/doc-staleness-guard.cjs
 check "citations resolve"             node scripts/citation-guard.cjs
 check "selling-guide corpus coherent" node scripts/selling-guide-corpus-guard.cjs
@@ -69,10 +69,10 @@ check "selling-guide coverage map"    node scripts/selling-guide-coverage.cjs --
 check "selling-guide conformance"     node scripts/selling-guide-conformance-guard.cjs
 check "regulatory ledger fresh"       node scripts/regulatory-freshness.cjs
 check "selling-guide watch live"      node scripts/selling-guide-freshness.cjs
-check "living docs fresh"             node scripts/doc-freshness-guard.cjs
-# Full check here, freshness included: this is the daily umbrella, and the registry-read
-# date going stale is the one failure mode CI structurally cannot see.
-check "routine seat roster"           node scripts/seat-roster-guard.cjs
+# "living docs fresh" and "routine seat roster" used to run here as two more checks. Both
+# were the SAME script as "document register + sources" above — #811 replaced all three
+# guards with delegating shims — so this umbrella reported one guard as three passes. There
+# is no longer a freshness check or a seat-roster check to run; the line above is all three.
 check "gating reality"                 node scripts/gating-reality-guard.cjs
 check "branch archive current"        node scripts/branch-archive.cjs --check
 check "vocabulary registry"            node scripts/vocabulary-registry.cjs
