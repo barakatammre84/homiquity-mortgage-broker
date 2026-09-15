@@ -39,6 +39,7 @@
     "guard:schema": "node scripts/schema-migration-guard.cjs",
     "guard:tokens": "node scripts/design-token-guard.cjs",
     "guard:ui": "node scripts/ui-standard-guard.cjs",
+    "ui:contrast": "node scripts/ui-contrast-baseline.cjs",
     "guard:channel": "node scripts/delivery-stack-freeze-guard.cjs",
     "guard:docs": "node scripts/doc-freshness-guard.cjs",
     "guard:querykeys": "node scripts/query-key-guard.cjs && node scripts/query-key-reachability.cjs && node scripts/query-key-transport-guard.cjs",

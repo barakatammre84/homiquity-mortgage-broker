@@ -287,7 +287,7 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader>
         <div className="px-2 py-4">
-          <Logo size="sm" tone="onDark" data-testid="logo-sidebar" />
+          <Logo size="sm" tone="brand" data-testid="logo-sidebar" />
           <p className="text-xs text-muted-foreground">
             {portalLabel}
           </p>
@@ -312,7 +312,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={isActive(item.href)}>
                       <Link href={item.href} className="cursor-pointer" data-testid={item.testId}>
                         {item.brandMark
-                          ? <Logo size="sm" variant="mark" tone="onDark" data-testid="logo-sidebar-homi" />
+                          ? <Logo size="sm" variant="mark" tone="brand" data-testid="logo-sidebar-homi" />
                           : item.icon ? <item.icon className="h-4 w-4" /> : null}
                         <span>{item.title}</span>
                         {item.showBadge && pendingTaskCount > 0 && (
@@ -345,7 +345,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={isActive(item.href)}>
                       <Link href={item.href} className="cursor-pointer" data-testid={item.testId}>
                         {item.brandMark
-                          ? <Logo size="sm" variant="mark" tone="onDark" data-testid="logo-sidebar-homi-admin" />
+                          ? <Logo size="sm" variant="mark" tone="brand" data-testid="logo-sidebar-homi-admin" />
                           : item.icon ? <item.icon className="h-4 w-4" /> : null}
                         <span>{item.title}</span>
                       </Link>

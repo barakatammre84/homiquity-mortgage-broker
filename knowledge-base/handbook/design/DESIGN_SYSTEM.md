@@ -93,9 +93,11 @@ indistinguishable palette from a bank in the same sector is trade-dress risk, no
 Every neutral now carries the brand hue. Audit notes, screenshots or docs describing stark-white
 surfaces over a slate structure with royal-blue dark surfaces describe the *previous* system.
 
-White ground · **green-black dark surfaces** (sidebar, footer, hero gradients) · **one mint
-tint** · **emerald reserved for forward-moving conversion actions** ("green means Go") · **one
-orange `--flare`** as the single warm accent.
+White ground · **white navigation containers** (sidebar and footer, separated by a hairline —
+founder decision 2026-09-12; they were green-black, and royal blue before that) · **green-black
+dark surfaces** now limited to hero gradients · **one mint
+tint** · **green-black primary actions** (founder decision 2026-09-12; this replaced emerald and
+its "green means Go" rationale) · **one orange `--flare`** as the single warm accent.
 
 **Dark-surface ramp** (`precision.950/900/700` — hero gradients only): `950 #0B1E19` green-black,
 hero anchor · `900 #112823` green-black mid · `700 #17302A` deep emerald-slate, hero end. *White
@@ -136,9 +138,15 @@ measured for white, **not** for mint.
 1. **Hierarchy through VALUE, not hue.** Depth comes from the neutral ramp, whitespace, and — on
    app surfaces — a soft neutral card shadow over a light-gray ground; never from harsh borders
    or coloured shadows.
-2. **Emerald = action.** `bg-primary` is `#047857` (emerald-700, AA-safe with white text at
-   **5.49:1** — raw `#10B981` is only 2.49:1 and must never carry white text); `--ring` is
-   emerald-600. Non-action green stays in the success tokens.
+2. **Black = action.** `bg-primary` is `#0B1E19` — the same green-black as body type, white
+   text at **19.5:1**; `--ring` follows it. *Founder decision 2026-09-12, adopted from the
+   Homiquity-Core direction before that repository was archived
+   ([log](../../logs/2026-09-12-one-application.md)). It replaced emerald `#047857`, which passed
+   AA at 5.49:1 and was retired by decision, not defect.* The value is the brand-tinted near-black
+   rather than pure `#000000` because every neutral in this system carries the brand hue; set
+   `--primary: 0 0% 0%` in `client/src/index.css` to go pure, and nothing else moves.
+   **Emerald is no longer an action colour.** It survives only as the success hue (`#10B981`,
+   Day 1 Certainty / auto-approved). Do not put it back on a button.
    **Corollary, and the most common way an outside proposal breaks this system: blue is not the
    CTA colour here.** Royal blue is a dark *surface*. A `bg-blue-600` primary button is wrong
    twice over — it inverts the semantics and it is a raw palette class the guard rejects.
@@ -162,8 +170,10 @@ provider ever applies the class. Keep it coherent; do not invest in tuning it.
   Layer 0 white stays for public/marketing, auth and reading surfaces.
 - **Layer 1** — white cards + 1px hairline (`border-card-border`). Near-flat on the white
   canvas; on `bg-surface` they carry `shadow-card`, supplied automatically (§5).
-- **Layer 2** — emerald conversion actions (`bg-primary`); hover deepens via the elevate system.
-- **Sidebar** — deep royal-blue dark nav container.
+- **Layer 2** — green-black primary actions (`bg-primary`); hover deepens via the elevate system.
+- **Sidebar** — WHITE nav container, separated from the canvas by the standard hairline
+  (`--sidebar-border`), not by a change of ground. The active item is the mint `--sidebar-accent`
+  with type-colour text at 13.6:1 — *not* `--sidebar-primary`, which the component never reads.
 
 ### Semantic status (the ONLY non-ramp colour)
 

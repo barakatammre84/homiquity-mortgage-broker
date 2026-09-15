@@ -48,7 +48,16 @@ const toneClass = {
   brand: "text-foreground",
   // WCAG 1.4.3 exempts logotypes from contrast, which is why the BRIGHT flare is
   // permitted here and nowhere a person has to read prose (use --flare-ink there).
-  onDark: "text-sidebar-foreground", // on the royal sidebar / dark surfaces
+  //
+  // For a mark sitting on a DARK ground — a hero gradient, or a filled
+  // `bg-primary` button such as HomiLauncher. It tracked `--sidebar-foreground`
+  // while the sidebar was the only dark container. The 2026-09-12 restyle turned
+  // the sidebar white, which silently made this token dark too: the launcher then
+  // painted a green-black mark on the green-black primary button — identical
+  // values, an invisible icon. It follows `--primary-foreground` instead, which
+  // is white on every dark ground this tone is for and cannot be inverted by a
+  // change to a navigation container. Light surfaces use `brand`.
+  onDark: "text-primary-foreground",
   mono: "text-foreground", // neutral
 } as const;
 
