@@ -37,17 +37,81 @@ const { spawnSync } = require("child_process");
 const ROOT = process.env.CLAUDE_PROJECT_DIR || path.join(__dirname, "..");
 const DIR = path.join(ROOT, "docs", "fannie-mae", "selling-guide");
 
-function directive(reason) {
+/**
+ * Does the PDF actually recover from THIS checkout's history? In a full clone it does,
+ * which is what the recovery path is built on. A cloud/web session is a SHALLOW clone
+ * (~87 commits), and the PDF was committed and removed in 2026-08, far outside that
+ * window — so the blob is simply not there, `git cat-file` fails, and "no network
+ * needed" sends the session to re-run a command that cannot work. CI already handles
+ * this with `fetch-depth: 0` (ci.yml); sessions are where it was unhandled.
+ */
+function shallowCheckout() {
+  try {
+    const r = run("git", ["rev-parse", "--is-shallow-repository"], 5000);
+    return r.status === 0 && (r.stdout || "").trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The directive a session reads when the corpus is not ready. `reason` may be several
+ * lines — the extractor's diagnosis usually is — and every line is indented into place.
+ * `opts.shallow` is for tests and for callers that already know; otherwise it is asked
+ * of the checkout, because the recovery step differs and the wrong one wastes a session.
+ */
+function directive(reason, opts) {
+  const shallow =
+    opts && typeof opts.shallow === "boolean" ? opts.shallow : shallowCheckout();
+  const recovery = shallow
+    ? [
+        "   This clone is SHALLOW — the PDF is not in its history. Recover the history",
+        "   first (network, ~3s), then extract:",
+        "       git fetch --unshallow --no-tags origin main",
+        "       pip3 install pymupdf && python3 scripts/extract-selling-guide.py",
+      ]
+    : [
+        "       pip3 install pymupdf && python3 scripts/extract-selling-guide.py",
+        "   The PDF recovers from this repo's own git history — no network needed.",
+      ];
   return [
     "⛔ SELLING GUIDE CORPUS-FIRST — the corpus is not ready in this checkout.",
-    `   ${reason}`,
+    ...String(reason).split("\n").map((line) => `   ${line}`),
     "   Fix before any Guide-governed work (underwriting, income, eligibility,",
     "   delivery, pricing policy):",
-    "       pip3 install pymupdf && python3 scripts/extract-selling-guide.py",
-    "   The PDF recovers from this repo's own git history — no network needed.",
+    ...recovery,
     "   Do NOT answer a Fannie policy question from memory in the meantime; a",
     "   missing source is an honest gap (AGENTS.md and the primary-source map).",
   ].join("\n");
+}
+
+const MAX_REASON_LINES = 12;
+const MAX_REASON_CHARS = 900;
+
+/**
+ * The reason slot, filled from a failed extractor run.
+ *
+ * This used to be `.split("\n").pop()`. The extractor's own failures are multi-line and
+ * they close with the standing "do not answer from memory" warning, so on the one failure
+ * a fresh clone actually hits — no PDF — the last line diagnoses nothing and the lines
+ * naming the missing blob and `git fetch --unshallow` were the ones discarded. Keep the
+ * diagnosis, drop the trailing warning the directive already carries, and bound it so a
+ * runaway stderr cannot flood the session's context.
+ */
+function failureReason(result) {
+  const stderr = ((result && result.stderr) || "").trim();
+  const stdout = ((result && result.stdout) || "").trim();
+  const lines = (stderr || stdout)
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim() !== "");
+  while (lines.length && /^do not answer/i.test(lines[lines.length - 1].trim())) lines.pop();
+  if (!lines.length) return "extractor failed";
+  const kept = lines.slice(0, MAX_REASON_LINES);
+  if (kept.length < lines.length) {
+    kept.push(`… +${lines.length - kept.length} more line(s) — re-run the command below to see them.`);
+  }
+  return kept.join("\n").slice(0, MAX_REASON_CHARS);
 }
 
 function run(cmd, args, timeoutMs) {
@@ -181,15 +245,20 @@ function main() {
     );
     if (!markdownPresent()) console.log(MD_ADVICE);
   } else {
-    const err = ((r.stderr || r.stdout || "").trim().split("\n").pop() || "extractor failed").slice(0, 200);
-    console.log(directive(`extraction failed: ${err}`));
+    console.log(directive(`extraction failed:\n${failureReason(r)}`));
   }
 }
 
-try {
-  main();
-} catch (e) {
-  // Never block a session — the loudest acceptable failure is a printed directive.
-  console.log(directive(`hook error: ${e.message}`));
+module.exports = { directive, failureReason, shallowCheckout };
+
+// Exported above for tests; the session-start behavior below runs only when this file is
+// the entry point, exactly as .claude/settings.json invokes it.
+if (require.main === module) {
+  try {
+    main();
+  } catch (e) {
+    // Never block a session — the loudest acceptable failure is a printed directive.
+    console.log(directive(`hook error: ${e.message}`));
+  }
+  process.exit(0);
 }
-process.exit(0);
