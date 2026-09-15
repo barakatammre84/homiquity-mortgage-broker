@@ -54,7 +54,7 @@ const REQUEST_GAP_MS = 1500;
  * able to tell exactly who this is and why, and block it deliberately if they want to.
  */
 const UA =
-  "HomiquityCorpusRecon/1.0 (+https://github.com/barakatammre84/homiquity-mortgage-broker; " +
+  "HomiquityCorpusRecon/1.0 (+https://github.com/barakatammre84/homiquity; " +
   "one-off Selling Guide corpus freshness probe; contact via repo issues)";
 
 const SG = "https://selling-guide.fanniemae.com";

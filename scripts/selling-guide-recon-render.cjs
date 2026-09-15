@@ -31,7 +31,7 @@ const URL_UNDER_TEST =
 const RAW_FILE = process.env.RECON_RENDER_RAW || "section-b3-6-05.html";
 
 const UA =
-  "HomiquityCorpusRecon/1.0 (+https://github.com/barakatammre84/homiquity-mortgage-broker; " +
+  "HomiquityCorpusRecon/1.0 (+https://github.com/barakatammre84/homiquity; " +
   "one-off Selling Guide corpus freshness probe; contact via repo issues)";
 
 /** Same reduction the watcher's strip() does, so the two numbers are comparable. */
