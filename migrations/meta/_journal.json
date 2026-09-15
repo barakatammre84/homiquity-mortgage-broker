@@ -603,6 +603,13 @@
       "when": 1790020800000,
       "tag": "0085_loan_term_months",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790020800001,
+      "tag": "0086_work_waits",
+      "breakpoints": true
     }
   ]
 }

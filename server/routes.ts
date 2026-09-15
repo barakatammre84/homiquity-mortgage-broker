@@ -1,3 +1,4 @@
+import { registerWorkWaitRoutes } from "./routes/work-waits";
 import { registerFileReviewRoutes } from "./routes/file-review";
 import { registerFinancialReviewRoutes } from "./routes/financial-review";
 import type { Express } from "express";
@@ -117,6 +118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAdminRoutes(app, storage);
   registerPricingPolicyRoutes(app);
   await registerTaskEngineRoutes(app, storage);
+  registerWorkWaitRoutes(app);
   registerUnderwritingRoutes(app, storage);
   registerComplianceRoutes(app, storage);
   registerBorrowerRoutes(app, storage);
